@@ -108,7 +108,7 @@ jobs:
             --repo "${{ github.repository }}" `
             --target "${{ github.sha }}" `
             --title "gloader v$env:RELEASE_VERSION" `
-            --notes "Reworks Host & Play redirection so gloader patches Terraria's own server-launch setup instead of globally intercepting System.Diagnostics.Process.Start. This reduces antivirus-heuristic surface while preserving Host & Play, keeps the Terraria startup-order and embedded ReLogic fixes, and keeps CI logs out of release packages."
+            --notes "Fixes vanilla Terraria 1.4.5 startup by initializing the real Program.SavePath field before mods touch Terraria.Main. Also excludes the opposite Terraria executable from Roslyn references so client mods no longer see duplicate Terraria.Main types. Keeps the embedded ReLogic and Terraria-specific Host & Play fixes."
 
       - name: Upload
         uses: actions/upload-artifact@v4
