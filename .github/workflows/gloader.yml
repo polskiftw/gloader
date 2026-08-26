@@ -54,6 +54,14 @@ jobs:
           dotnet build tests/HostPlayFixture/Client.csproj -c Release --no-restore
           dotnet build tests/HostPlayFixture/Server.csproj -c Release --no-restore
 
+      - name: VGMRadio Rainwave metadata parser test
+        shell: pwsh
+        run: |
+          & "tests/VGMRadioCompile/bin/Release/net48/VGMRadioCompile.exe"
+          if ($LASTEXITCODE -ne 0) {
+            throw "VGMRadio Rainwave metadata parser test failed with exit code $LASTEXITCODE"
+          }
+
       - name: Publish
         shell: pwsh
         run: ./build.ps1
@@ -112,7 +120,7 @@ jobs:
             --repo "${{ github.repository }}" `
             --target "${{ github.sha }}" `
             --title "gloader v$env:RELEASE_VERSION" `
-            --notes "Restores Infinite Angler to the intended server-only architecture for multiplayer with completely vanilla clients. Host & Play redirection now intercepts Terraria's final Process.Start call inside the Terraria server-launch method, so the fully populated TerrariaServer.exe launch is reliably routed through gloader without globally patching Process.Start. CI exercises a vanilla client launching a gloader-modded server and validates Infinite Angler on that server."
+            --notes "Fixes VGM Radio now-playing text on Rainwave. Rainwave's current API exposes the active track under sched_current.songs rather than the old song_data shape, so the metadata parser now supports the current response and the legacy form. The popup timer now starts on the first real Terraria UI draw instead of during pre-game startup, and the overlay is drawn after Terraria's mouse-text pass. Includes the vanilla-client Infinite Angler Host & Play fixes from 0.1.5-alpha."
 
       - name: Upload
         uses: actions/upload-artifact@v4
