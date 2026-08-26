@@ -15,31 +15,50 @@ namespace GLoader
                 return;
             }
 
-            var savePathProperty = programType.GetProperty(
-                "SavePath",
-                BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-            if (savePathProperty == null)
-            {
-                return;
-            }
-
-            string existing = null;
-            try
-            {
-                existing = savePathProperty.GetValue(null, null) as string;
-            }
-            catch
-            {
-                // If Terraria changes this property, the explicit setter attempt below
-                // will produce a useful startup error instead of letting Main fail later.
-            }
-
-            if (!string.IsNullOrWhiteSpace(existing))
-            {
-                return;
-            }
-
+            var flags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
             var savePath = ResolveSavePath(gameArguments);
+
+            // Vanilla Terraria 1.4.x exposes Program.SavePath as a static field.
+            // Keep property support as a fallback for alternate/future builds.
+            var savePathField = programType.GetField("SavePath", flags);
+            if (savePathField != null && savePathField.FieldType == typeof(string))
+            {
+                var existing = savePathField.GetValue(null) as string;
+                if (!string.IsNullOrWhiteSpace(existing))
+                {
+                    return;
+                }
+
+                if (savePathField.IsInitOnly)
+                {
+                    throw new InvalidOperationException(
+                        "Terraria.Program.SavePath is empty and readonly; gloader could not initialize it before loading mods.");
+                }
+
+                savePathField.SetValue(null, savePath);
+                var confirmed = savePathField.GetValue(null) as string;
+                if (string.IsNullOrWhiteSpace(confirmed))
+                {
+                    throw new InvalidOperationException(
+                        "Terraria.Program.SavePath remained empty after gloader initialized startup state.");
+                }
+
+                Log.Info("Prepared Terraria save path before mod initialization: " + confirmed);
+                return;
+            }
+
+            var savePathProperty = programType.GetProperty("SavePath", flags);
+            if (savePathProperty == null || savePathProperty.PropertyType != typeof(string))
+            {
+                return;
+            }
+
+            var propertyExisting = savePathProperty.GetValue(null, null) as string;
+            if (!string.IsNullOrWhiteSpace(propertyExisting))
+            {
+                return;
+            }
+
             var setter = savePathProperty.GetSetMethod(nonPublic: true);
             if (setter == null)
             {
@@ -49,14 +68,14 @@ namespace GLoader
 
             setter.Invoke(null, new object[] { savePath });
 
-            var confirmed = savePathProperty.GetValue(null, null) as string;
-            if (string.IsNullOrWhiteSpace(confirmed))
+            var propertyConfirmed = savePathProperty.GetValue(null, null) as string;
+            if (string.IsNullOrWhiteSpace(propertyConfirmed))
             {
                 throw new InvalidOperationException(
                     "Terraria.Program.SavePath remained empty after gloader initialized startup state.");
             }
 
-            Log.Info("Prepared Terraria save path before mod initialization: " + confirmed);
+            Log.Info("Prepared Terraria save path before mod initialization: " + propertyConfirmed);
         }
 
         private static string ResolveSavePath(IReadOnlyList<string> gameArguments)
