@@ -36,7 +36,7 @@ namespace GLoader
                 Log.Initialize(
                     Path.Combine(supportDirectory, "logs"),
                     isServerTarget ? "server" : "client");
-                Log.Info("gloader 0.1.0-alpha");
+                Log.Info("gloader 0.1.1-alpha");
                 Log.Info("Target: " + targetPath);
                 Log.Info("Target version: " + GetFileVersion(targetPath));
                 Log.Info("Mode: " + (isServerTarget ? "server" : "client"));
@@ -53,6 +53,8 @@ namespace GLoader
                 }
 
                 var gameAssembly = GameBootstrap.Load(targetPath);
+                var gameArguments = options.GameArguments.ToArray();
+
                 using (var resolver = new ManagedAssemblyResolver(
                     gameAssembly,
                     gameDirectory,
@@ -61,6 +63,7 @@ namespace GLoader
                 {
                     if (!options.DisableMods)
                     {
+                        TerrariaStartupState.Prepare(gameAssembly, gameArguments);
                         ModRuntime.LoadAll(
                             modsDirectory,
                             gameAssembly,
@@ -74,7 +77,7 @@ namespace GLoader
                     }
 
                     Log.Info("Starting Terraria.");
-                    return GameBootstrap.InvokeEntryPoint(gameAssembly, options.GameArguments.ToArray());
+                    return GameBootstrap.InvokeEntryPoint(gameAssembly, gameArguments);
                 }
             }
             catch (Exception ex)
