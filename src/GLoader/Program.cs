@@ -11,8 +11,12 @@ namespace GLoader
         private static int Main(string[] args)
         {
             var loaderDirectory = Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory);
-            var supportDirectory = Path.Combine(loaderDirectory, "gmods");
-            var startupResolver = new ManagedAssemblyResolver(supportDirectory);
+            var defaultModsDirectory = Path.Combine(loaderDirectory, "gmods");
+            var dependenciesDirectory = Path.Combine(loaderDirectory, "gdeps");
+
+            MigrateLegacyLayout(defaultModsDirectory, dependenciesDirectory);
+
+            var startupResolver = new ManagedAssemblyResolver(dependenciesDirectory);
             var options = LoaderOptions.Parse(args);
 
             if (options.ShowHelp)
@@ -26,7 +30,7 @@ namespace GLoader
                 var targetPath = TargetLocator.Find(loaderDirectory, options);
                 var gameDirectory = Path.GetDirectoryName(targetPath);
                 var modsDirectory = string.IsNullOrWhiteSpace(options.ModsPath)
-                    ? supportDirectory
+                    ? defaultModsDirectory
                     : Path.GetFullPath(options.ModsPath);
                 var isServerTarget = string.Equals(
                     Path.GetFileName(targetPath),
@@ -34,13 +38,14 @@ namespace GLoader
                     StringComparison.OrdinalIgnoreCase);
 
                 Log.Initialize(
-                    Path.Combine(supportDirectory, "logs"),
+                    Path.Combine(dependenciesDirectory, "logs"),
                     isServerTarget ? "server" : "client");
                 Log.Info("gloader " + GetLoaderVersion());
                 Log.Info("Target: " + targetPath);
                 Log.Info("Target version: " + GetFileVersion(targetPath));
                 Log.Info("Mode: " + (isServerTarget ? "server" : "client"));
                 Log.Info("Mods: " + modsDirectory);
+                Log.Info("Dependencies: " + dependenciesDirectory);
 
                 Directory.SetCurrentDirectory(gameDirectory);
                 NativeLibrarySearch.UseDirectory(gameDirectory);
@@ -51,7 +56,7 @@ namespace GLoader
                 using (var resolver = new ManagedAssemblyResolver(
                     gameAssembly,
                     gameDirectory,
-                    supportDirectory,
+                    dependenciesDirectory,
                     modsDirectory))
                 {
                     if (!options.DisableMods)
@@ -70,7 +75,7 @@ namespace GLoader
                             modsDirectory,
                             gameAssembly,
                             gameDirectory,
-                            supportDirectory,
+                            dependenciesDirectory,
                             isServerTarget);
                     }
                     else
@@ -97,7 +102,7 @@ namespace GLoader
                 Console.Error.WriteLine("gloader failed:");
                 Console.Error.WriteLine(ex);
                 Console.Error.WriteLine();
-                Console.Error.WriteLine("See gmods\\logs\\gloader-client.log or gmods\\logs\\gloader-server.log for details.");
+                Console.Error.WriteLine("See gdeps\\logs\\gloader-client.log or gdeps\\logs\\gloader-server.log for details.");
                 return 1;
             }
             finally
@@ -105,6 +110,69 @@ namespace GLoader
                 Log.Dispose();
                 startupResolver.Dispose();
             }
+        }
+
+        private static void MigrateLegacyLayout(string modsDirectory, string dependenciesDirectory)
+        {
+            if (!Directory.Exists(modsDirectory))
+            {
+                return;
+            }
+
+            try
+            {
+                Directory.CreateDirectory(dependenciesDirectory);
+
+                foreach (var file in Directory.GetFiles(modsDirectory, "*", SearchOption.TopDirectoryOnly))
+                {
+                    var destination = Path.Combine(dependenciesDirectory, Path.GetFileName(file));
+                    if (File.Exists(destination))
+                    {
+                        File.Delete(file);
+                    }
+                    else
+                    {
+                        File.Move(file, destination);
+                    }
+                }
+
+                var legacyLogsDirectory = Path.Combine(modsDirectory, "logs");
+                if (Directory.Exists(legacyLogsDirectory))
+                {
+                    MergeLegacyDirectory(legacyLogsDirectory, Path.Combine(dependenciesDirectory, "logs"));
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("gloader warning: could not fully migrate the old gmods support layout: " + ex.Message);
+            }
+        }
+
+        private static void MergeLegacyDirectory(string sourceDirectory, string destinationDirectory)
+        {
+            Directory.CreateDirectory(destinationDirectory);
+
+            foreach (var file in Directory.GetFiles(sourceDirectory, "*", SearchOption.TopDirectoryOnly))
+            {
+                var destination = Path.Combine(destinationDirectory, Path.GetFileName(file));
+                if (File.Exists(destination))
+                {
+                    File.Delete(file);
+                }
+                else
+                {
+                    File.Move(file, destination);
+                }
+            }
+
+            foreach (var directory in Directory.GetDirectories(sourceDirectory, "*", SearchOption.TopDirectoryOnly))
+            {
+                MergeLegacyDirectory(
+                    directory,
+                    Path.Combine(destinationDirectory, Path.GetFileName(directory)));
+            }
+
+            Directory.Delete(sourceDirectory, false);
         }
 
         private static string GetLoaderVersion()
