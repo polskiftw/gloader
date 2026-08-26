@@ -7,6 +7,8 @@ namespace GLoader
 {
     internal static class ModRuntime
     {
+        private const string ModDirectoryDataKey = "GLoader.ModDirectory";
+
         public static void LoadAll(
             string modsDirectory,
             Assembly gameAssembly,
@@ -46,7 +48,7 @@ namespace GLoader
                 Log.Info("Compiling mod: " + mod.DisplayName);
                 var assembly = ModCompiler.Compile(mod, references, isServerTarget);
 
-                InvokeOptionalLoad(assembly);
+                InvokeOptionalLoad(assembly, GetModDirectory(mod));
 
                 harmony = new Harmony(harmonyId);
                 harmony.PatchAll(assembly);
@@ -68,7 +70,15 @@ namespace GLoader
             }
         }
 
-        private static void InvokeOptionalLoad(Assembly assembly)
+        private static string GetModDirectory(ModSource mod)
+        {
+            if (mod == null || mod.SourceFiles == null || mod.SourceFiles.Count == 0)
+                return null;
+
+            return System.IO.Path.GetDirectoryName(mod.SourceFiles[0]);
+        }
+
+        private static void InvokeOptionalLoad(Assembly assembly, string modDirectory)
         {
             var candidates = assembly
                 .GetTypes()
@@ -98,7 +108,16 @@ namespace GLoader
                     "A source mod may contain at most one class named Mod with a static parameterless Load() method.");
             }
 
-            candidates[0].Method.Invoke(null, null);
+            var previousModDirectory = AppDomain.CurrentDomain.GetData(ModDirectoryDataKey);
+            try
+            {
+                AppDomain.CurrentDomain.SetData(ModDirectoryDataKey, modDirectory);
+                candidates[0].Method.Invoke(null, null);
+            }
+            finally
+            {
+                AppDomain.CurrentDomain.SetData(ModDirectoryDataKey, previousModDirectory);
+            }
         }
 
         private static Exception Unwrap(Exception exception)
