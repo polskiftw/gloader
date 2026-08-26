@@ -24,7 +24,6 @@ namespace Terraria
         public static bool triggerDawnReset;
         public static int questSwapCount;
 
-        // Terraria 1.4.5.8 calls UpdateTime_StartDay(ref bool) from UpdateTime().
         public static void UpdateTime()
         {
             if (!triggerDawnReset)
@@ -35,15 +34,11 @@ namespace Terraria
             UpdateTime_StartDay(ref stopEvents);
         }
 
-        // Exact structural behavior relevant to the uploaded 1.4.5.8 server:
-        // the dawn helper takes a ref bool and calls AnglerQuestSwap().
         public static void UpdateTime_StartDay(ref bool stopEvents)
         {
             AnglerQuestSwap();
         }
 
-        // The real server clears the completion list, chooses the next quest, then
-        // broadcasts personalized packet 74 state to every fully connected client.
         public static void AnglerQuestSwap()
         {
             anglerWhoFinishedToday.Clear();
@@ -62,6 +57,7 @@ namespace Terraria
 
     public sealed class RemoteClient
     {
+        public string Name = string.Empty;
         public int State;
     }
 
@@ -116,20 +112,20 @@ namespace Terraria
         public byte[] readBuffer = new byte[256];
         public int whoAmI;
 
-        // Mirrors vanilla packet 75: the server only adds the player's name. It
-        // does not automatically send packet 74 back to that player.
+        // Match TerrariaServer 1.4.5.8 packet 75 exactly for the state Infinite
+        // Angler cares about. Vanilla does not filter on Player.active and does not
+        // reject an empty player name; it simply stores Main.player[whoAmI].name.
         public void GetData(int start, int length, out int messageType)
         {
             messageType = readBuffer[start];
             if (messageType != ID.MessageID.AnglerQuestFinished || Main.netMode != 2)
                 return;
 
-            var player = Main.player[whoAmI];
-            if (!player.active || string.IsNullOrEmpty(player.name))
+            var name = Main.player[whoAmI].name;
+            if (Main.anglerWhoFinishedToday.Contains(name))
                 return;
 
-            if (!Main.anglerWhoFinishedToday.Contains(player.name))
-                Main.anglerWhoFinishedToday.Add(player.name);
+            Main.anglerWhoFinishedToday.Add(name);
         }
     }
 }
@@ -143,6 +139,30 @@ namespace FixtureServer
             Require(
                 args.Length == 2 && args[0] == "--fixture-arg" && args[1] == "hello world",
                 "Host & Play redirect did not preserve the original server arguments.");
+
+            // Regression for 0.1.9: a fully connected State-10 slot must NEVER
+            // disappear from the quorum just because Main.player[index].name is
+            // temporarily empty. The old mod skipped that slot and could swap after
+            // only the other player finished, exactly the premature-round behavior
+            // seen with a real vanilla multiplayer client.
+            ResetFixture();
+            Terraria.Main.player[2].name = string.Empty;
+            Complete(1);
+            Require(Terraria.Main.anglerQuest == 7,
+                "connected slot with an empty player name vanished from the quorum");
+            Require(Terraria.Main.questSwapCount == 0,
+                "quest swapped while a State-10 client was still unfinished");
+            Require(Terraria.NetMessage.clientQuestFinished[1],
+                "first finisher was not kept locked while waiting for the connected host slot");
+
+            // Mirror vanilla packet 75's raw-name behavior too: if that connected
+            // slot completes while its Player.name is still empty, the empty string
+            // is a valid completion-list key and the round can then advance.
+            Complete(2);
+            Require(Terraria.Main.anglerQuest == 8,
+                "round did not advance after the previously unnamed connected slot finished");
+            Require(Terraria.Main.questSwapCount == 1,
+                "unnamed-slot regression round did not swap exactly once");
 
             ResetFixture();
 
@@ -231,7 +251,7 @@ namespace FixtureServer
                 "single connected vanilla client did not receive the next quest unlocked");
 
             Console.WriteLine(
-                "PASS: vanilla clients stay locked after individual turn-in, dawn cannot reset the round, the quest advances only after every Netplay-connected client finishes, joiners count, and disconnects stop counting.");
+                "PASS: every State-10 client remains in the Angler quorum even during transient player-name state; vanilla clients stay locked after individual turn-in, dawn cannot reset the round, joiners count, and disconnects stop counting.");
             return 0;
         }
 
@@ -249,6 +269,7 @@ namespace FixtureServer
             {
                 Terraria.Main.player[index].active = false;
                 Terraria.Main.player[index].name = string.Empty;
+                Terraria.Netplay.Clients[index].Name = string.Empty;
                 Terraria.Netplay.Clients[index].State = 0;
                 Terraria.NetMessage.clientQuest[index] = -1;
                 Terraria.NetMessage.clientQuestFinished[index] = false;
@@ -262,6 +283,7 @@ namespace FixtureServer
         {
             Terraria.Main.player[index].active = true;
             Terraria.Main.player[index].name = name;
+            Terraria.Netplay.Clients[index].Name = name;
             Terraria.Netplay.Clients[index].State = 10;
             Terraria.NetMessage.SendAnglerQuest(index);
         }
