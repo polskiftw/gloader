@@ -2,13 +2,13 @@
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
     <OutputType>Exe</OutputType>
-    <AssemblyName>TerrariaServer</AssemblyName>
+    <AssemblyName>Terraria</AssemblyName>
     <RootNamespace>FixtureServer</RootNamespace>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <Deterministic>true</Deterministic>
-    <OutputPath>bin\$(Configuration)\net48\</OutputPath>
+    <OutputPath>bin\$(Configuration)\net48\serverbuild\</OutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
   </PropertyGroup>
 
@@ -16,4 +16,10 @@
     <Compile Include="ServerProgram.cs" />
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net48" Version="1.0.3" PrivateAssets="All" />
   </ItemGroup>
+
+  <Target Name="CopyTerrariaServerFixture" AfterTargets="Build">
+    <Copy
+      SourceFiles="$(TargetPath)"
+      DestinationFiles="$(MSBuildProjectDirectory)\bin\$(Configuration)\net48\TerrariaServer.exe" />
+  </Target>
 </Project>
