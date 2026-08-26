@@ -92,7 +92,8 @@ namespace GLoader
             Console.WriteLine("  gloader.exe --no-mods");
             Console.WriteLine("  gloader.exe -- <arguments passed to Terraria>");
             Console.WriteLine();
-            Console.WriteLine("Default layout: put gloader.exe beside Terraria.exe and keep gmods beside them.");
+            Console.WriteLine("Default layout: put gloader.exe beside Terraria.exe, with gmods and gdeps beside them.");
+            Console.WriteLine("gmods contains mod folders only; gdeps contains gloader runtime/support files and logs.");
             Console.WriteLine("If no target is given, gloader looks beside itself first, then one folder above");
             Console.WriteLine("itself, and in the current working directory.");
         }
