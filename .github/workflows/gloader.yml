@@ -120,7 +120,7 @@ jobs:
             --repo "${{ github.repository }}" `
             --target "${{ github.sha }}" `
             --title "gloader v$env:RELEASE_VERSION" `
-            --notes "Fixes the remaining Infinite Angler premature multiplayer rollover. In TerrariaServer 1.4.5.8, packet 75 stores Main.player[slot].name without filtering it. 0.1.9's quorum incorrectly skipped a fully connected State-10 client whenever that Player.name was temporarily empty, allowing the first finisher to look like the whole group. Every State-10 slot now counts unconditionally and must have a completion marker before the quest can advance; RemoteClient.Name is used as a secondary identity during connection transitions. The fixture now reproduces the exact vanilla packet-75 behavior and tests that an unnamed-but-connected slot blocks rollover. Dawn remains disabled and vanilla clients remain supported."
+            --notes "Infinite Angler now treats the network connection itself as the shared-round authority. Each accepted vanilla packet 75 marks that exact whoAmI slot complete, and the quest cannot advance until every fully connected Netplay State-10 slot is complete. Player names are retained only for vanilla packet-74 finished-state synchronization and reconnect reconstruction; they can no longer make a connected player disappear from the quorum. Disconnects stop counting, late joiners count immediately, individual finishers remain locked on the same quest, and dawn never rolls the quest. The fixture mirrors TerrariaServer 1.4.5.8 packet-75 behavior and covers the premature-first-finisher regression."
 
       - name: Upload
         uses: actions/upload-artifact@v4
