@@ -96,17 +96,10 @@ jobs:
           $target = (Resolve-Path "tests/HostPlayFixture/bin/Release/net48/Terraria.exe").Path
           $mods = Join-Path $env:RUNNER_TEMP "gloader-hostplay-mods"
           $anglerMod = Join-Path $mods "InfiniteAngler"
-          $legacyProbe = "dist/gloader/gmods/legacy-layout-probe.txt"
-          $legacyLogs = "dist/gloader/gmods/logs"
 
           Remove-Item $mods -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Path $mods | Out-Null
           Copy-Item "gmods/InfiniteAngler" $anglerMod -Recurse
-
-          # Verify an in-place upgrade cleans the old mixed gmods layout.
-          Set-Content -Path $legacyProbe -Value "legacy" -Encoding ASCII
-          New-Item -ItemType Directory -Path $legacyLogs -Force | Out-Null
-          Set-Content -Path (Join-Path $legacyLogs "legacy.log") -Value "legacy" -Encoding ASCII
 
           # The shipped setting is deliberately false to preserve v0.1.11 behavior.
           # Enable it only in this isolated fixture so CI exercises the command path.
@@ -119,21 +112,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "Steam Host & Play / Infinite Angler participation fixture failed with exit code $LASTEXITCODE"
           }
-
-          if (Test-Path $legacyProbe) {
-            throw "Legacy loose gmods files were not migrated."
-          }
-          if (-not (Test-Path "dist/gloader/gdeps/legacy-layout-probe.txt" -PathType Leaf)) {
-            throw "Legacy loose gmods file was not moved into gdeps."
-          }
-          if (Test-Path $legacyLogs) {
-            throw "Legacy gmods/logs directory was not migrated."
-          }
-          if (-not (Test-Path "dist/gloader/gdeps/logs/legacy.log" -PathType Leaf)) {
-            throw "Legacy gmods logs were not moved into gdeps/logs."
-          }
-
-          Remove-Item "dist/gloader/gdeps/legacy-layout-probe.txt" -Force
 
       - name: Remove integration-test logs
         shell: pwsh
@@ -162,7 +140,7 @@ jobs:
             --repo "${{ github.repository }}" `
             --target "${{ github.sha }}" `
             --title "gloader v$env:RELEASE_VERSION" `
-            --notes "GLoader now keeps its install layout clean: gloader.exe stays beside Terraria.exe, mod folders live only under gmods, and loader runtime/support files plus logs live under the new gdeps folder. Existing installations are migrated automatically on first launch: legacy loose files in gmods move into gdeps and the old gmods/logs folder moves to gdeps/logs. CI verifies the separated package layout, upgrade migration, Host & Play behavior, and the included mod compile/runtime fixtures."
+            --notes "GLoader uses the clean alpha install layout only: gloader.exe sits beside Terraria.exe, gmods contains mod folders only, and gdeps contains loader runtime/support files plus logs. There is intentionally no upgrade or migration logic; alpha users handle cleanup of older layouts themselves. CI verifies the package layout, Host & Play behavior, and the included mod compile/runtime fixtures."
 
       - name: Upload
         uses: actions/upload-artifact@v4
