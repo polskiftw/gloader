@@ -23,20 +23,33 @@ namespace Terraria
         public static bool triggerDawnReset;
         public static int questSwapCount;
 
-        // Synthetic vanilla dawn behavior. Infinite Angler should suppress only the
-        // Clear + AnglerQuestSwap pair while leaving this method callable normally.
+        // Terraria 1.4.5.8 splits dawn into UpdateTime_StartDay(). UpdateTime()
+        // reaches it when dawn occurs; Infinite Angler's per-tick round check is a
+        // postfix on this outer method.
         public static void UpdateTime()
         {
-            if (triggerDawnReset)
-            {
-                triggerDawnReset = false;
-                anglerWhoFinishedToday.Clear();
-                AnglerQuestSwap();
-            }
+            if (!triggerDawnReset)
+                return;
+
+            triggerDawnReset = false;
+            UpdateTime_StartDay();
         }
 
+        // Exact structural behavior relevant to the real 1.4.5.8 server: the
+        // dawn helper calls AnglerQuestSwap(), rather than clearing the completion
+        // list itself.
+        public static void UpdateTime_StartDay()
+        {
+            AnglerQuestSwap();
+        }
+
+        // In the real 1.4.5.8 server AnglerQuestSwap() itself begins by clearing
+        // anglerWhoFinishedToday, then resets the finished flag, selects a quest,
+        // and broadcasts the new quest. Keep the fixture equivalent for the parts
+        // Infinite Angler depends on.
         public static void AnglerQuestSwap()
         {
+            anglerWhoFinishedToday.Clear();
             anglerQuestFinished = false;
             anglerQuest = (anglerQuest + 1) % 40;
             questSwapCount++;
@@ -90,7 +103,8 @@ namespace FixtureServer
             Require(Terraria.Main.anglerWhoFinishedToday.SequenceEqual(new[] { "VanillaGuest" }),
                 "first player's vanilla completion marker was not preserved");
 
-            // Dawn must no longer reset either the quest or the completion list.
+            // Dawn must no longer invoke AnglerQuestSwap(), which also means its
+            // internal completion-list clear must not happen.
             Terraria.Main.triggerDawnReset = true;
             Tick();
             Require(Terraria.Main.anglerQuest == 7, "dawn changed the Angler quest");
@@ -145,7 +159,7 @@ namespace FixtureServer
                 "single-player round did not clear completion state");
 
             Console.WriteLine(
-                "PASS: Host & Play child was routed through gloader; Infinite Angler preserved quests across dawn, advanced only after all active players completed, counted joiners, ignored disconnects, and handled a one-player group.");
+                "PASS: Steam Host & Play child was routed through gloader; Infinite Angler matches Terraria 1.4.5.8's UpdateTime_StartDay/AnglerQuestSwap layout, preserves quests across dawn, and advances only after all active players complete.");
             return 0;
         }
 
