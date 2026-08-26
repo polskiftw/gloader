@@ -81,6 +81,11 @@ jobs:
             throw "Host & Play integration fixture failed with exit code $LASTEXITCODE"
           }
 
+      - name: Remove integration-test logs
+        shell: pwsh
+        run: |
+          Remove-Item "dist/gloader/gmods/logs" -Recurse -Force -ErrorAction SilentlyContinue
+
       - name: Package release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release ')
         shell: pwsh
@@ -103,7 +108,7 @@ jobs:
             --repo "${{ github.repository }}" `
             --target "${{ github.sha }}" `
             --title "gloader v$env:RELEASE_VERSION" `
-            --notes "Initial alpha release. Includes embedded Terraria dependency resolution so Harmony mods such as VGMRadio can resolve ReLogic correctly."
+            --notes "Fixes Terraria startup ordering so Program.SavePath is initialized before source mods can touch Terraria.Main. Keeps embedded ReLogic resolution for VGMRadio and removes CI integration-test logs from release packages."
 
       - name: Upload
         uses: actions/upload-artifact@v4
