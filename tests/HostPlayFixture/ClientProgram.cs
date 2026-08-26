@@ -15,10 +15,25 @@ namespace FixtureClient
 
 namespace Terraria
 {
+    public static class Program
+    {
+        public static string SavePath;
+    }
+
     public static class Main
     {
+        // Mirrors vanilla Terraria's startup dependency: Main's static initializer
+        // needs Program.SavePath to already be valid before mods touch Main.
+        private static readonly string FavoritePath = Path.Combine(Program.SavePath, "favorites.json");
+
         public static int LaunchHostAndPlay()
         {
+            if (string.IsNullOrWhiteSpace(Program.SavePath) || string.IsNullOrWhiteSpace(FavoritePath))
+            {
+                Console.Error.WriteLine("Fixture SavePath was not initialized before Terraria.Main.");
+                return 90;
+            }
+
             var gameDirectory = Environment.CurrentDirectory;
             var server = Path.Combine(gameDirectory, "TerrariaServer.exe");
             if (!File.Exists(server))
