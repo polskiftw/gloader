@@ -13,10 +13,6 @@ internal static partial class VGMRadio
     // station is running its music-guessing game.
     private const string GttStreamUrl = "https://icecast.gttradio.com/mp3_320k";
 
-    private static readonly Regex RainwaveCurrentSongRegex = new Regex(
-        @"""sched_current""\s*:\s*\{.*?""song_data""\s*:\s*\{.*?""title""\s*:\s*""((?:\\.|[^""\\])*)"".*?""artists""\s*:\s*\[(.*?)\]",
-        RegexOptions.Compiled | RegexOptions.Singleline | RegexOptions.CultureInvariant);
-
     private static readonly Regex RainwaveArtistRegex = new Regex(
         @"""name""\s*:\s*""((?:\\.|[^""\\])*)""",
         RegexOptions.Compiled | RegexOptions.Singleline | RegexOptions.CultureInvariant);
@@ -64,31 +60,153 @@ internal static partial class VGMRadio
 
     private static bool TryGetRainwaveNowPlaying(out string display)
     {
-        display = null;
-
         var json = DownloadText("https://rainwave.cc/api4/info?sid=" + _stationId, 5000);
+        return TryParseRainwaveNowPlayingJson(json, out display);
+    }
+
+    // Rainwave's current API exposes the current event as sched_current.songs[0].
+    // Older responses used sched_current.song_data. Keep both layouts supported so
+    // now-playing text is not tied to JSON property order or one historical schema.
+    internal static bool TryParseRainwaveNowPlayingJson(string json, out string display)
+    {
+        display = null;
         if (string.IsNullOrWhiteSpace(json))
             return false;
 
-        var current = RainwaveCurrentSongRegex.Match(json);
-        if (!current.Success)
+        var current = ExtractJsonContainer(json, "sched_current", '{', '}');
+        if (string.IsNullOrEmpty(current))
             return false;
 
-        var title = UnescapeJsonString(current.Groups[1].Value).Trim();
+        string song = null;
+        var songs = ExtractJsonContainer(current, "songs", '[', ']');
+        if (!string.IsNullOrEmpty(songs))
+            song = ExtractFirstJsonObject(songs);
+
+        if (string.IsNullOrEmpty(song))
+            song = ExtractJsonContainer(current, "song_data", '{', '}');
+
+        if (string.IsNullOrEmpty(song))
+            return false;
+
+        var title = ExtractJsonStringField(song, "title").Trim();
         if (title.Length == 0)
             return false;
 
-        var artists = RainwaveArtistRegex.Matches(current.Groups[2].Value)
-            .Cast<Match>()
-            .Select(match => UnescapeJsonString(match.Groups[1].Value).Trim())
-            .Where(name => name.Length > 0)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+        var artistsContainer = ExtractJsonContainer(song, "artists", '[', ']');
+        var artists = string.IsNullOrEmpty(artistsContainer)
+            ? new string[0]
+            : RainwaveArtistRegex.Matches(artistsContainer)
+                .Cast<Match>()
+                .Select(match => UnescapeJsonString(match.Groups[1].Value).Trim())
+                .Where(name => name.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
 
         display = artists.Length == 0
             ? "Now playing: " + title
             : "Now playing: " + string.Join(", ", artists) + " - " + title;
         return true;
+    }
+
+    private static string ExtractJsonStringField(string json, string fieldName)
+    {
+        if (string.IsNullOrEmpty(json) || string.IsNullOrEmpty(fieldName))
+            return string.Empty;
+
+        var pattern =
+            "\\\"" + Regex.Escape(fieldName) + "\\\"\\s*:\\s*\\\"((?:\\\\.|[^\\\"\\\\])*)\\\"";
+        var match = Regex.Match(
+            json,
+            pattern,
+            RegexOptions.Singleline | RegexOptions.CultureInvariant);
+
+        return match.Success
+            ? UnescapeJsonString(match.Groups[1].Value)
+            : string.Empty;
+    }
+
+    private static string ExtractFirstJsonObject(string json)
+    {
+        if (string.IsNullOrEmpty(json))
+            return null;
+
+        var start = json.IndexOf('{');
+        if (start < 0)
+            return null;
+
+        var end = FindMatchingJsonDelimiter(json, start, '{', '}');
+        return end < 0 ? null : json.Substring(start, end - start + 1);
+    }
+
+    private static string ExtractJsonContainer(string json, string fieldName, char open, char close)
+    {
+        if (string.IsNullOrEmpty(json) || string.IsNullOrEmpty(fieldName))
+            return null;
+
+        var key = "\"" + fieldName + "\"";
+        var keyIndex = json.IndexOf(key, StringComparison.Ordinal);
+        if (keyIndex < 0)
+            return null;
+
+        var start = json.IndexOf(open, keyIndex + key.Length);
+        if (start < 0)
+            return null;
+
+        var end = FindMatchingJsonDelimiter(json, start, open, close);
+        return end < 0 ? null : json.Substring(start, end - start + 1);
+    }
+
+    private static int FindMatchingJsonDelimiter(string json, int start, char open, char close)
+    {
+        var depth = 0;
+        var inString = false;
+        var escaped = false;
+
+        for (var index = start; index < json.Length; index++)
+        {
+            var character = json[index];
+
+            if (inString)
+            {
+                if (escaped)
+                {
+                    escaped = false;
+                    continue;
+                }
+
+                if (character == '\\')
+                {
+                    escaped = true;
+                    continue;
+                }
+
+                if (character == '"')
+                    inString = false;
+
+                continue;
+            }
+
+            if (character == '"')
+            {
+                inString = true;
+                continue;
+            }
+
+            if (character == open)
+            {
+                depth++;
+                continue;
+            }
+
+            if (character != close)
+                continue;
+
+            depth--;
+            if (depth == 0)
+                return index;
+        }
+
+        return -1;
     }
 
     private static bool TryGetGttNowPlaying(out string display)
@@ -106,7 +224,7 @@ internal static partial class VGMRadio
     {
         var request = (HttpWebRequest)WebRequest.Create(GttStreamUrl);
         request.Method = "GET";
-        request.UserAgent = "gloader-vgm-radio/0.4";
+        request.UserAgent = "gloader-vgm-radio/0.5";
         request.Accept = "*/*";
         request.Timeout = timeoutMilliseconds;
         request.ReadWriteTimeout = timeoutMilliseconds;
