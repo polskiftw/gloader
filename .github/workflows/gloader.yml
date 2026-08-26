@@ -77,7 +77,7 @@ jobs:
             throw "dist/gloader/gmods was not produced."
           }
 
-      - name: Vanilla-client Host & Play + server Infinite Angler integration test
+      - name: Steam SocialAPI Host & Play + server Infinite Angler integration test
         shell: pwsh
         run: |
           $loader = (Resolve-Path "dist/gloader/gloader.exe").Path
@@ -90,7 +90,7 @@ jobs:
 
           & $loader --target $target --mods $mods
           if ($LASTEXITCODE -ne 0) {
-            throw "Vanilla-client Host & Play / server Infinite Angler fixture failed with exit code $LASTEXITCODE"
+            throw "Steam SocialAPI Host & Play / server Infinite Angler fixture failed with exit code $LASTEXITCODE"
           }
 
       - name: Remove integration-test logs
@@ -120,7 +120,7 @@ jobs:
             --repo "${{ github.repository }}" `
             --target "${{ github.sha }}" `
             --title "gloader v$env:RELEASE_VERSION" `
-            --notes "Fixes VGM Radio now-playing text on Rainwave. Rainwave's current API exposes the active track under sched_current.songs rather than the old song_data shape, so the metadata parser now supports the current response and the legacy form. The popup timer now starts on the first real Terraria UI draw instead of during pre-game startup, and the overlay is drawn after Terraria's mouse-text pass. Includes the vanilla-client Infinite Angler Host & Play fixes from 0.1.5-alpha."
+            --notes "Fixes Infinite Angler under Steam Host & Play. Vanilla Terraria hands its prepared TerrariaServer.exe Process to SocialAPI.Network.LaunchLocalServer, so Process.Start occurs outside Terraria.Main. gloader now redirects the fully prepared server ProcessStartInfo before that SocialAPI handoff while keeping the direct-launch fallback. CI now reproduces the SocialAPI launch path and verifies the child server is actually routed through gloader with Infinite Angler active. Includes the Rainwave now-playing fix from 0.1.6-alpha."
 
       - name: Upload
         uses: actions/upload-artifact@v4
