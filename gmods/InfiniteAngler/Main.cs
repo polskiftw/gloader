@@ -12,7 +12,7 @@ public static class Mod
     public static void Load()
     {
         InfiniteAnglerRuntime.Initialize();
-        Console.WriteLine("[Infinite Angler] Shared endless Angler quests enabled on server.");
+        Console.WriteLine("[Infinite Angler] Slot-authoritative shared Angler rounds enabled on server.");
     }
 }
 
@@ -47,10 +47,9 @@ internal static class InfiniteAnglerDawnPatch
     }
 }
 
-// Vanilla packet 75 records the player's current Main.player[].name in
-// anglerWhoFinishedToday. After vanilla handles that packet, keep the finisher's
-// completely vanilla client locked to the current shared round until everyone who
-// is actually connected has also finished it.
+// Packet 75 is the authoritative event that a particular network connection
+// turned in the current Angler quest. Let vanilla record its name first, then mark
+// that exact connection slot complete for our shared round.
 [HarmonyPatch]
 internal static class InfiniteAnglerCompletionPatch
 {
@@ -70,9 +69,9 @@ internal static class InfiniteAnglerCompletionPatch
     }
 }
 
-// Keep one lightweight server-tick check as a disconnect fallback. If an
-// unfinished player leaves and everyone still connected had already finished,
-// that disconnect itself satisfies the shared-round condition.
+// A tick check handles disconnects and reconnects. Disconnected slots are removed
+// from the round immediately; fully connected slots are restored as completed when
+// vanilla's completion-name list proves that same connected player already turned in.
 [HarmonyPatch]
 internal static class InfiniteAnglerRoundPatch
 {
@@ -85,6 +84,11 @@ internal static class InfiniteAnglerRoundPatch
 internal static class InfiniteAnglerRuntime
 {
     private const int FullyConnectedState = 10;
+
+    // This is the actual shared-round authority. Names remain vanilla's mechanism
+    // for packet-74 personalization, but they no longer decide how many players the
+    // round contains. Every State-10 connection slot must be represented here.
+    private static readonly HashSet<int> CompletedSlots = new HashSet<int>();
 
     private static FieldInfo _netMode;
     private static FieldInfo _players;
@@ -154,6 +158,8 @@ internal static class InfiniteAnglerRuntime
 
         if (!_players.FieldType.IsArray)
             throw new InvalidOperationException("Main.player is no longer an array.");
+
+        CompletedSlots.Clear();
     }
 
     public static bool IsAnglerCompletionPacket(MessageBuffer buffer, int start)
@@ -191,22 +197,22 @@ internal static class InfiniteAnglerRuntime
         var finishedToday = GetFinishedToday();
         var playerName = GetPlayerName(player);
 
-        // Match vanilla packet 75 exactly: an empty string is still a real list key.
-        // Do not reject or skip it here. The old code did, while Terraria 1.4.5.8
-        // itself simply adds Main.player[whoAmI].name to the list.
+        // Let vanilla validate/record packet 75 first. Terraria 1.4.5.8 uses the raw
+        // player name, including an empty string, so match that behavior exactly.
         if (playerName == null || !finishedToday.Contains(playerName))
             return;
 
-        if (AllConnectedPlayersFinished(finishedToday))
+        CompletedSlots.Add(whoAmI);
+        RefreshCompletedSlots(finishedToday);
+
+        if (AllConnectedSlotsFinished())
         {
             AdvanceQuest(finishedToday);
             return;
         }
 
-        // Keep this vanilla client locked out of the current quest while the other
-        // connected players finish it. SendAnglerQuest is personalized: packet 74
-        // contains the same global quest plus a bool based on this player's name in
-        // anglerWhoFinishedToday.
+        // Keep this vanilla client locked out of the SAME quest. No global quest
+        // state changes until every connected slot has completed this round.
         SendAnglerQuest(whoAmI);
     }
 
@@ -216,23 +222,88 @@ internal static class InfiniteAnglerRuntime
             return;
 
         var finishedToday = GetFinishedToday();
-        if (AllConnectedPlayersFinished(finishedToday))
+        RefreshCompletedSlots(finishedToday);
+
+        if (AllConnectedSlotsFinished())
             AdvanceQuest(finishedToday);
+    }
+
+    private static void RefreshCompletedSlots(IList<string> finishedToday)
+    {
+        var clients = (Array)_netplayClients.GetValue(null);
+        var players = (Array)_players.GetValue(null);
+        if (clients == null || players == null)
+            return;
+
+        var count = Math.Min(clients.Length, players.Length);
+        for (var index = 0; index < count; index++)
+        {
+            var client = clients.GetValue(index);
+            if (client == null || GetClientState(client) != FullyConnectedState)
+            {
+                CompletedSlots.Remove(index);
+                continue;
+            }
+
+            if (CompletedSlots.Contains(index))
+                continue;
+
+            // Reconstruct completion after a reconnect/slot transition from vanilla's
+            // persisted name list. Prefer RemoteClient.Name because it belongs to the
+            // connection; fall back to Main.player[].name when needed.
+            var clientName = GetClientName(client);
+            if (!string.IsNullOrEmpty(clientName) && finishedToday.Contains(clientName))
+            {
+                CompletedSlots.Add(index);
+                continue;
+            }
+
+            var player = players.GetValue(index);
+            var playerName = player == null ? null : GetPlayerName(player);
+            if (playerName != null && finishedToday.Contains(playerName))
+                CompletedSlots.Add(index);
+        }
+
+        // Netplay currently has at most the player-array count, but clean any stale
+        // slot markers beyond the shared range defensively.
+        CompletedSlots.RemoveWhere(index => index < 0 || index >= count);
+    }
+
+    private static bool AllConnectedSlotsFinished()
+    {
+        var clients = (Array)_netplayClients.GetValue(null);
+        if (clients == null)
+            return false;
+
+        var anyConnected = false;
+        for (var index = 0; index < clients.Length; index++)
+        {
+            var client = clients.GetValue(index);
+            if (client == null || GetClientState(client) != FullyConnectedState)
+                continue;
+
+            anyConnected = true;
+            if (!CompletedSlots.Contains(index))
+                return false;
+        }
+
+        return anyConnected;
     }
 
     private static void AdvanceQuest(IList<string> finishedToday)
     {
         var completedNames = finishedToday.ToArray();
+        var completedSlots = CompletedSlots.ToArray();
 
         try
         {
             _advancing = true;
 
-            // Terraria 1.4.5.8 AnglerQuestSwap() clears anglerWhoFinishedToday,
-            // selects the next quest, and calls NetMessage.SendAnglerQuest(-1).
-            // That broadcast resets every connected vanilla client to unfinished for
-            // the new shared round.
+            // The ONLY successful path that starts another quest. Vanilla clears its
+            // name list, chooses the next quest, and broadcasts personalized packet 74
+            // to every connected vanilla client.
             AnglerQuestSwapMethod.Invoke(null, null);
+            CompletedSlots.Clear();
             _advanceFailureLogged = false;
         }
         catch (Exception ex)
@@ -241,8 +312,10 @@ internal static class InfiniteAnglerRuntime
             foreach (var name in completedNames)
                 finishedToday.Add(name);
 
-            // Restore each client's personalized finished flag if vanilla failed
-            // after partially clearing/changing the round.
+            CompletedSlots.Clear();
+            foreach (var slot in completedSlots)
+                CompletedSlots.Add(slot);
+
             SendAnglerQuest(-1);
 
             if (!_advanceFailureLogged)
@@ -255,54 +328,6 @@ internal static class InfiniteAnglerRuntime
         {
             _advancing = false;
         }
-    }
-
-    private static bool AllConnectedPlayersFinished(IList<string> finishedToday)
-    {
-        var clients = (Array)_netplayClients.GetValue(null);
-        var players = (Array)_players.GetValue(null);
-        if (clients == null || players == null)
-            return false;
-
-        var anyConnected = false;
-        var count = Math.Min(clients.Length, players.Length);
-
-        for (var index = 0; index < count; index++)
-        {
-            var client = clients.GetValue(index);
-            if (client == null || GetClientState(client) != FullyConnectedState)
-                continue;
-
-            // A State-10 slot is part of the round immediately. Never silently drop
-            // it from the quorum because Main.player[index].name is temporarily empty
-            // or not populated yet. That was the premature-swap bug in 0.1.9.
-            anyConnected = true;
-
-            var player = players.GetValue(index);
-            if (!ConnectedSlotHasFinished(client, player, finishedToday))
-                return false;
-        }
-
-        return anyConnected;
-    }
-
-    private static bool ConnectedSlotHasFinished(object client, object player, IList<string> finishedToday)
-    {
-        if (player != null)
-        {
-            var playerName = GetPlayerName(player);
-
-            // Empty string is intentionally allowed: vanilla packet 75 also uses the
-            // raw Main.player[].name without filtering it.
-            if (playerName != null && finishedToday.Contains(playerName))
-                return true;
-        }
-
-        // During connection/Host & Play transitions RemoteClient.Name can already be
-        // populated while Main.player[].name is briefly unavailable. It is a safe
-        // secondary identity for determining whether this connected slot completed.
-        var clientName = GetClientName(client);
-        return clientName != null && finishedToday.Contains(clientName);
     }
 
     private static int GetClientState(object client)
