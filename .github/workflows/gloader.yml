@@ -20,7 +20,7 @@ on:
       - ".github/workflows/gloader.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -80,6 +80,30 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "Host & Play integration fixture failed with exit code $LASTEXITCODE"
           }
+
+      - name: Package release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release ')
+        shell: pwsh
+        run: |
+          [xml]$project = Get-Content "src/GLoader/GLoader.csproj"
+          $version = [string]($project.Project.PropertyGroup.Version | Select-Object -First 1)
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            throw "Could not read Version from src/GLoader/GLoader.csproj"
+          }
+          "RELEASE_VERSION=$version" >> $env:GITHUB_ENV
+          Compress-Archive -Path "dist/gloader/*" -DestinationPath "gloader-$version.zip" -Force
+
+      - name: Publish GitHub release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release ')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$env:RELEASE_VERSION" "gloader-$env:RELEASE_VERSION.zip" `
+            --repo "${{ github.repository }}" `
+            --target "${{ github.sha }}" `
+            --title "gloader v$env:RELEASE_VERSION" `
+            --notes "Initial alpha release. Includes embedded Terraria dependency resolution so Harmony mods such as VGMRadio can resolve ReLogic correctly."
 
       - name: Upload
         uses: actions/upload-artifact@v4
