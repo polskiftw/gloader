@@ -8,6 +8,17 @@ namespace FixtureClient
     {
         public static int Main(string[] args)
         {
+            return Terraria.Main.LaunchHostAndPlay();
+        }
+    }
+}
+
+namespace Terraria
+{
+    public static class Main
+    {
+        public static int LaunchHostAndPlay()
+        {
             var gameDirectory = Environment.CurrentDirectory;
             var server = Path.Combine(gameDirectory, "TerrariaServer.exe");
             if (!File.Exists(server))
@@ -27,7 +38,7 @@ namespace FixtureClient
                 }
             };
 
-            Console.WriteLine("[fixture client] launching TerrariaServer.exe through Process.Start()...");
+            Console.WriteLine("[fixture client] launching TerrariaServer.exe through Terraria Host & Play path...");
             if (!process.Start())
             {
                 Console.Error.WriteLine("Process.Start returned false.");
