@@ -23,8 +23,6 @@ Terraria/
     logs/
 ```
 
-When upgrading from the old mixed layout, GLoader automatically cleans it on first launch. Loose files in the root of `gmods/` move into `gdeps/`, and the old `gmods/logs/` directory moves into `gdeps/logs/`. If a current dependency already exists in `gdeps/`, the stale legacy copy in `gmods/` is discarded instead of overwriting it.
-
 ## gmods and gdeps folder contract
 
 `gmods/` is for mods only. Each immediate subfolder containing enabled `.cs` files is treated as one mod. There should be no GLoader dependency DLLs or log files loose in this directory.
