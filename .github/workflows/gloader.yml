@@ -73,8 +73,20 @@ jobs:
           if ($rootFiles.Count -ne 1 -or $rootFiles[0].Name -ne "gloader.exe") {
             throw "dist/gloader root must contain exactly one file: gloader.exe. Found: $($rootFiles.Name -join ', ')"
           }
-          if (-not (Test-Path "dist/gloader/gmods" -PathType Container)) {
-            throw "dist/gloader/gmods was not produced."
+
+          $rootDirectories = @(Get-ChildItem "dist/gloader" -Directory | Select-Object -ExpandProperty Name | Sort-Object)
+          if (($rootDirectories -join ',') -ne "gdeps,gmods") {
+            throw "dist/gloader root must contain exactly the gdeps and gmods folders. Found: $($rootDirectories -join ', ')"
+          }
+
+          $modRootFiles = @(Get-ChildItem "dist/gloader/gmods" -File)
+          if ($modRootFiles.Count -ne 0) {
+            throw "gmods must contain mod folders only. Loose files found: $($modRootFiles.Name -join ', ')"
+          }
+
+          $dependencyFiles = @(Get-ChildItem "dist/gloader/gdeps" -File)
+          if ($dependencyFiles.Count -eq 0) {
+            throw "gdeps must contain the published gloader runtime/support files."
           }
 
       - name: Steam Host & Play + Infinite Angler participation integration test
@@ -84,10 +96,17 @@ jobs:
           $target = (Resolve-Path "tests/HostPlayFixture/bin/Release/net48/Terraria.exe").Path
           $mods = Join-Path $env:RUNNER_TEMP "gloader-hostplay-mods"
           $anglerMod = Join-Path $mods "InfiniteAngler"
+          $legacyProbe = "dist/gloader/gmods/legacy-layout-probe.txt"
+          $legacyLogs = "dist/gloader/gmods/logs"
 
           Remove-Item $mods -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Path $mods | Out-Null
           Copy-Item "gmods/InfiniteAngler" $anglerMod -Recurse
+
+          # Verify an in-place upgrade cleans the old mixed gmods layout.
+          Set-Content -Path $legacyProbe -Value "legacy" -Encoding ASCII
+          New-Item -ItemType Directory -Path $legacyLogs -Force | Out-Null
+          Set-Content -Path (Join-Path $legacyLogs "legacy.log") -Value "legacy" -Encoding ASCII
 
           # The shipped setting is deliberately false to preserve v0.1.11 behavior.
           # Enable it only in this isolated fixture so CI exercises the command path.
@@ -101,10 +120,25 @@ jobs:
             throw "Steam Host & Play / Infinite Angler participation fixture failed with exit code $LASTEXITCODE"
           }
 
+          if (Test-Path $legacyProbe) {
+            throw "Legacy loose gmods files were not migrated."
+          }
+          if (-not (Test-Path "dist/gloader/gdeps/legacy-layout-probe.txt" -PathType Leaf)) {
+            throw "Legacy loose gmods file was not moved into gdeps."
+          }
+          if (Test-Path $legacyLogs) {
+            throw "Legacy gmods/logs directory was not migrated."
+          }
+          if (-not (Test-Path "dist/gloader/gdeps/logs/legacy.log" -PathType Leaf)) {
+            throw "Legacy gmods logs were not moved into gdeps/logs."
+          }
+
+          Remove-Item "dist/gloader/gdeps/legacy-layout-probe.txt" -Force
+
       - name: Remove integration-test logs
         shell: pwsh
         run: |
-          Remove-Item "dist/gloader/gmods/logs" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item "dist/gloader/gdeps/logs" -Recurse -Force -ErrorAction SilentlyContinue
 
       - name: Package release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release ')
@@ -128,7 +162,7 @@ jobs:
             --repo "${{ github.repository }}" `
             --target "${{ github.sha }}" `
             --title "gloader v$env:RELEASE_VERSION" `
-            --notes "Infinite Angler adds an optional vanilla-client participation system. Enable EnableParticipationCommands=true in gmods/InfiniteAngler/InfiniteAngler.ini to use !fish in, !fish out, and !fish status. OUT players may still catch and turn in fish normally and are locked out after a successful turn-in; they simply do not block the shared quest from advancing. Completion and participation are tracked separately, opting back in preserves a completion earned while OUT, all-OUT parks the current quest instead of swapping endlessly, disconnects clear session-only opt-outs, and the default false setting preserves the proven v0.1.11 behavior. CI covers the command path plus the existing dawn, vanilla packet-74/75, join, disconnect, and Host & Play regressions."
+            --notes "GLoader now keeps its install layout clean: gloader.exe stays beside Terraria.exe, mod folders live only under gmods, and loader runtime/support files plus logs live under the new gdeps folder. Existing installations are migrated automatically on first launch: legacy loose files in gmods move into gdeps and the old gmods/logs folder moves to gdeps/logs. CI verifies the separated package layout, upgrade migration, Host & Play behavior, and the included mod compile/runtime fixtures."
 
       - name: Upload
         uses: actions/upload-artifact@v4
