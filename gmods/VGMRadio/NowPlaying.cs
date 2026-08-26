@@ -8,6 +8,8 @@ using HarmonyLib;
 
 internal static partial class VGMRadio
 {
+    private static bool _overlayPending;
+
     private static void TryInstallOverlayPatch(Harmony harmony)
     {
         try
@@ -21,7 +23,7 @@ internal static partial class VGMRadio
 
             harmony.Patch(
                 drawMouseText,
-                prefix: new HarmonyMethod(AccessTools.Method(typeof(VGMRadio), nameof(DrawOverlayPrefix))));
+                postfix: new HarmonyMethod(AccessTools.Method(typeof(VGMRadio), nameof(DrawOverlayPostfix))));
         }
         catch
         {
@@ -30,7 +32,7 @@ internal static partial class VGMRadio
         }
     }
 
-    private static void DrawOverlayPrefix()
+    private static void DrawOverlayPostfix()
     {
         if (!_overlayAvailable || !_showNowPlaying)
             return;
@@ -84,19 +86,32 @@ internal static partial class VGMRadio
                 return;
 
             _nowPlaying = display;
-            _overlayStartSeconds = Clock.Elapsed.TotalSeconds;
-            _overlayEndSeconds = _overlayStartSeconds + OverlaySeconds;
+
+            // Metadata can arrive while Terraria is still starting, before there is
+            // any interface frame to draw into. Arm the popup here, but start its
+            // six-second clock on the first actual UI draw so it cannot expire unseen.
+            _overlayPending = true;
+            _overlayStartSeconds = 0.0;
+            _overlayEndSeconds = 0.0;
         }
     }
 
     private static void DrawNowPlaying()
     {
+        var now = Clock.Elapsed.TotalSeconds;
         string text;
         double start;
         double end;
         lock (OverlayLock)
         {
             text = _nowPlaying;
+            if (_overlayPending && !string.IsNullOrWhiteSpace(text))
+            {
+                _overlayPending = false;
+                _overlayStartSeconds = now;
+                _overlayEndSeconds = now + OverlaySeconds;
+            }
+
             start = _overlayStartSeconds;
             end = _overlayEndSeconds;
         }
@@ -104,7 +119,6 @@ internal static partial class VGMRadio
         if (string.IsNullOrWhiteSpace(text))
             return;
 
-        var now = Clock.Elapsed.TotalSeconds;
         if (now < start || now >= end)
             return;
 
@@ -167,8 +181,15 @@ internal static partial class VGMRadio
 
         var draw = chatManagerType.GetMethods(BindingFlags.Static | BindingFlags.Public)
             .FirstOrDefault(method =>
-                method.Name == "DrawColorCodedStringWithShadow" &&
-                method.GetParameters().Length == 10);
+            {
+                if (method.Name != "DrawColorCodedStringWithShadow")
+                    return false;
+
+                var parameters = method.GetParameters();
+                return parameters.Length == 10 &&
+                       parameters[2].ParameterType == typeof(string) &&
+                       parameters[5].ParameterType == typeof(float);
+            });
         if (draw == null)
             return;
 
