@@ -141,18 +141,20 @@ gdeps/logs/gloader-server.log
 
 `gmods/InfiniteAngler/Main.cs` is a server-authoritative shared endless Angler quest mod for multiplayer. Joining clients can remain completely vanilla. Vanilla's dawn quest rollover is suppressed, so the current quest stays active until every required, fully connected player has completed it. Each finisher is kept locked out of repeating that same quest. When the whole required group is finished, the server performs one normal Angler quest swap and broadcasts the next quest immediately. Players who join count immediately; players who disconnect stop counting.
 
-By default, every connected player is required, matching the original shared-round behavior:
+Participation commands are enabled by default:
 
 ```ini
 # gmods/InfiniteAngler/InfiniteAngler.ini
-EnableParticipationCommands=false
+EnableParticipationCommands=true
 ```
 
-Set `EnableParticipationCommands=true` to let completely vanilla clients control whether they are required for the shared-round quorum with normal chat commands:
+Completely vanilla clients can control whether they are required for the shared-round quorum with normal chat commands:
 
 - `!fish out` — stay connected and keep full Angler functionality, but stop blocking the next shared quest.
 - `!fish in` — count toward the current shared quest again.
 - `!fish` or `!fish status` — privately show your IN/OUT state plus who is waiting, finished, or opted out.
+
+Set `EnableParticipationCommands=false` if you want the original strict behavior where every connected player is always required and `!fish` messages are left as ordinary chat.
 
 Participation and completion are separate states. An OUT player may still catch and turn in the current quest fish, receives normal rewards, and is marked finished so they cannot repeat that quest. Their completion simply is not required for the round to advance. If they use `!fish in` later during the same round, a completion earned while OUT is preserved.
 
