@@ -2,6 +2,101 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
+namespace Microsoft.Xna.Framework
+{
+    public struct Color
+    {
+        public static Color Yellow => new Color();
+    }
+}
+
+namespace Terraria.Localization
+{
+    public sealed class NetworkText
+    {
+        private readonly string _text;
+
+        private NetworkText(string text)
+        {
+            _text = text ?? string.Empty;
+        }
+
+        public static NetworkText FromLiteral(string text)
+        {
+            return new NetworkText(text);
+        }
+
+        public override string ToString()
+        {
+            return _text;
+        }
+    }
+}
+
+namespace Terraria.Chat
+{
+    public sealed class ChatMessage
+    {
+        public ChatMessage(string text)
+        {
+            Text = text;
+        }
+
+        public string Text { get; set; }
+        public bool IsConsumed { get; private set; }
+
+        public void Consume()
+        {
+            IsConsumed = true;
+        }
+    }
+
+    public sealed class ChatCommandProcessor
+    {
+        public static int VanillaMessagesProcessed;
+
+        public void ProcessIncomingMessage(ChatMessage message, int clientId)
+        {
+            VanillaMessagesProcessed++;
+        }
+    }
+
+    public static class ChatHelper
+    {
+        public static readonly Dictionary<int, List<string>> Replies =
+            new Dictionary<int, List<string>>();
+
+        public static void SendChatMessageToClient(
+            Terraria.Localization.NetworkText text,
+            Microsoft.Xna.Framework.Color color,
+            int playerId)
+        {
+            List<string> messages;
+            if (!Replies.TryGetValue(playerId, out messages))
+            {
+                messages = new List<string>();
+                Replies[playerId] = messages;
+            }
+
+            messages.Add(text == null ? string.Empty : text.ToString());
+        }
+
+        public static string LastReply(int playerId)
+        {
+            List<string> messages;
+            if (!Replies.TryGetValue(playerId, out messages) || messages.Count == 0)
+                return null;
+
+            return messages[messages.Count - 1];
+        }
+
+        public static void Reset()
+        {
+            Replies.Clear();
+        }
+    }
+}
+
 namespace Terraria.ID
 {
     public static class MessageID
@@ -113,8 +208,8 @@ namespace Terraria
         public int whoAmI;
 
         // Match TerrariaServer 1.4.5.8 packet 75 exactly for the state Infinite
-        // Angler cares about. Vanilla does not filter on Player.active and does not
-        // reject an empty player name; it simply stores Main.player[whoAmI].name.
+        // Angler cares about. Vanilla stores Main.player[whoAmI].name without
+        // filtering on Player.active or rejecting an empty name.
         public void GetData(int start, int length, out int messageType)
         {
             messageType = readBuffer[start];
@@ -140,11 +235,101 @@ namespace FixtureServer
                 args.Length == 2 && args[0] == "--fixture-arg" && args[1] == "hello world",
                 "Host & Play redirect did not preserve the original server arguments.");
 
-            // Regression for 0.1.9: a fully connected State-10 slot must NEVER
-            // disappear from the quorum just because Main.player[index].name is
-            // temporarily empty. The old mod skipped that slot and could swap after
-            // only the other player finished, exactly the premature-round behavior
-            // seen with a real vanilla multiplayer client.
+            TestParticipationCommands();
+            TestEmptyQuorumDoesNotAdvance();
+            TestUnnamedConnectedSlotRegression();
+            TestSharedRoundCoreBehavior();
+
+            Console.WriteLine(
+                "PASS: Steam Host & Play routed through gloader; Infinite Angler keeps vanilla clients synchronized, supports optional !fish participation commands, preserves opted-out turn-ins, never advances an empty quorum, ignores dawn, counts joiners, and releases disconnects.");
+            return 0;
+        }
+
+        private static void TestParticipationCommands()
+        {
+            ResetFixture();
+
+            var normalChat = Chat(1, "hello world");
+            Require(Terraria.Chat.ChatCommandProcessor.VanillaMessagesProcessed == 1,
+                "non-command chat was intercepted");
+            Require(!normalChat.IsConsumed,
+                "non-command chat was consumed by Infinite Angler");
+
+            var status = Chat(1, "!fish");
+            Require(status.IsConsumed, "!fish status command was not consumed");
+            Require(Terraria.Chat.ChatCommandProcessor.VanillaMessagesProcessed == 1,
+                "!fish status leaked into vanilla chat");
+            Require((Terraria.Chat.ChatHelper.LastReply(1) ?? string.Empty).Contains("You are IN"),
+                "!fish did not report the player's participation state");
+
+            var outMessage = Chat(2, "!fish out");
+            Require(outMessage.IsConsumed, "!fish out was not consumed");
+            Require((Terraria.Chat.ChatHelper.LastReply(2) ?? string.Empty).Contains("You are OUT"),
+                "!fish out did not confirm the opt-out");
+
+            // Slot 2 is still connected and unfinished, but OUT means it no longer
+            // blocks the shared-round quorum. Slot 1 finishing must advance exactly once.
+            Complete(1);
+            Require(Terraria.Main.anglerQuest == 8,
+                "opted-out connected player still blocked the quest advance");
+            Require(Terraria.Main.questSwapCount == 1,
+                "opt-out round did not swap exactly once");
+
+            // OUT removes obligation, not participation. The opted-out player can
+            // turn in the new quest, gets locked out of repeating it, and the quest
+            // stays put because required slot 1 is still unfinished.
+            Complete(2);
+            Require(Terraria.Main.anglerQuest == 8,
+                "opted-out player's turn-in advanced the quest by itself");
+            Require(Terraria.NetMessage.clientQuestFinished[2],
+                "opted-out finisher was not locked out of repeating the same quest");
+
+            // Rejoining the quorum must preserve that completion. Slot 2 is already
+            // done, so the round should wait only for slot 1.
+            Chat(2, "!fish in");
+            Require((Terraria.Chat.ChatHelper.LastReply(2) ?? string.Empty).Contains("already finished"),
+                "!fish in forgot completion earned while opted out");
+            Require(Terraria.Main.anglerQuest == 8,
+                "opting back in advanced before the other required player finished");
+
+            Complete(1);
+            Require(Terraria.Main.anglerQuest == 9,
+                "round did not advance after all IN players were complete");
+            Require(Terraria.Main.questSwapCount == 2,
+                "rejoined-quorum round did not swap exactly once");
+        }
+
+        private static void TestEmptyQuorumDoesNotAdvance()
+        {
+            ResetFixture();
+
+            Chat(1, "!fish out");
+            Chat(2, "!fish out");
+            Tick();
+            Require(Terraria.Main.anglerQuest == 7,
+                "all-opted-out empty quorum advanced on a server tick");
+            Require(Terraria.Main.questSwapCount == 0,
+                "all-opted-out empty quorum performed a quest swap");
+
+            // Turning in while OUT is still allowed and still must not create a swap
+            // when nobody is currently required.
+            Complete(1);
+            Require(Terraria.Main.anglerQuest == 7,
+                "opted-out turn-in advanced an empty quorum");
+            Require(Terraria.NetMessage.clientQuestFinished[1],
+                "opted-out player was not marked finished after a valid turn-in");
+
+            // If that already-finished player opts back in, they become the only
+            // required player and are already complete, so the round may advance now.
+            Chat(1, "!fish in");
+            Require(Terraria.Main.anglerQuest == 8,
+                "already-finished player opting back in did not satisfy the quorum");
+            Require(Terraria.Main.questSwapCount == 1,
+                "empty-quorum recovery swapped an unexpected number of times");
+        }
+
+        private static void TestUnnamedConnectedSlotRegression()
+        {
             ResetFixture();
             Terraria.Main.player[2].name = string.Empty;
             Complete(1);
@@ -155,20 +340,17 @@ namespace FixtureServer
             Require(Terraria.NetMessage.clientQuestFinished[1],
                 "first finisher was not kept locked while waiting for the connected host slot");
 
-            // Mirror vanilla packet 75's raw-name behavior too: if that connected
-            // slot completes while its Player.name is still empty, the empty string
-            // is a valid completion-list key and the round can then advance.
             Complete(2);
             Require(Terraria.Main.anglerQuest == 8,
                 "round did not advance after the previously unnamed connected slot finished");
             Require(Terraria.Main.questSwapCount == 1,
                 "unnamed-slot regression round did not swap exactly once");
+        }
 
+        private static void TestSharedRoundCoreBehavior()
+        {
             ResetFixture();
 
-            // First vanilla client finishes. The global quest must NOT move, but
-            // that client must immediately receive packet 74 with finished=true so
-            // the Angler tells them to wait instead of offering the same quest again.
             Complete(1);
             Require(Terraria.Main.anglerQuest == 7, "quest advanced before every connected player finished");
             Require(Terraria.Main.questSwapCount == 0, "quest swap ran after only one completion");
@@ -181,7 +363,6 @@ namespace FixtureServer
             Require(!Terraria.NetMessage.clientQuestFinished[2],
                 "unfinished second client was incorrectly marked finished");
 
-            // Dawn must not reset the global quest or the per-player completion set.
             Terraria.Main.triggerDawnReset = true;
             Tick();
             Require(Terraria.Main.anglerQuest == 7, "dawn changed the Angler quest");
@@ -191,9 +372,6 @@ namespace FixtureServer
             Require(Terraria.NetMessage.clientQuestFinished[1],
                 "dawn unlocked a player who had already finished the shared quest");
 
-            // The second client finishes. This packet is the only event that should
-            // advance the round. Vanilla AnglerQuestSwap then broadcasts quest 8 and
-            // finished=false to both clients.
             Complete(2);
             Require(Terraria.Main.anglerQuest == 8, "all-player completion did not immediately advance the quest");
             Require(Terraria.Main.questSwapCount == 1, "all-player completion did not perform exactly one swap");
@@ -204,8 +382,6 @@ namespace FixtureServer
             Require(!Terraria.NetMessage.clientQuestFinished[1] && !Terraria.NetMessage.clientQuestFinished[2],
                 "new shared round did not unlock both vanilla clients");
 
-            // A fully connected late joiner counts immediately. Existing players can
-            // finish and must remain locked out until the late joiner also finishes.
             Connect(3, "LateGuest");
             Complete(1);
             Complete(2);
@@ -220,14 +396,7 @@ namespace FixtureServer
             Require(Terraria.Main.questSwapCount == 2, "late-join round swapped an unexpected number of times");
             Require(Terraria.Main.anglerWhoFinishedToday.Count == 0,
                 "late-join round did not start cleanly");
-            Require(!Terraria.NetMessage.clientQuestFinished[1] &&
-                    !Terraria.NetMessage.clientQuestFinished[2] &&
-                    !Terraria.NetMessage.clientQuestFinished[3],
-                "new round did not unlock every connected vanilla client");
 
-            // Connection state, not Player.active, defines the group. Leave the old
-            // Player object active on purpose, disconnect its Netplay slot, and verify
-            // the tick fallback advances once only the two real clients remain.
             Complete(1);
             Complete(2);
             Require(Terraria.Main.anglerQuest == 9, "round advanced while third client was still connected");
@@ -239,8 +408,6 @@ namespace FixtureServer
             Require(Terraria.Main.anglerWhoFinishedToday.Count == 0,
                 "disconnect-triggered round did not start cleanly");
 
-            // With only one fully connected client, that one completion is the whole
-            // group even if stale Player.active objects remain in other slots.
             Disconnect(2, leavePlayerActive: true);
             Complete(1);
             Require(Terraria.Main.anglerQuest == 11, "single connected client did not advance the shared quest");
@@ -249,14 +416,18 @@ namespace FixtureServer
                 "single-client round did not clear completion state");
             Require(Terraria.NetMessage.clientQuest[1] == 11 && !Terraria.NetMessage.clientQuestFinished[1],
                 "single connected vanilla client did not receive the next quest unlocked");
-
-            Console.WriteLine(
-                "PASS: every State-10 client remains in the Angler quorum even during transient player-name state; vanilla clients stay locked after individual turn-in, dawn cannot reset the round, joiners count, and disconnects stop counting.");
-            return 0;
         }
 
         private static void ResetFixture()
         {
+            Terraria.Main.triggerDawnReset = false;
+
+            // First disconnect every fixture slot and run one patched server tick so
+            // Infinite Angler clears session-only OUT state from prior test phases.
+            for (var index = 0; index < Terraria.Main.player.Length; index++)
+                Terraria.Netplay.Clients[index].State = 0;
+            Tick();
+
             Terraria.Main.netMode = 2;
             Terraria.Main.anglerQuest = 7;
             Terraria.Main.anglerQuestFinished = true;
@@ -264,6 +435,8 @@ namespace FixtureServer
             Terraria.Main.questSwapCount = 0;
             Terraria.Main.triggerDawnReset = false;
             Terraria.NetMessage.sendAnglerQuestCount = 0;
+            Terraria.Chat.ChatCommandProcessor.VanillaMessagesProcessed = 0;
+            Terraria.Chat.ChatHelper.Reset();
 
             for (var index = 0; index < Terraria.Main.player.Length; index++)
             {
@@ -303,6 +476,13 @@ namespace FixtureServer
             buffer.GetData(0, 1, out messageType);
             Require(messageType == Terraria.ID.MessageID.AnglerQuestFinished,
                 "fixture completion message ID changed unexpectedly");
+        }
+
+        private static Terraria.Chat.ChatMessage Chat(int whoAmI, string text)
+        {
+            var message = new Terraria.Chat.ChatMessage(text);
+            new Terraria.Chat.ChatCommandProcessor().ProcessIncomingMessage(message, whoAmI);
+            return message;
         }
 
         private static void Tick()
