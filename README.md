@@ -131,7 +131,7 @@ gmods/logs/gloader-server.log
 
 ### Infinite Angler
 
-`gmods/InfiniteAngler/Main.cs` is a server-authoritative shared endless Angler quest mod. Vanilla's dawn quest rollover is suppressed, so the current quest stays active until every currently connected player has completed it. The server then performs one normal global Angler quest swap for everyone and starts a fresh round. Players who join become part of the current round; players who disconnect stop counting. Joining clients can remain vanilla.
+`gmods/InfiniteAngler/Main.cs` is a shared endless Angler quest mod for both single-player and server-authoritative multiplayer. Vanilla's dawn quest rollover is suppressed, so the current quest stays active until every currently active player has completed it. The game then performs one normal Angler quest swap and starts a fresh round immediately. In single-player, the one active local player is the whole group. In multiplayer, the server owns the round: players who join become part of the current round, players who disconnect stop counting, and joining clients can remain vanilla.
 
 ### No Liquid Dupe
 
