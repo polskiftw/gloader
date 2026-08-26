@@ -69,7 +69,7 @@ jobs:
             throw "dist/gloader/gmods was not produced."
           }
 
-      - name: Infinite Angler + Host & Play integration test
+      - name: Vanilla-client Host & Play + server Infinite Angler integration test
         shell: pwsh
         run: |
           $loader = (Resolve-Path "dist/gloader/gloader.exe").Path
@@ -82,7 +82,7 @@ jobs:
 
           & $loader --target $target --mods $mods
           if ($LASTEXITCODE -ne 0) {
-            throw "Infinite Angler / Host & Play integration fixture failed with exit code $LASTEXITCODE"
+            throw "Vanilla-client Host & Play / server Infinite Angler fixture failed with exit code $LASTEXITCODE"
           }
 
       - name: Remove integration-test logs
@@ -112,7 +112,7 @@ jobs:
             --repo "${{ github.repository }}" `
             --target "${{ github.sha }}" `
             --title "gloader v$env:RELEASE_VERSION" `
-            --notes "Fixes Infinite Angler doing nothing in single-player. The same endless-quest logic now runs in single-player and on TerrariaServer, while multiplayer clients remain server-authoritative. CI now exercises both the single-player Angler path and Host & Play server path."
+            --notes "Restores Infinite Angler to the intended server-only architecture for multiplayer with completely vanilla clients. Host & Play redirection now intercepts Terraria's final Process.Start call inside the Terraria server-launch method, so the fully populated TerrariaServer.exe launch is reliably routed through gloader without globally patching Process.Start. CI exercises a vanilla client launching a gloader-modded server and validates Infinite Angler on that server."
 
       - name: Upload
         uses: actions/upload-artifact@v4
