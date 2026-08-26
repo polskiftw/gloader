@@ -24,6 +24,10 @@ namespace GLoader
             AddManagedFiles(paths, supportDirectory, overwrite: false);
             AddManagedFiles(paths, gameDirectory, overwrite: false);
 
+            // Terraria.exe and TerrariaServer.exe both define Terraria.Main. Never feed
+            // the opposite executable to Roslyn or source mods get CS0433 ambiguity.
+            RemoveOppositeTerrariaAssembly(paths, gameAssembly);
+
             // The exact Terraria assembly selected by the user always wins over a
             // same-named assembly that might already have been visible elsewhere.
             AddAssemblyLocation(paths, gameAssembly, overwrite: true);
@@ -46,6 +50,21 @@ namespace GLoader
             }
 
             return references;
+        }
+
+        private static void RemoveOppositeTerrariaAssembly(
+            IDictionary<string, string> paths,
+            Assembly gameAssembly)
+        {
+            var targetName = gameAssembly.GetName().Name;
+            if (string.Equals(targetName, "Terraria", StringComparison.OrdinalIgnoreCase))
+            {
+                paths.Remove("TerrariaServer");
+            }
+            else if (string.Equals(targetName, "TerrariaServer", StringComparison.OrdinalIgnoreCase))
+            {
+                paths.Remove("Terraria");
+            }
         }
 
         private static void AddManagedFiles(
