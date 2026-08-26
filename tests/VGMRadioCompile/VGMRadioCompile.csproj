@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
+    <OutputType>Exe</OutputType>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
     <DefineConstants>GLOADER;GLOADER_CLIENT</DefineConstants>
@@ -9,6 +10,7 @@
 
   <ItemGroup>
     <Compile Include="../../gmods/VGMRadio/*.cs" Link="%(Filename)%(Extension)" />
+    <Compile Include="Program.cs" />
   </ItemGroup>
 
   <ItemGroup>
