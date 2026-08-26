@@ -36,7 +36,7 @@ namespace GLoader
                 Log.Initialize(
                     Path.Combine(supportDirectory, "logs"),
                     isServerTarget ? "server" : "client");
-                Log.Info("gloader 0.1.2-alpha");
+                Log.Info("gloader " + GetLoaderVersion());
                 Log.Info("Target: " + targetPath);
                 Log.Info("Target version: " + GetFileVersion(targetPath));
                 Log.Info("Mode: " + (isServerTarget ? "server" : "client"));
@@ -104,6 +104,19 @@ namespace GLoader
             {
                 Log.Dispose();
                 startupResolver.Dispose();
+            }
+        }
+
+        private static string GetLoaderVersion()
+        {
+            try
+            {
+                var path = Assembly.GetExecutingAssembly().Location;
+                return FileVersionInfo.GetVersionInfo(path).ProductVersion ?? "unknown";
+            }
+            catch
+            {
+                return "unknown";
             }
         }
 
