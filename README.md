@@ -13,8 +13,9 @@ Terraria/
   Terraria.exe
   TerrariaServer.exe
   gloader.exe
-  gloader.exe.config
   gmods/
+    [gloader runtime/support files]
+    logs/
     InfiniteAngler/
     NoLiquidDupe/
     VGMRadio/
@@ -23,10 +24,14 @@ Terraria/
 
 ## gmods folder contract
 
-`gmods/` contains **folders only**. Every immediate subfolder is one mod.
+`gmods/` is GLoader's **entire support directory**. The Terraria root gets only `gloader.exe`; dependency DLLs, generated support files, and logs all live under `gmods/`.
+
+Mod folders live there too. An immediate subfolder containing enabled `.cs` files is treated as one mod; loose support files in the `gmods/` root are normal and are not treated as mods.
 
 ```text
 gmods/
+  [gloader dependency/support files]
+  logs/
   InfiniteAngler/
     Main.cs
   NoLiquidDupe/
@@ -43,9 +48,7 @@ gmods/
     dvd-logo.png
 ```
 
-There are no loose mod source, config, asset, or documentation files in the `gmods/` root. gloader only discovers mods from immediate subfolders; loose files are ignored and logged as a warning. The build script also refuses to package a `gmods/` directory containing loose files.
-
-Everything belonging to a mod stays inside that mod's folder: `.cs` source, `.ini`/other configuration, images, data files, and any mod-specific documentation. All `.cs` files beneath one mod folder are compiled together as one in-memory assembly.
+Everything belonging specifically to a mod stays inside that mod's folder: `.cs` source, `.ini`/other configuration, images, data files, and any mod-specific documentation. All `.cs` files beneath one mod folder are compiled together as one in-memory assembly.
 
 Disable one mod by renaming its folder:
 
@@ -120,8 +123,8 @@ Arguments after `--` are passed to Terraria's entry point.
 Client and server logs are separate:
 
 ```text
-logs/gloader-client.log
-logs/gloader-server.log
+gmods/logs/gloader-client.log
+gmods/logs/gloader-server.log
 ```
 
 ## Included mods
@@ -192,6 +195,6 @@ Output staging folder:
 dist/gloader/
 ```
 
-Copy the **contents** of `dist/gloader/` directly into the Terraria installation folder. Do not put them inside a nested `gloader` directory.
+Copy the **contents** of `dist/gloader/` directly into the Terraria installation folder. The package adds only `gloader.exe` to the game root; all other GLoader files are already contained inside `gmods/`.
 
 Raw source mods execute with the same privileges as Terraria. Only use code you trust.

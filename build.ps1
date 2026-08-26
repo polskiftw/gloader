@@ -2,24 +2,27 @@ $ErrorActionPreference = "Stop"
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Project = Join-Path $Root "src\GLoader\GLoader.csproj"
-$Dist = Join-Path $Root "dist\gloader"
+$DistRoot = Join-Path $Root "dist"
+$Dist = Join-Path $DistRoot "gloader"
+$Publish = Join-Path $DistRoot "publish"
+$Runtime = Join-Path $Dist "gmods"
 $Mods = Join-Path $Root "gmods"
 
-$LooseFiles = @(Get-ChildItem $Mods -File)
-if ($LooseFiles.Count -gt 0) {
-    $Names = ($LooseFiles | ForEach-Object { $_.Name }) -join ", "
-    throw "gmods root must contain only mod subfolders. Move these loose files into their mod folder: $Names"
+if (Test-Path $DistRoot) {
+    Remove-Item $DistRoot -Recurse -Force
 }
 
-if (Test-Path $Dist) {
-    Remove-Item $Dist -Recurse -Force
-}
+New-Item $Dist -ItemType Directory -Force | Out-Null
+New-Item $Runtime -ItemType Directory -Force | Out-Null
 
-dotnet publish $Project -c Release -o $Dist
+dotnet publish $Project -c Release -o $Publish
 
-Copy-Item $Mods (Join-Path $Dist "gmods") -Recurse -Force
+Move-Item (Join-Path $Publish "gloader.exe") (Join-Path $Dist "gloader.exe") -Force
+Get-ChildItem $Publish -Force | Move-Item -Destination $Runtime -Force
+Copy-Item (Join-Path $Mods "*") $Runtime -Recurse -Force
+Remove-Item $Publish -Recurse -Force
 
 Write-Host ""
 Write-Host "Built: $Dist"
 Write-Host "Copy the contents of that folder directly into the Terraria installation folder."
-Write-Host "gloader.exe should sit beside Terraria.exe, with gmods beside them."
+Write-Host "Only gloader.exe is added to the game root; every other gloader file lives under gmods."

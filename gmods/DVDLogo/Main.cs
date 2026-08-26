@@ -91,7 +91,7 @@ internal static class DvdLogoScreensaver
 
         var modDirectory = Path.Combine(
             AppDomain.CurrentDomain.BaseDirectory,
-            "Mods",
+            "gmods",
             "DVDLogo");
 
         using (var stream = File.OpenRead(Path.Combine(modDirectory, "dvd-logo.png")))
