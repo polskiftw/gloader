@@ -19,24 +19,17 @@ namespace GLoader
         public static void Install(Assembly gameAssembly, string loaderPath, string modsDirectory)
         {
             if (_installed)
-            {
                 return;
-            }
 
             if (gameAssembly == null)
-            {
                 throw new ArgumentNullException(nameof(gameAssembly));
-            }
 
             _loaderPath = Path.GetFullPath(loaderPath);
             _modsDirectory = Path.GetFullPath(modsDirectory);
 
             var launcher = FindServerLauncher(gameAssembly);
             if (launcher == null)
-            {
-                throw new MissingMethodException(
-                    "Could not locate Terraria's Host & Play server launcher.");
-            }
+                throw new MissingMethodException("Could not locate Terraria's Host & Play server launcher.");
 
             var transpiler = typeof(HostPlayServerRedirect).GetMethod(
                 nameof(ServerLaunchTranspiler),
@@ -54,9 +47,7 @@ namespace GLoader
         {
             var mainType = gameAssembly.GetType("Terraria.Main", throwOnError: false);
             if (mainType == null)
-            {
                 return null;
-            }
 
             var candidates = mainType
                 .GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance)
@@ -64,9 +55,7 @@ namespace GLoader
                 .ToArray();
 
             if (candidates.Length == 1)
-            {
                 return candidates[0];
-            }
 
             return candidates.FirstOrDefault(method => MethodContainsString(method, " -hosttoken "))
                 ?? candidates.FirstOrDefault();
@@ -86,27 +75,18 @@ namespace GLoader
 
             var il = body?.GetILAsByteArray();
             if (il == null || il.Length < 5)
-            {
                 return false;
-            }
 
             for (var index = 0; index <= il.Length - 5; index++)
             {
                 if (il[index] != 0x72)
-                {
                     continue;
-                }
 
                 try
                 {
                     var token = BitConverter.ToInt32(il, index + 1);
-                    if (string.Equals(
-                        method.Module.ResolveString(token),
-                        expected,
-                        StringComparison.Ordinal))
-                    {
+                    if (string.Equals(method.Module.ResolveString(token), expected, StringComparison.Ordinal))
                         return true;
-                    }
                 }
                 catch
                 {
@@ -122,6 +102,13 @@ namespace GLoader
         private static IEnumerable<CodeInstruction> ServerLaunchTranspiler(
             IEnumerable<CodeInstruction> instructions)
         {
+            var argumentsSetter = typeof(ProcessStartInfo)
+                .GetProperty(nameof(ProcessStartInfo.Arguments))
+                ?.GetSetMethod();
+            var argumentsRedirect = typeof(HostPlayServerRedirect).GetMethod(
+                nameof(SetArgumentsAndRedirect),
+                BindingFlags.NonPublic | BindingFlags.Static);
+
             var instanceStart = typeof(Process).GetMethod(
                 nameof(Process.Start),
                 BindingFlags.Public | BindingFlags.Instance,
@@ -147,44 +134,65 @@ namespace GLoader
                 types: new[] { typeof(ProcessStartInfo) },
                 modifiers: null);
 
-            if (instanceStart == null || staticStart == null ||
+            if (argumentsSetter == null || argumentsRedirect == null ||
+                instanceStart == null || staticStart == null ||
                 instanceRedirect == null || staticRedirect == null)
             {
                 throw new MissingMethodException("Could not build Host & Play redirect patch.");
             }
 
-            var replacements = 0;
+            var preparationReplacements = 0;
+            var startReplacements = 0;
+
             foreach (var instruction in instructions)
             {
-                if (instruction.Calls(instanceStart))
+                if (instruction.Calls(argumentsSetter))
                 {
+                    // Steam Host & Play hands the Process object to
+                    // SocialAPI.Network.LaunchLocalServer(), so Process.Start() is not
+                    // called inside Terraria.Main. Redirect while Terraria is finishing
+                    // the ProcessStartInfo instead, after the server arguments exist.
+                    instruction.opcode = OpCodes.Call;
+                    instruction.operand = argumentsRedirect;
+                    preparationReplacements++;
+                }
+                else if (instruction.Calls(instanceStart))
+                {
+                    // Keep the direct-launch fallback for non-Steam/social-null paths.
                     instruction.opcode = OpCodes.Call;
                     instruction.operand = instanceRedirect;
-                    replacements++;
+                    startReplacements++;
                 }
                 else if (instruction.Calls(staticStart))
                 {
                     instruction.opcode = OpCodes.Call;
                     instruction.operand = staticRedirect;
-                    replacements++;
+                    startReplacements++;
                 }
 
                 yield return instruction;
             }
 
-            if (replacements == 0)
+            if (preparationReplacements == 0 && startReplacements == 0)
             {
                 throw new InvalidOperationException(
-                    "Terraria's Host & Play launcher no longer calls Process.Start as expected.");
+                    "Terraria's Host & Play launcher no longer prepares or starts a Process as expected.");
             }
+        }
+
+        private static void SetArgumentsAndRedirect(ProcessStartInfo startInfo, string arguments)
+        {
+            if (startInfo == null)
+                throw new ArgumentNullException(nameof(startInfo));
+
+            startInfo.Arguments = arguments ?? string.Empty;
+            RedirectIfTerrariaServer(startInfo);
         }
 
         private static bool StartAndRedirect(Process process)
         {
             if (process == null)
-            {
                 throw new ArgumentNullException(nameof(process));
-            }
 
             RedirectIfTerrariaServer(process.StartInfo);
             return process.Start();
@@ -199,16 +207,11 @@ namespace GLoader
         private static void RedirectIfTerrariaServer(ProcessStartInfo startInfo)
         {
             if (startInfo == null)
-            {
                 throw new ArgumentNullException(nameof(startInfo));
-            }
 
             var requestedFile = TrimQuotes(startInfo.FileName);
             if (string.IsNullOrWhiteSpace(requestedFile) ||
-                !string.Equals(
-                    Path.GetFileName(requestedFile),
-                    "TerrariaServer.exe",
-                    StringComparison.OrdinalIgnoreCase))
+                !string.Equals(Path.GetFileName(requestedFile), "TerrariaServer.exe", StringComparison.OrdinalIgnoreCase))
             {
                 return;
             }
@@ -246,9 +249,7 @@ namespace GLoader
         private static string Quote(string value)
         {
             if (value == null)
-            {
                 return "\"\"";
-            }
 
             var builder = new System.Text.StringBuilder();
             builder.Append('"');
