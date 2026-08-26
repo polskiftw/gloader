@@ -120,7 +120,7 @@ jobs:
             --repo "${{ github.repository }}" `
             --target "${{ github.sha }}" `
             --title "gloader v$env:RELEASE_VERSION" `
-            --notes "Fixes Infinite Angler under Steam Host & Play. Vanilla Terraria hands its prepared TerrariaServer.exe Process to SocialAPI.Network.LaunchLocalServer, so Process.Start occurs outside Terraria.Main. gloader now redirects the fully prepared server ProcessStartInfo before that SocialAPI handoff while keeping the direct-launch fallback. CI now reproduces the SocialAPI launch path and verifies the child server is actually routed through gloader with Infinite Angler active. Includes the Rainwave now-playing fix from 0.1.6-alpha."
+            --notes "Infinite Angler is now matched to the actual Terraria 1.4.5.8 client/server IL. The real dawn rollover lives in Main.UpdateTime_StartDay(ref bool), not Main.UpdateTime(), and AnglerQuestSwap() itself clears anglerWhoFinishedToday. gloader now suppresses the exact dawn swap while still using vanilla AnglerQuestSwap after every active player finishes. The Steam SocialAPI Host & Play handoff and Rainwave now-playing fixes remain included."
 
       - name: Upload
         uses: actions/upload-artifact@v4
