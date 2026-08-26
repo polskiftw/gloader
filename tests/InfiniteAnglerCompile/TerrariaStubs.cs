@@ -6,6 +6,13 @@ namespace Terraria
 
     public class MessageBuffer
     {
+        public byte[] readBuffer = new byte[256];
+        public int whoAmI;
+
+        public void GetData(int start, int length, out int messageType)
+        {
+            messageType = 0;
+        }
     }
 }
 
