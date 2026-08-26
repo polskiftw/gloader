@@ -69,16 +69,20 @@ jobs:
             throw "dist/gloader/gmods was not produced."
           }
 
-      - name: Host & Play integration test
+      - name: Infinite Angler + Host & Play integration test
         shell: pwsh
         run: |
           $loader = (Resolve-Path "dist/gloader/gloader.exe").Path
           $target = (Resolve-Path "tests/HostPlayFixture/bin/Release/net48/Terraria.exe").Path
-          $mods = (Resolve-Path "gmods").Path
+          $mods = Join-Path $env:RUNNER_TEMP "gloader-hostplay-mods"
+
+          Remove-Item $mods -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $mods | Out-Null
+          Copy-Item "gmods/InfiniteAngler" (Join-Path $mods "InfiniteAngler") -Recurse
 
           & $loader --target $target --mods $mods
           if ($LASTEXITCODE -ne 0) {
-            throw "Host & Play integration fixture failed with exit code $LASTEXITCODE"
+            throw "Infinite Angler / Host & Play integration fixture failed with exit code $LASTEXITCODE"
           }
 
       - name: Remove integration-test logs
@@ -108,7 +112,7 @@ jobs:
             --repo "${{ github.repository }}" `
             --target "${{ github.sha }}" `
             --title "gloader v$env:RELEASE_VERSION" `
-            --notes "Fixes vanilla Terraria 1.4.5 startup by initializing the real Program.SavePath field before mods touch Terraria.Main. Also excludes the opposite Terraria executable from Roslyn references so client mods no longer see duplicate Terraria.Main types. Keeps the embedded ReLogic and Terraria-specific Host & Play fixes."
+            --notes "Fixes Infinite Angler doing nothing in single-player. The same endless-quest logic now runs in single-player and on TerrariaServer, while multiplayer clients remain server-authoritative. CI now exercises both the single-player Angler path and Host & Play server path."
 
       - name: Upload
         uses: actions/upload-artifact@v4
