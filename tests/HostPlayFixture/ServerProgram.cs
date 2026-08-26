@@ -23,30 +23,27 @@ namespace Terraria
         public static bool triggerDawnReset;
         public static int questSwapCount;
 
-        // Terraria 1.4.5.8 splits dawn into UpdateTime_StartDay(). UpdateTime()
-        // reaches it when dawn occurs; Infinite Angler's per-tick round check is a
-        // postfix on this outer method.
+        // Terraria 1.4.5.8 calls UpdateTime_StartDay(ref bool) from UpdateTime().
         public static void UpdateTime()
         {
             if (!triggerDawnReset)
                 return;
 
             triggerDawnReset = false;
-            UpdateTime_StartDay();
+            var stopEvents = false;
+            UpdateTime_StartDay(ref stopEvents);
         }
 
-        // Exact structural behavior relevant to the real 1.4.5.8 server: the
-        // dawn helper calls AnglerQuestSwap(), rather than clearing the completion
-        // list itself.
-        public static void UpdateTime_StartDay()
+        // Exact structural behavior relevant to the uploaded 1.4.5.8 server:
+        // the dawn helper takes a ref bool and calls AnglerQuestSwap().
+        public static void UpdateTime_StartDay(ref bool stopEvents)
         {
             AnglerQuestSwap();
         }
 
         // In the real 1.4.5.8 server AnglerQuestSwap() itself begins by clearing
         // anglerWhoFinishedToday, then resets the finished flag, selects a quest,
-        // and broadcasts the new quest. Keep the fixture equivalent for the parts
-        // Infinite Angler depends on.
+        // and broadcasts the new quest.
         public static void AnglerQuestSwap()
         {
             anglerWhoFinishedToday.Clear();
@@ -159,7 +156,7 @@ namespace FixtureServer
                 "single-player round did not clear completion state");
 
             Console.WriteLine(
-                "PASS: Steam Host & Play child was routed through gloader; Infinite Angler matches Terraria 1.4.5.8's UpdateTime_StartDay/AnglerQuestSwap layout, preserves quests across dawn, and advances only after all active players complete.");
+                "PASS: Steam Host & Play child was routed through gloader; Infinite Angler matches Terraria 1.4.5.8's UpdateTime_StartDay(ref bool)/AnglerQuestSwap layout, preserves quests across dawn, and advances only after all active players complete.");
             return 0;
         }
 
