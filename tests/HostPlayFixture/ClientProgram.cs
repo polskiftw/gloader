@@ -13,6 +13,24 @@ namespace FixtureClient
     }
 }
 
+namespace Terraria.Social
+{
+    public static class SocialAPI
+    {
+        public static readonly NetworkSocialModule Network = new NetworkSocialModule();
+    }
+
+    public sealed class NetworkSocialModule
+    {
+        public bool LaunchLocalServer(Process process, int mode)
+        {
+            // Mirrors Steam Terraria: Main hands the already-configured Process to
+            // SocialAPI.Network and Process.Start happens down here, outside Main.
+            return process.Start();
+        }
+    }
+}
+
 namespace Terraria
 {
     public static class Program
@@ -53,10 +71,10 @@ namespace Terraria
                 }
             };
 
-            Console.WriteLine("[fixture client] launching vanilla TerrariaServer.exe path...");
-            if (!process.Start())
+            Console.WriteLine("[fixture client] handing TerrariaServer.exe to SocialAPI.Network...");
+            if (!Social.SocialAPI.Network.LaunchLocalServer(process, 0))
             {
-                Console.Error.WriteLine("Process.Start returned false.");
+                Console.Error.WriteLine("SocialAPI.Network.LaunchLocalServer returned false.");
                 return 92;
             }
 
