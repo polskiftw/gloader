@@ -36,7 +36,7 @@ namespace GLoader
                 Log.Initialize(
                     Path.Combine(supportDirectory, "logs"),
                     isServerTarget ? "server" : "client");
-                Log.Info("gloader 0.1.1-alpha");
+                Log.Info("gloader 0.1.2-alpha");
                 Log.Info("Target: " + targetPath);
                 Log.Info("Target version: " + GetFileVersion(targetPath));
                 Log.Info("Mode: " + (isServerTarget ? "server" : "client"));
@@ -44,13 +44,6 @@ namespace GLoader
 
                 Directory.SetCurrentDirectory(gameDirectory);
                 NativeLibrarySearch.UseDirectory(gameDirectory);
-
-                if (!isServerTarget && !options.DisableMods)
-                {
-                    HostPlayServerRedirect.Install(
-                        Assembly.GetExecutingAssembly().Location,
-                        modsDirectory);
-                }
 
                 var gameAssembly = GameBootstrap.Load(targetPath);
                 var gameArguments = options.GameArguments.ToArray();
@@ -64,6 +57,15 @@ namespace GLoader
                     if (!options.DisableMods)
                     {
                         TerrariaStartupState.Prepare(gameAssembly, gameArguments);
+
+                        if (!isServerTarget)
+                        {
+                            HostPlayServerRedirect.Install(
+                                gameAssembly,
+                                Assembly.GetExecutingAssembly().Location,
+                                modsDirectory);
+                        }
+
                         ModRuntime.LoadAll(
                             modsDirectory,
                             gameAssembly,
