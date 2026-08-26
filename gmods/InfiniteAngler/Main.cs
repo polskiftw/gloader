@@ -1,4 +1,3 @@
-#if GLOADER_SERVER
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -12,13 +11,14 @@ public static class Mod
     public static void Load()
     {
         InfiniteAnglerRuntime.Initialize();
-        Console.WriteLine("[Infinite Angler] Shared endless Angler quests enabled.");
+        Console.WriteLine("[Infinite Angler] Endless Angler quest patch active.");
     }
 }
 
 // Vanilla resets the Angler round at dawn by clearing the completion list and
-// calling AnglerQuestSwap(). Remove exactly those two operations; everything else
-// about the day transition stays vanilla.
+// calling AnglerQuestSwap(). Replace those two operations with wrappers so the
+// reset is suppressed on a server and in single-player, while a normal
+// multiplayer client keeps vanilla behavior and lets its server stay authoritative.
 [HarmonyPatch]
 internal static class InfiniteAnglerDawnPatch
 {
@@ -29,6 +29,15 @@ internal static class InfiniteAnglerDawnPatch
         var list = instructions.ToList();
         var swap = InfiniteAnglerRuntime.AnglerQuestSwapMethod;
         var finishedToday = InfiniteAnglerRuntime.FinishedTodayField;
+        var dawnClear = AccessTools.Method(
+            typeof(InfiniteAnglerRuntime),
+            nameof(InfiniteAnglerRuntime.HandleDawnCompletionClear));
+        var dawnSwap = AccessTools.Method(
+            typeof(InfiniteAnglerRuntime),
+            nameof(InfiniteAnglerRuntime.HandleDawnQuestSwap));
+
+        if (dawnClear == null || dawnSwap == null)
+            throw new MissingMethodException("Could not build Infinite Angler dawn wrappers.");
 
         var swapIndexes = list
             .Select((instruction, index) => new { instruction, index })
@@ -44,12 +53,12 @@ internal static class InfiniteAnglerDawnPatch
         var swapIndex = swapIndexes[0];
         var clearIndex = FindDawnCompletionClear(list, swapIndex, finishedToday);
 
-        // The Clear() instance is already on the stack, so Pop replaces the void
-        // call without disturbing IL stack balance. AnglerQuestSwap() is static/no-arg.
-        list[clearIndex].opcode = OpCodes.Pop;
-        list[clearIndex].operand = null;
-        list[swapIndex].opcode = OpCodes.Nop;
-        list[swapIndex].operand = null;
+        // Clear() already has its list instance on the stack. A static wrapper that
+        // accepts IList<string> consumes that same value without changing stack shape.
+        list[clearIndex].opcode = OpCodes.Call;
+        list[clearIndex].operand = dawnClear;
+        list[swapIndex].opcode = OpCodes.Call;
+        list[swapIndex].operand = dawnSwap;
 
         return list;
     }
@@ -87,8 +96,9 @@ internal static class InfiniteAnglerDawnPatch
     }
 }
 
-// The server checks the shared round after normal vanilla time processing. This is
-// also what makes a disconnected player stop blocking the round immediately.
+// Check the shared round after normal vanilla time processing. On a dedicated or
+// Host & Play server this waits for every connected player. In single-player the
+// one active local player is the whole group. Multiplayer clients do nothing here.
 [HarmonyPatch]
 internal static class InfiniteAnglerRoundPatch
 {
@@ -139,9 +149,21 @@ internal static class InfiniteAnglerRuntime
             throw new InvalidOperationException("Main.player is no longer an array.");
     }
 
+    public static void HandleDawnCompletionClear(IList<string> finishedToday)
+    {
+        if (!ShouldManageRound())
+            finishedToday.Clear();
+    }
+
+    public static void HandleDawnQuestSwap()
+    {
+        if (!ShouldManageRound())
+            AnglerQuestSwapMethod.Invoke(null, null);
+    }
+
     public static void TryAdvanceQuest()
     {
-        if (_advancing || GetNetMode() != 2)
+        if (_advancing || !ShouldManageRound())
             return;
 
         var finishedToday = GetFinishedToday();
@@ -179,6 +201,12 @@ internal static class InfiniteAnglerRuntime
         {
             _advancing = false;
         }
+    }
+
+    private static bool ShouldManageRound()
+    {
+        var netMode = GetNetMode();
+        return netMode == 0 || netMode == 2;
     }
 
     private static bool AllConnectedPlayersFinished(IList<string> finishedToday)
@@ -257,9 +285,3 @@ internal static class InfiniteAnglerRuntime
         return exception;
     }
 }
-#else
-public static class Mod
-{
-    public static void Load() { }
-}
-#endif
