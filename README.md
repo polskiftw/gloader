@@ -34,6 +34,7 @@ gmods/
   logs/
   InfiniteAngler/
     Main.cs
+    InfiniteAngler.ini
   NoLiquidDupe/
     Main.cs
   VGMRadio/
@@ -131,7 +132,24 @@ gmods/logs/gloader-server.log
 
 ### Infinite Angler
 
-`gmods/InfiniteAngler/Main.cs` is a shared endless Angler quest mod for both single-player and server-authoritative multiplayer. Vanilla's dawn quest rollover is suppressed, so the current quest stays active until every currently active player has completed it. The game then performs one normal Angler quest swap and starts a fresh round immediately. In single-player, the one active local player is the whole group. In multiplayer, the server owns the round: players who join become part of the current round, players who disconnect stop counting, and joining clients can remain vanilla.
+`gmods/InfiniteAngler/Main.cs` is a server-authoritative shared endless Angler quest mod for multiplayer. Joining clients can remain completely vanilla. Vanilla's dawn quest rollover is suppressed, so the current quest stays active until every required, fully connected player has completed it. Each finisher is kept locked out of repeating that same quest. When the whole required group is finished, the server performs one normal Angler quest swap and broadcasts the next quest immediately. Players who join count immediately; players who disconnect stop counting.
+
+By default, every connected player is required, matching the original shared-round behavior:
+
+```ini
+# gmods/InfiniteAngler/InfiniteAngler.ini
+EnableParticipationCommands=false
+```
+
+Set `EnableParticipationCommands=true` to let completely vanilla clients control whether they are required for the shared-round quorum with normal chat commands:
+
+- `!fish out` — stay connected and keep full Angler functionality, but stop blocking the next shared quest.
+- `!fish in` — count toward the current shared quest again.
+- `!fish` or `!fish status` — privately show your IN/OUT state plus who is waiting, finished, or opted out.
+
+Participation and completion are separate states. An OUT player may still catch and turn in the current quest fish, receives normal rewards, and is marked finished so they cannot repeat that quest. Their completion simply is not required for the round to advance. If they use `!fish in` later during the same round, a completion earned while OUT is preserved.
+
+OUT state lasts across quest swaps for that connection. Disconnecting clears it, so a reconnect starts IN. If everybody opts OUT, the current quest is parked; an empty required group never causes automatic repeated quest swaps.
 
 ### No Liquid Dupe
 
