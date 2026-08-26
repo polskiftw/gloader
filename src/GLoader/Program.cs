@@ -13,9 +13,6 @@ namespace GLoader
             var loaderDirectory = Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory);
             var defaultModsDirectory = Path.Combine(loaderDirectory, "gmods");
             var dependenciesDirectory = Path.Combine(loaderDirectory, "gdeps");
-
-            MigrateLegacyLayout(defaultModsDirectory, dependenciesDirectory);
-
             var startupResolver = new ManagedAssemblyResolver(dependenciesDirectory);
             var options = LoaderOptions.Parse(args);
 
@@ -110,69 +107,6 @@ namespace GLoader
                 Log.Dispose();
                 startupResolver.Dispose();
             }
-        }
-
-        private static void MigrateLegacyLayout(string modsDirectory, string dependenciesDirectory)
-        {
-            if (!Directory.Exists(modsDirectory))
-            {
-                return;
-            }
-
-            try
-            {
-                Directory.CreateDirectory(dependenciesDirectory);
-
-                foreach (var file in Directory.GetFiles(modsDirectory, "*", SearchOption.TopDirectoryOnly))
-                {
-                    var destination = Path.Combine(dependenciesDirectory, Path.GetFileName(file));
-                    if (File.Exists(destination))
-                    {
-                        File.Delete(file);
-                    }
-                    else
-                    {
-                        File.Move(file, destination);
-                    }
-                }
-
-                var legacyLogsDirectory = Path.Combine(modsDirectory, "logs");
-                if (Directory.Exists(legacyLogsDirectory))
-                {
-                    MergeLegacyDirectory(legacyLogsDirectory, Path.Combine(dependenciesDirectory, "logs"));
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine("gloader warning: could not fully migrate the old gmods support layout: " + ex.Message);
-            }
-        }
-
-        private static void MergeLegacyDirectory(string sourceDirectory, string destinationDirectory)
-        {
-            Directory.CreateDirectory(destinationDirectory);
-
-            foreach (var file in Directory.GetFiles(sourceDirectory, "*", SearchOption.TopDirectoryOnly))
-            {
-                var destination = Path.Combine(destinationDirectory, Path.GetFileName(file));
-                if (File.Exists(destination))
-                {
-                    File.Delete(file);
-                }
-                else
-                {
-                    File.Move(file, destination);
-                }
-            }
-
-            foreach (var directory in Directory.GetDirectories(sourceDirectory, "*", SearchOption.TopDirectoryOnly))
-            {
-                MergeLegacyDirectory(
-                    directory,
-                    Path.Combine(destinationDirectory, Path.GetFileName(directory)));
-            }
-
-            Directory.Delete(sourceDirectory, false);
         }
 
         private static string GetLoaderVersion()
