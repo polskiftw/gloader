@@ -52,10 +52,13 @@ namespace GLoader
                         modsDirectory);
                 }
 
-                using (var resolver = new ManagedAssemblyResolver(gameDirectory, supportDirectory, modsDirectory))
+                var gameAssembly = GameBootstrap.Load(targetPath);
+                using (var resolver = new ManagedAssemblyResolver(
+                    gameAssembly,
+                    gameDirectory,
+                    supportDirectory,
+                    modsDirectory))
                 {
-                    var gameAssembly = GameBootstrap.Load(targetPath);
-
                     if (!options.DisableMods)
                     {
                         ModRuntime.LoadAll(
