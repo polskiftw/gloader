@@ -120,7 +120,7 @@ jobs:
             --repo "${{ github.repository }}" `
             --target "${{ github.sha }}" `
             --title "gloader v$env:RELEASE_VERSION" `
-            --notes "Infinite Angler is now matched to the actual Terraria 1.4.5.8 client/server IL. The real dawn rollover lives in Main.UpdateTime_StartDay(ref bool), not Main.UpdateTime(), and AnglerQuestSwap() itself clears anglerWhoFinishedToday. gloader now suppresses the exact dawn swap while still using vanilla AnglerQuestSwap after every active player finishes. The Steam SocialAPI Host & Play handoff and Rainwave now-playing fixes remain included."
+            --notes "Fixes Infinite Angler's multiplayer shared-round state with completely vanilla clients. After a player turns in the current quest, the server now sends that client a personalized Angler quest sync so they stay finished/locked out while the other connected players complete the same quest. The group is defined by fully connected Netplay clients (State 10), not stale Player.active slots. The quest advances immediately only when every currently connected player is in anglerWhoFinishedToday; dawn remains disabled, late joiners count, and disconnected players stop counting. Includes the Terraria 1.4.5.8, Steam Host & Play, and Rainwave fixes from earlier alphas."
 
       - name: Upload
         uses: actions/upload-artifact@v4
