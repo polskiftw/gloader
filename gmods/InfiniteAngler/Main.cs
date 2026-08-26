@@ -17,10 +17,10 @@ public static class Mod
 }
 
 // Terraria 1.4.5.8 does not roll the Angler quest directly inside UpdateTime().
-// Dawn is split into Main.UpdateTime_StartDay(), which calls AnglerQuestSwap().
-// AnglerQuestSwap() itself clears anglerWhoFinishedToday before selecting and
-// broadcasting the next quest. Suppress only that dawn call; our own explicit
-// swap after the whole connected group finishes still uses vanilla code.
+// Dawn is split into Main.UpdateTime_StartDay(ref bool), which calls
+// AnglerQuestSwap(). AnglerQuestSwap() itself clears anglerWhoFinishedToday
+// before selecting and broadcasting the next quest. Suppress only that dawn call;
+// our own explicit swap after the whole connected group finishes still uses vanilla code.
 [HarmonyPatch]
 internal static class InfiniteAnglerDawnPatch
 {
@@ -39,7 +39,7 @@ internal static class InfiniteAnglerDawnPatch
         if (swapIndexes.Length != 1)
         {
             throw new InvalidOperationException(
-                "Expected exactly one Main.AnglerQuestSwap() call in Main.UpdateTime_StartDay(), found " +
+                "Expected exactly one Main.AnglerQuestSwap() call in Main.UpdateTime_StartDay(ref bool), found " +
                 swapIndexes.Length + ".");
         }
 
@@ -81,9 +81,11 @@ internal static class InfiniteAnglerRuntime
         FinishedTodayField = RequireField(typeof(Main), "anglerWhoFinishedToday", null);
         _players = RequireField(typeof(Main), "player", null);
 
-        AnglerQuestSwapMethod = RequireStaticVoidMethod("AnglerQuestSwap");
-        UpdateTimeMethod = RequireStaticVoidMethod("UpdateTime");
-        UpdateTimeStartDayMethod = RequireStaticVoidMethod("UpdateTime_StartDay");
+        AnglerQuestSwapMethod = RequireStaticVoidMethod("AnglerQuestSwap", Type.EmptyTypes);
+        UpdateTimeMethod = RequireStaticVoidMethod("UpdateTime", Type.EmptyTypes);
+        UpdateTimeStartDayMethod = RequireStaticVoidMethod(
+            "UpdateTime_StartDay",
+            new[] { typeof(bool).MakeByRefType() });
 
         if (!typeof(IList<string>).IsAssignableFrom(FinishedTodayField.FieldType))
         {
@@ -192,14 +194,27 @@ internal static class InfiniteAnglerRuntime
     private static int GetNetMode()
         => (int)_netMode.GetValue(null);
 
-    private static MethodInfo RequireStaticVoidMethod(string name)
+    private static MethodInfo RequireStaticVoidMethod(string name, Type[] parameterTypes)
     {
         return typeof(Main)
             .GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
             .SingleOrDefault(method =>
-                method.Name == name &&
-                method.ReturnType == typeof(void) &&
-                method.GetParameters().Length == 0)
+            {
+                if (method.Name != name || method.ReturnType != typeof(void))
+                    return false;
+
+                var parameters = method.GetParameters();
+                if (parameters.Length != parameterTypes.Length)
+                    return false;
+
+                for (var index = 0; index < parameters.Length; index++)
+                {
+                    if (parameters[index].ParameterType != parameterTypes[index])
+                        return false;
+                }
+
+                return true;
+            })
             ?? throw new MissingMethodException(typeof(Main).FullName, name + "()");
     }
 
