@@ -6,7 +6,7 @@ gloader loads the installed Terraria executable, compiles each source mod in mem
 
 ## Install layout
 
-Copy the built gloader files directly into the Terraria installation folder. `gloader.exe` sits beside `Terraria.exe`, and its mod folder is `gmods/` beside both of them.
+Copy the built gloader files directly into the Terraria installation folder. `gloader.exe` sits beside `Terraria.exe`; `gmods/` contains only mod folders, and `gdeps/` contains GLoader's runtime/support files and logs.
 
 ```text
 Terraria/
@@ -14,24 +14,23 @@ Terraria/
   TerrariaServer.exe
   gloader.exe
   gmods/
-    [gloader runtime/support files]
-    logs/
     InfiniteAngler/
     NoLiquidDupe/
     VGMRadio/
     DVDLogo/
+  gdeps/
+    [gloader runtime/support files]
+    logs/
 ```
 
-## gmods folder contract
+When upgrading from the old mixed layout, GLoader automatically cleans it on first launch. Loose files in the root of `gmods/` move into `gdeps/`, and the old `gmods/logs/` directory moves into `gdeps/logs/`. If a current dependency already exists in `gdeps/`, the stale legacy copy in `gmods/` is discarded instead of overwriting it.
 
-`gmods/` is GLoader's **entire support directory**. The Terraria root gets only `gloader.exe`; dependency DLLs, generated support files, and logs all live under `gmods/`.
+## gmods and gdeps folder contract
 
-Mod folders live there too. An immediate subfolder containing enabled `.cs` files is treated as one mod; loose support files in the `gmods/` root are normal and are not treated as mods.
+`gmods/` is for mods only. Each immediate subfolder containing enabled `.cs` files is treated as one mod. There should be no GLoader dependency DLLs or log files loose in this directory.
 
 ```text
 gmods/
-  [gloader dependency/support files]
-  logs/
   InfiniteAngler/
     Main.cs
     InfiniteAngler.ini
@@ -47,6 +46,16 @@ gmods/
     Main.cs
     DVDLogo.ini
     dvd-logo.png
+```
+
+`gdeps/` is GLoader's runtime/support directory. Published dependency files and GLoader's client/server logs live there.
+
+```text
+gdeps/
+  [gloader dependency/support files]
+  logs/
+    gloader-client.log
+    gloader-server.log
 ```
 
 Everything belonging specifically to a mod stays inside that mod's folder: `.cs` source, `.ini`/other configuration, images, data files, and any mod-specific documentation. All `.cs` files beneath one mod folder are compiled together as one in-memory assembly.
@@ -124,8 +133,8 @@ Arguments after `--` are passed to Terraria's entry point.
 Client and server logs are separate:
 
 ```text
-gmods/logs/gloader-client.log
-gmods/logs/gloader-server.log
+gdeps/logs/gloader-client.log
+gdeps/logs/gloader-server.log
 ```
 
 ## Included mods
@@ -213,6 +222,6 @@ Output staging folder:
 dist/gloader/
 ```
 
-Copy the **contents** of `dist/gloader/` directly into the Terraria installation folder. The package adds only `gloader.exe` to the game root; all other GLoader files are already contained inside `gmods/`.
+Copy the **contents** of `dist/gloader/` directly into the Terraria installation folder. The package adds `gloader.exe` plus two sibling folders: `gmods/` for mods and `gdeps/` for GLoader runtime/support files.
 
 Raw source mods execute with the same privileges as Terraria. Only use code you trust.
