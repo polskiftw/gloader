@@ -76,21 +76,26 @@ internal static class InfiniteAnglerCompletionPatch
     }
 }
 
-// Optional vanilla-client commands are intercepted at the same server-side chat
-// processor Terraria uses for ordinary Say messages. Returning false suppresses the
-// command from normal chat; non-!fish messages continue through untouched.
+// Vanilla multiplayer chat reaches the server as a NetTextModule packet. Hook that
+// network boundary directly rather than the tiny downstream ChatCommandProcessor
+// helper. For a !fish command we consume the packet and report success; for every
+// other message we rewind the BinaryReader and let vanilla deserialize it untouched.
 [HarmonyPatch]
 internal static class InfiniteAnglerChatPatch
 {
     [HarmonyPrepare]
     private static bool Prepare() => InfiniteAnglerRuntime.ParticipationCommandsEnabled;
 
-    private static MethodBase TargetMethod() => InfiniteAnglerRuntime.ChatProcessIncomingMessageMethod;
+    private static MethodBase TargetMethod() => InfiniteAnglerRuntime.NetTextDeserializeMethod;
 
     [HarmonyPrefix]
-    private static bool Prefix(ChatMessage __0, int __1)
+    private static bool Prefix(BinaryReader __0, int __1, ref bool __result)
     {
-        return !InfiniteAnglerRuntime.TryHandleChatCommand(__0, __1);
+        if (!InfiniteAnglerRuntime.TryHandleNetTextMessage(__0, __1))
+            return true;
+
+        __result = true;
+        return false;
     }
 }
 
@@ -133,7 +138,7 @@ internal static class InfiniteAnglerRuntime
     public static MethodBase UpdateTimeMethod { get; private set; }
     public static MethodBase UpdateTimeStartDayMethod { get; private set; }
     public static MethodBase MessageBufferGetDataMethod { get; private set; }
-    public static MethodBase ChatProcessIncomingMessageMethod { get; private set; }
+    public static MethodBase NetTextDeserializeMethod { get; private set; }
     public static MethodInfo AnglerQuestSwapMethod { get; private set; }
 
     public static void Initialize(string modDirectory)
@@ -190,16 +195,18 @@ internal static class InfiniteAnglerRuntime
             throw new InvalidOperationException("Main.player is no longer an array.");
 
         ParticipationCommandsEnabled = LoadParticipationConfig(modDirectory);
-        ChatProcessIncomingMessageMethod = null;
+        NetTextDeserializeMethod = null;
 
         if (ParticipationCommandsEnabled)
         {
-            var chatProcessorType = gameAssembly.GetType("Terraria.Chat.ChatCommandProcessor", throwOnError: true);
-            var chatMessageType = gameAssembly.GetType("Terraria.Chat.ChatMessage", throwOnError: true);
-            ChatProcessIncomingMessageMethod = RequireInstanceVoidMethod(
-                chatProcessorType,
-                "ProcessIncomingMessage",
-                new[] { chatMessageType, typeof(int) });
+            var netTextModuleType = gameAssembly.GetType(
+                "Terraria.GameContent.NetModules.NetTextModule",
+                throwOnError: true);
+            NetTextDeserializeMethod = RequireInstanceMethod(
+                netTextModuleType,
+                "Deserialize",
+                typeof(bool),
+                new[] { typeof(BinaryReader), typeof(int) });
         }
 
         CompletedSlots.Clear();
@@ -260,6 +267,34 @@ internal static class InfiniteAnglerRuntime
         SendAnglerQuest(whoAmI);
     }
 
+    public static bool TryHandleNetTextMessage(BinaryReader reader, int clientId)
+    {
+        if (!ParticipationCommandsEnabled || reader == null || GetNetMode() != 2)
+            return false;
+
+        var stream = reader.BaseStream;
+        if (stream == null || !stream.CanSeek)
+            return false;
+
+        var start = stream.Position;
+        try
+        {
+            var message = ChatMessage.Deserialize(reader);
+            if (TryHandleChatCommand(message, clientId))
+                return true;
+        }
+        catch
+        {
+            // This is only a look-ahead. If it is not a valid ChatMessage, restore
+            // the reader and let Terraria's own NetTextModule handle the packet.
+            stream.Position = start;
+            return false;
+        }
+
+        stream.Position = start;
+        return false;
+    }
+
     public static bool TryHandleChatCommand(ChatMessage message, int clientId)
     {
         if (!ParticipationCommandsEnabled || message == null || GetNetMode() != 2)
@@ -275,7 +310,8 @@ internal static class InfiniteAnglerRuntime
         if (!IsFullyConnectedSlot(clientId))
             return false;
 
-        // The command belongs to Infinite Angler, not Terraria's Say command.
+        // The packet is consumed at NetTextModule.Deserialize. Marking this local
+        // ChatMessage consumed as well keeps the command's intent explicit.
         message.Consume();
 
         var argument = text.Length == 5 ? "status" : text.Substring(5).Trim();
@@ -616,11 +652,15 @@ internal static class InfiniteAnglerRuntime
             ?? throw new MissingMethodException(type.FullName, name + "()");
     }
 
-    private static MethodInfo RequireInstanceVoidMethod(Type type, string name, Type[] parameterTypes)
+    private static MethodInfo RequireInstanceMethod(
+        Type type,
+        string name,
+        Type returnType,
+        Type[] parameterTypes)
     {
         return type
             .GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
-            .SingleOrDefault(method => MethodMatches(method, name, typeof(void), parameterTypes))
+            .SingleOrDefault(method => MethodMatches(method, name, returnType, parameterTypes))
             ?? throw new MissingMethodException(type.FullName, name + "()");
     }
 
