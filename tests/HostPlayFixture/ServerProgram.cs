@@ -410,9 +410,9 @@ namespace FixtureServer
             Require(Terraria.Main.questSwapCount == 0, "quest swap ran after only one completion");
             Require(Terraria.Main.anglerWhoFinishedToday.SequenceEqual(new[] { "VanillaGuest" }),
                 "first player's vanilla completion marker was not preserved");
-            Require(Terraria.Main.clientQuestFinishedForTest(1),
+            Require(Terraria.NetMessage.clientQuestFinished[1],
                 "first finisher was not told that the current quest is already complete for them");
-            Require(!Terraria.Main.clientQuestFinishedForTest(2),
+            Require(!Terraria.NetMessage.clientQuestFinished[2],
                 "unfinished second client was incorrectly marked finished");
 
             Terraria.Main.triggerDawnReset = true;
@@ -421,7 +421,7 @@ namespace FixtureServer
             Require(Terraria.Main.questSwapCount == 0, "dawn still called AnglerQuestSwap");
             Require(Terraria.Main.anglerWhoFinishedToday.SequenceEqual(new[] { "VanillaGuest" }),
                 "dawn cleared the current round's completion state");
-            Require(Terraria.Main.clientQuestFinishedForTest(1),
+            Require(Terraria.NetMessage.clientQuestFinished[1],
                 "dawn unlocked a player who had already finished the shared quest");
 
             Complete(2);
