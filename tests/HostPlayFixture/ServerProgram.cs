@@ -129,21 +129,29 @@ namespace Terraria.Chat
 
 namespace Terraria.GameContent.NetModules
 {
-    // Mirrors the real TerrariaServer 1.4.5.8 route used by vanilla multiplayer
-    // chat: NetManager dispatches to NetTextModule.Deserialize, which deserializes a
-    // ChatMessage and then hands it to ChatManager.Commands.ProcessIncomingMessage.
     public class NetTextModule
     {
         public virtual bool Deserialize(BinaryReader reader, int senderPlayerId)
         {
-            return DeserializeAsServer(reader, senderPlayerId);
-        }
-
-        private bool DeserializeAsServer(BinaryReader reader, int senderPlayerId)
-        {
             var message = Terraria.Chat.ChatMessage.Deserialize(reader);
             Terraria.Chat.ChatManager.Commands.ProcessIncomingMessage(message, senderPlayerId);
             return true;
+        }
+    }
+}
+
+namespace Terraria.Net
+{
+    public sealed class NetManager
+    {
+        public static readonly NetManager Instance = new NetManager();
+
+        public ushort GetId<T>()
+        {
+            if (typeof(T) == typeof(Terraria.GameContent.NetModules.NetTextModule))
+                return 1;
+
+            return ushort.MaxValue;
         }
     }
 }
@@ -154,6 +162,7 @@ namespace Terraria.ID
     {
         public const byte AnglerQuest = 74;
         public const byte AnglerQuestFinished = 75;
+        public const byte NetModules = 82;
     }
 }
 
@@ -258,20 +267,36 @@ namespace Terraria
         public byte[] readBuffer = new byte[256];
         public int whoAmI;
 
-        // Match TerrariaServer 1.4.5.8 packet 75 exactly for the state Infinite
-        // Angler cares about. Vanilla stores Main.player[whoAmI].name without
-        // filtering on Player.active or rejecting an empty name.
+        // Both packet 75 and packet 82 travel through the exact method Infinite
+        // Angler patches, so the command test cannot bypass the real hook boundary.
         public void GetData(int start, int length, out int messageType)
         {
             messageType = readBuffer[start];
-            if (messageType != ID.MessageID.AnglerQuestFinished || Main.netMode != 2)
+            if (Main.netMode != 2)
                 return;
 
-            var name = Main.player[whoAmI].name;
-            if (Main.anglerWhoFinishedToday.Contains(name))
+            if (messageType == ID.MessageID.AnglerQuestFinished)
+            {
+                var name = Main.player[whoAmI].name;
+                if (!Main.anglerWhoFinishedToday.Contains(name))
+                    Main.anglerWhoFinishedToday.Add(name);
+                return;
+            }
+
+            if (messageType != ID.MessageID.NetModules)
                 return;
 
-            Main.anglerWhoFinishedToday.Add(name);
+            var payloadStart = start + 1;
+            var payloadLength = Math.Max(0, Math.Min(length - 1, readBuffer.Length - payloadStart));
+            using (var stream = new MemoryStream(readBuffer, payloadStart, payloadLength, writable: false))
+            using (var reader = new BinaryReader(stream))
+            {
+                var moduleId = reader.ReadUInt16();
+                if (moduleId != Terraria.Net.NetManager.Instance.GetId<Terraria.GameContent.NetModules.NetTextModule>())
+                    return;
+
+                new Terraria.GameContent.NetModules.NetTextModule().Deserialize(reader, whoAmI);
+            }
         }
     }
 }
@@ -292,7 +317,7 @@ namespace FixtureServer
             TestSharedRoundCoreBehavior();
 
             Console.WriteLine(
-                "PASS: Steam Host & Play routed through gloader; Infinite Angler intercepts vanilla NetText chat packets, keeps clients synchronized, preserves opted-out turn-ins, never advances an empty quorum, ignores dawn, counts joiners, and releases disconnects.");
+                "PASS: Steam Host & Play routed through gloader; Infinite Angler intercepts full packet-82 chat at MessageBuffer.GetData, keeps clients synchronized, preserves opted-out turn-ins, never advances an empty quorum, ignores dawn, counts joiners, and releases disconnects.");
             return 0;
         }
 
@@ -300,46 +325,42 @@ namespace FixtureServer
         {
             ResetFixture();
 
-            Require(Chat(1, "hello world"),
-                "vanilla NetText module rejected ordinary chat");
+            Require(Chat(1, "hello world"), "ordinary packet-82 chat was not recognized");
             Require(Terraria.Chat.ChatCommandProcessor.VanillaMessagesProcessed == 1,
                 "non-command chat was intercepted");
             Require(Terraria.Chat.ChatCommandProcessor.LastVanillaText == "hello world",
-                "non-command NetText reader was not rewound before vanilla processed it");
+                "ordinary chat did not reach vanilla unchanged");
 
-            Require(Chat(1, "!fish"),
-                "!fish NetText packet was not reported handled");
+            Require(Chat(1, "!fish"), "!fish packet was not recognized");
             Require(Terraria.Chat.ChatCommandProcessor.VanillaMessagesProcessed == 1,
-                "!fish status leaked through the NetText boundary into vanilla chat");
+                "!fish status leaked into vanilla/public chat");
             Require((Terraria.Chat.ChatHelper.LastReply(1) ?? string.Empty).Contains("You are IN"),
                 "!fish did not report the player's participation state");
 
-            Require(Chat(2, "!fish out"),
-                "!fish out NetText packet was not reported handled");
+            Require(Chat(2, "!fish out"), "!fish out packet was not recognized");
             Require(Terraria.Chat.ChatCommandProcessor.VanillaMessagesProcessed == 1,
-                "!fish out leaked through the NetText boundary into vanilla chat");
+                "!fish out leaked into vanilla/public chat");
             Require((Terraria.Chat.ChatHelper.LastReply(2) ?? string.Empty).Contains("You are OUT"),
                 "!fish out did not confirm the opt-out");
 
-            // Slot 2 is still connected and unfinished, but OUT means it no longer
-            // blocks the shared-round quorum. Slot 1 finishing must advance exactly once.
+            Require(Chat(1, "!fishout"), "unsupported !fishout packet was not recognized");
+            Require(Terraria.Chat.ChatCommandProcessor.VanillaMessagesProcessed == 2,
+                "unsupported !fishout was incorrectly swallowed");
+            Require(Terraria.Chat.ChatCommandProcessor.LastVanillaText == "!fishout",
+                "unsupported !fishout did not reach vanilla unchanged");
+
             Complete(1);
             Require(Terraria.Main.anglerQuest == 8,
                 "opted-out connected player still blocked the quest advance");
             Require(Terraria.Main.questSwapCount == 1,
                 "opt-out round did not swap exactly once");
 
-            // OUT removes obligation, not participation. The opted-out player can
-            // turn in the new quest, gets locked out of repeating it, and the quest
-            // stays put because required slot 1 is still unfinished.
             Complete(2);
             Require(Terraria.Main.anglerQuest == 8,
                 "opted-out player's turn-in advanced the quest by itself");
             Require(Terraria.NetMessage.clientQuestFinished[2],
                 "opted-out finisher was not locked out of repeating the same quest");
 
-            // Rejoining the quorum must preserve that completion. Slot 2 is already
-            // done, so the round should wait only for slot 1.
             Chat(2, "!fish in");
             Require((Terraria.Chat.ChatHelper.LastReply(2) ?? string.Empty).Contains("already finished"),
                 "!fish in forgot completion earned while opted out");
@@ -365,16 +386,12 @@ namespace FixtureServer
             Require(Terraria.Main.questSwapCount == 0,
                 "all-opted-out empty quorum performed a quest swap");
 
-            // Turning in while OUT is still allowed and still must not create a swap
-            // when nobody is currently required.
             Complete(1);
             Require(Terraria.Main.anglerQuest == 7,
                 "opted-out turn-in advanced an empty quorum");
             Require(Terraria.NetMessage.clientQuestFinished[1],
                 "opted-out player was not marked finished after a valid turn-in");
 
-            // If that already-finished player opts back in, they become the only
-            // required player and are already complete, so the round may advance now.
             Chat(1, "!fish in");
             Require(Terraria.Main.anglerQuest == 8,
                 "already-finished player opting back in did not satisfy the quorum");
@@ -410,6 +427,8 @@ namespace FixtureServer
             Require(Terraria.Main.questSwapCount == 0, "quest swap ran after only one completion");
             Require(Terraria.Main.anglerWhoFinishedToday.SequenceEqual(new[] { "VanillaGuest" }),
                 "first player's vanilla completion marker was not preserved");
+            Require(Terraria.NetMessage.clientQuest[1] == 7,
+                "first finisher was synced to the wrong quest");
             Require(Terraria.NetMessage.clientQuestFinished[1],
                 "first finisher was not told that the current quest is already complete for them");
             Require(!Terraria.NetMessage.clientQuestFinished[2],
@@ -474,8 +493,6 @@ namespace FixtureServer
         {
             Terraria.Main.triggerDawnReset = false;
 
-            // First disconnect every fixture slot and run one patched server tick so
-            // Infinite Angler clears session-only OUT state from prior test phases.
             for (var index = 0; index < Terraria.Main.player.Length; index++)
                 Terraria.Netplay.Clients[index].State = 0;
             Tick();
@@ -533,18 +550,24 @@ namespace FixtureServer
 
         private static bool Chat(int whoAmI, string text)
         {
+            byte[] modulePayload;
             using (var stream = new MemoryStream())
             {
                 using (var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, true))
-                    new Terraria.Chat.ChatMessage(text).Serialize(writer);
-
-                stream.Position = 0;
-                using (var reader = new BinaryReader(stream, System.Text.Encoding.UTF8, true))
                 {
-                    return new Terraria.GameContent.NetModules.NetTextModule()
-                        .Deserialize(reader, whoAmI);
+                    writer.Write(Terraria.Net.NetManager.Instance.GetId<Terraria.GameContent.NetModules.NetTextModule>());
+                    new Terraria.Chat.ChatMessage(text).Serialize(writer);
                 }
+                modulePayload = stream.ToArray();
             }
+
+            var buffer = new Terraria.MessageBuffer { whoAmI = whoAmI };
+            buffer.readBuffer[0] = Terraria.ID.MessageID.NetModules;
+            Buffer.BlockCopy(modulePayload, 0, buffer.readBuffer, 1, modulePayload.Length);
+
+            int messageType;
+            buffer.GetData(0, modulePayload.Length + 1, out messageType);
+            return messageType == Terraria.ID.MessageID.NetModules;
         }
 
         private static void Tick()
