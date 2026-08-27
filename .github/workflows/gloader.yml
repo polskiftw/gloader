@@ -89,7 +89,7 @@ jobs:
             throw "gdeps must contain the published gloader runtime/support files."
           }
 
-      - name: Steam Host & Play + Infinite Angler participation integration test
+      - name: Steam Host & Play + Infinite Angler vanilla NetText integration test
         shell: pwsh
         run: |
           $loader = (Resolve-Path "dist/gloader/gloader.exe").Path
@@ -108,7 +108,7 @@ jobs:
 
           & $loader --target $target --mods $mods
           if ($LASTEXITCODE -ne 0) {
-            throw "Steam Host & Play / Infinite Angler participation fixture failed with exit code $LASTEXITCODE"
+            throw "Steam Host & Play / Infinite Angler vanilla NetText fixture failed with exit code $LASTEXITCODE"
           }
 
       - name: Remove integration-test logs
@@ -138,7 +138,7 @@ jobs:
             --repo "${{ github.repository }}" `
             --target "${{ github.sha }}" `
             --title "gloader v$env:RELEASE_VERSION" `
-            --notes "Infinite Angler participation commands now ship enabled by default, so !fish in, !fish out, and !fish status work immediately for vanilla multiplayer clients. Set EnableParticipationCommands=false in gmods/InfiniteAngler/InfiniteAngler.ini only if you deliberately want the original strict all-connected-players-required behavior. CI now verifies the shipped default instead of force-enabling the setting during the fixture, while retaining the existing Host & Play, dawn, join, disconnect, packet-74/75, and quorum regression coverage."
+            --notes "Fixes Infinite Angler !fish commands for real vanilla multiplayer chat. The previous implementation patched the small downstream ChatCommandProcessor helper, and its fixture called that helper directly. Inspection of TerrariaServer 1.4.5.8 shows real chat enters through NetTextModule.Deserialize before reaching ChatCommandProcessor. Infinite Angler now intercepts at that network boundary, consumes only !fish commands, rewinds all ordinary chat for untouched vanilla processing, and keeps the existing IN/OUT quorum behavior. The integration fixture now serializes and deserializes ChatMessage packets through the same NetTextModule-shaped route instead of directly invoking the old helper."
 
       - name: Upload
         uses: actions/upload-artifact@v4
