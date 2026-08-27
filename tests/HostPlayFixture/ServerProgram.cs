@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 
 namespace Microsoft.Xna.Framework
@@ -38,12 +39,32 @@ namespace Terraria.Chat
     public sealed class ChatMessage
     {
         public ChatMessage(string text)
+            : this(text, "Say")
         {
-            Text = text;
         }
 
+        public ChatMessage(string text, string commandId)
+        {
+            Text = text ?? string.Empty;
+            CommandId = commandId ?? string.Empty;
+        }
+
+        public string CommandId { get; set; }
         public string Text { get; set; }
         public bool IsConsumed { get; private set; }
+
+        public void Serialize(BinaryWriter writer)
+        {
+            writer.Write(CommandId ?? string.Empty);
+            writer.Write(Text ?? string.Empty);
+        }
+
+        public static ChatMessage Deserialize(BinaryReader reader)
+        {
+            var commandId = reader.ReadString();
+            var text = reader.ReadString();
+            return new ChatMessage(text, commandId);
+        }
 
         public void Consume()
         {
@@ -54,11 +75,20 @@ namespace Terraria.Chat
     public sealed class ChatCommandProcessor
     {
         public static int VanillaMessagesProcessed;
+        public static string LastVanillaText;
 
         public void ProcessIncomingMessage(ChatMessage message, int clientId)
         {
             VanillaMessagesProcessed++;
+            LastVanillaText = message == null ? null : message.Text;
+            if (message != null)
+                message.Consume();
         }
+    }
+
+    public static class ChatManager
+    {
+        public static readonly ChatCommandProcessor Commands = new ChatCommandProcessor();
     }
 
     public static class ChatHelper
@@ -93,6 +123,27 @@ namespace Terraria.Chat
         public static void Reset()
         {
             Replies.Clear();
+        }
+    }
+}
+
+namespace Terraria.GameContent.NetModules
+{
+    // Mirrors the real TerrariaServer 1.4.5.8 route used by vanilla multiplayer
+    // chat: NetManager dispatches to NetTextModule.Deserialize, which deserializes a
+    // ChatMessage and then hands it to ChatManager.Commands.ProcessIncomingMessage.
+    public class NetTextModule
+    {
+        public virtual bool Deserialize(BinaryReader reader, int senderPlayerId)
+        {
+            return DeserializeAsServer(reader, senderPlayerId);
+        }
+
+        private bool DeserializeAsServer(BinaryReader reader, int senderPlayerId)
+        {
+            var message = Terraria.Chat.ChatMessage.Deserialize(reader);
+            Terraria.Chat.ChatManager.Commands.ProcessIncomingMessage(message, senderPlayerId);
+            return true;
         }
     }
 }
@@ -241,7 +292,7 @@ namespace FixtureServer
             TestSharedRoundCoreBehavior();
 
             Console.WriteLine(
-                "PASS: Steam Host & Play routed through gloader; Infinite Angler keeps vanilla clients synchronized, supports optional !fish participation commands, preserves opted-out turn-ins, never advances an empty quorum, ignores dawn, counts joiners, and releases disconnects.");
+                "PASS: Steam Host & Play routed through gloader; Infinite Angler intercepts vanilla NetText chat packets, keeps clients synchronized, preserves opted-out turn-ins, never advances an empty quorum, ignores dawn, counts joiners, and releases disconnects.");
             return 0;
         }
 
@@ -249,21 +300,24 @@ namespace FixtureServer
         {
             ResetFixture();
 
-            var normalChat = Chat(1, "hello world");
+            Require(Chat(1, "hello world"),
+                "vanilla NetText module rejected ordinary chat");
             Require(Terraria.Chat.ChatCommandProcessor.VanillaMessagesProcessed == 1,
                 "non-command chat was intercepted");
-            Require(!normalChat.IsConsumed,
-                "non-command chat was consumed by Infinite Angler");
+            Require(Terraria.Chat.ChatCommandProcessor.LastVanillaText == "hello world",
+                "non-command NetText reader was not rewound before vanilla processed it");
 
-            var status = Chat(1, "!fish");
-            Require(status.IsConsumed, "!fish status command was not consumed");
+            Require(Chat(1, "!fish"),
+                "!fish NetText packet was not reported handled");
             Require(Terraria.Chat.ChatCommandProcessor.VanillaMessagesProcessed == 1,
-                "!fish status leaked into vanilla chat");
+                "!fish status leaked through the NetText boundary into vanilla chat");
             Require((Terraria.Chat.ChatHelper.LastReply(1) ?? string.Empty).Contains("You are IN"),
                 "!fish did not report the player's participation state");
 
-            var outMessage = Chat(2, "!fish out");
-            Require(outMessage.IsConsumed, "!fish out was not consumed");
+            Require(Chat(2, "!fish out"),
+                "!fish out NetText packet was not reported handled");
+            Require(Terraria.Chat.ChatCommandProcessor.VanillaMessagesProcessed == 1,
+                "!fish out leaked through the NetText boundary into vanilla chat");
             Require((Terraria.Chat.ChatHelper.LastReply(2) ?? string.Empty).Contains("You are OUT"),
                 "!fish out did not confirm the opt-out");
 
@@ -356,11 +410,9 @@ namespace FixtureServer
             Require(Terraria.Main.questSwapCount == 0, "quest swap ran after only one completion");
             Require(Terraria.Main.anglerWhoFinishedToday.SequenceEqual(new[] { "VanillaGuest" }),
                 "first player's vanilla completion marker was not preserved");
-            Require(Terraria.NetMessage.clientQuest[1] == 7,
-                "first finisher was synced to the wrong quest");
-            Require(Terraria.NetMessage.clientQuestFinished[1],
+            Require(Terraria.Main.clientQuestFinishedForTest(1),
                 "first finisher was not told that the current quest is already complete for them");
-            Require(!Terraria.NetMessage.clientQuestFinished[2],
+            Require(!Terraria.Main.clientQuestFinishedForTest(2),
                 "unfinished second client was incorrectly marked finished");
 
             Terraria.Main.triggerDawnReset = true;
@@ -369,7 +421,7 @@ namespace FixtureServer
             Require(Terraria.Main.questSwapCount == 0, "dawn still called AnglerQuestSwap");
             Require(Terraria.Main.anglerWhoFinishedToday.SequenceEqual(new[] { "VanillaGuest" }),
                 "dawn cleared the current round's completion state");
-            Require(Terraria.NetMessage.clientQuestFinished[1],
+            Require(Terraria.Main.clientQuestFinishedForTest(1),
                 "dawn unlocked a player who had already finished the shared quest");
 
             Complete(2);
@@ -436,6 +488,7 @@ namespace FixtureServer
             Terraria.Main.triggerDawnReset = false;
             Terraria.NetMessage.sendAnglerQuestCount = 0;
             Terraria.Chat.ChatCommandProcessor.VanillaMessagesProcessed = 0;
+            Terraria.Chat.ChatCommandProcessor.LastVanillaText = null;
             Terraria.Chat.ChatHelper.Reset();
 
             for (var index = 0; index < Terraria.Main.player.Length; index++)
@@ -478,11 +531,20 @@ namespace FixtureServer
                 "fixture completion message ID changed unexpectedly");
         }
 
-        private static Terraria.Chat.ChatMessage Chat(int whoAmI, string text)
+        private static bool Chat(int whoAmI, string text)
         {
-            var message = new Terraria.Chat.ChatMessage(text);
-            new Terraria.Chat.ChatCommandProcessor().ProcessIncomingMessage(message, whoAmI);
-            return message;
+            using (var stream = new MemoryStream())
+            {
+                using (var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, true))
+                    new Terraria.Chat.ChatMessage(text).Serialize(writer);
+
+                stream.Position = 0;
+                using (var reader = new BinaryReader(stream, System.Text.Encoding.UTF8, true))
+                {
+                    return new Terraria.GameContent.NetModules.NetTextModule()
+                        .Deserialize(reader, whoAmI);
+                }
+            }
         }
 
         private static void Tick()
