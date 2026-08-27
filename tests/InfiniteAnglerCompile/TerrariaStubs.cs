@@ -1,3 +1,5 @@
+using System.IO;
+
 namespace Microsoft.Xna.Framework
 {
     public struct Color
@@ -36,16 +38,15 @@ namespace Terraria.Chat
             Text = text;
         }
 
+        public static ChatMessage Deserialize(BinaryReader reader)
+        {
+            reader.ReadString();
+            return new ChatMessage(reader.ReadString());
+        }
+
         public void Consume()
         {
             IsConsumed = true;
-        }
-    }
-
-    public class ChatCommandProcessor
-    {
-        public void ProcessIncomingMessage(ChatMessage message, int clientId)
-        {
         }
     }
 
@@ -56,6 +57,17 @@ namespace Terraria.Chat
             Microsoft.Xna.Framework.Color color,
             int playerId)
         {
+        }
+    }
+}
+
+namespace Terraria.GameContent.NetModules
+{
+    public class NetTextModule
+    {
+        public virtual bool Deserialize(BinaryReader reader, int senderPlayerId)
+        {
+            return true;
         }
     }
 }
