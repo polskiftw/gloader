@@ -54,18 +54,32 @@ internal static class InfiniteAnglerDawnPatch
     }
 }
 
-// Packet 75 is the authoritative event that a particular network connection
-// turned in the current Angler quest. Let vanilla record its name first, then mark
-// that exact connection slot complete for our shared round.
+// MessageBuffer.GetData is already the proven real-server interception point used
+// by Infinite Angler's packet-75 completion tracking. Use that same boundary for
+// vanilla NetModules chat packets instead of depending on a deeper helper call that
+// may be bypassed or JIT-dispatched differently in the live game.
 [HarmonyPatch]
-internal static class InfiniteAnglerCompletionPatch
+internal static class InfiniteAnglerMessageBufferPatch
 {
     private static MethodBase TargetMethod() => InfiniteAnglerRuntime.MessageBufferGetDataMethod;
 
     [HarmonyPrefix]
-    private static void Prefix(MessageBuffer __instance, int __0, ref bool __state)
+    private static bool Prefix(
+        MessageBuffer __instance,
+        int __0,
+        int __1,
+        ref int __2,
+        ref bool __state)
     {
         __state = InfiniteAnglerRuntime.IsAnglerCompletionPacket(__instance, __0);
+
+        if (!InfiniteAnglerRuntime.TryHandleIncomingChatPacket(__instance, __0, __1))
+            return true;
+
+        // We handled this NetModules packet ourselves. Set the out message type to
+        // the real packet id and skip vanilla so the command cannot be broadcast.
+        __2 = InfiniteAnglerRuntime.NetModulesMessageId;
+        return false;
     }
 
     [HarmonyPostfix]
@@ -73,29 +87,6 @@ internal static class InfiniteAnglerCompletionPatch
     {
         if (__state && __instance != null)
             InfiniteAnglerRuntime.HandleQuestCompletion(__instance.whoAmI);
-    }
-}
-
-// Vanilla multiplayer chat reaches the server as a NetTextModule packet. Hook that
-// network boundary directly rather than the tiny downstream ChatCommandProcessor
-// helper. For a !fish command we consume the packet and report success; for every
-// other message we rewind the BinaryReader and let vanilla deserialize it untouched.
-[HarmonyPatch]
-internal static class InfiniteAnglerChatPatch
-{
-    [HarmonyPrepare]
-    private static bool Prepare() => InfiniteAnglerRuntime.ParticipationCommandsEnabled;
-
-    private static MethodBase TargetMethod() => InfiniteAnglerRuntime.NetTextDeserializeMethod;
-
-    [HarmonyPrefix]
-    private static bool Prefix(BinaryReader __0, int __1, ref bool __result)
-    {
-        if (!InfiniteAnglerRuntime.TryHandleNetTextMessage(__0, __1))
-            return true;
-
-        __result = true;
-        return false;
     }
 }
 
@@ -130,15 +121,17 @@ internal static class InfiniteAnglerRuntime
     private static FieldInfo _clientName;
     private static MethodInfo _sendAnglerQuest;
     private static int _anglerQuestFinishedMessageId;
+    private static int _netTextModuleId;
     private static bool _advancing;
     private static bool _advanceFailureLogged;
+    private static bool _chatDecodeFailureLogged;
 
     public static bool ParticipationCommandsEnabled { get; private set; }
+    public static int NetModulesMessageId { get; private set; }
     public static FieldInfo FinishedTodayField { get; private set; }
     public static MethodBase UpdateTimeMethod { get; private set; }
     public static MethodBase UpdateTimeStartDayMethod { get; private set; }
     public static MethodBase MessageBufferGetDataMethod { get; private set; }
-    public static MethodBase NetTextDeserializeMethod { get; private set; }
     public static MethodInfo AnglerQuestSwapMethod { get; private set; }
 
     public static void Initialize(string modDirectory)
@@ -187,6 +180,7 @@ internal static class InfiniteAnglerRuntime
 
         var messageIdType = gameAssembly.GetType("Terraria.ID.MessageID", throwOnError: true);
         _anglerQuestFinishedMessageId = ReadConstantInt(messageIdType, "AnglerQuestFinished");
+        NetModulesMessageId = ReadConstantInt(messageIdType, "NetModules");
 
         if (!typeof(IList<string>).IsAssignableFrom(FinishedTodayField.FieldType))
             throw new InvalidOperationException("Main.anglerWhoFinishedToday is no longer an IList<string>.");
@@ -195,18 +189,15 @@ internal static class InfiniteAnglerRuntime
             throw new InvalidOperationException("Main.player is no longer an array.");
 
         ParticipationCommandsEnabled = LoadParticipationConfig(modDirectory);
-        NetTextDeserializeMethod = null;
+        _netTextModuleId = -1;
+        _chatDecodeFailureLogged = false;
 
         if (ParticipationCommandsEnabled)
         {
-            var netTextModuleType = gameAssembly.GetType(
-                "Terraria.GameContent.NetModules.NetTextModule",
-                throwOnError: true);
-            NetTextDeserializeMethod = RequireInstanceMethod(
-                netTextModuleType,
-                "Deserialize",
-                typeof(bool),
-                new[] { typeof(BinaryReader), typeof(int) });
+            _netTextModuleId = ResolveNetTextModuleId(gameAssembly);
+            Console.WriteLine(
+                "[Infinite Angler] Chat interception armed at MessageBuffer.GetData: packet " +
+                NetModulesMessageId + ", NetText module " + _netTextModuleId + ".");
         }
 
         CompletedSlots.Clear();
@@ -222,6 +213,56 @@ internal static class InfiniteAnglerRuntime
         }
 
         return buffer.readBuffer[start] == _anglerQuestFinishedMessageId;
+    }
+
+    public static bool TryHandleIncomingChatPacket(MessageBuffer buffer, int start, int length)
+    {
+        if (!ParticipationCommandsEnabled || buffer == null || GetNetMode() != 2 ||
+            buffer.readBuffer == null || start < 0 || start >= buffer.readBuffer.Length)
+        {
+            return false;
+        }
+
+        if (buffer.readBuffer[start] != NetModulesMessageId)
+            return false;
+
+        // In MessageBuffer.GetData, start points at the MessageID byte. Packet 82 is
+        // followed by the UInt16 NetModule id and then that module's payload. Parse a
+        // private view over the backing buffer so the real Terraria reader is never
+        // moved when this packet turns out not to be our command.
+        var payloadStart = start + 1;
+        if (payloadStart < 0 || payloadStart + 2 > buffer.readBuffer.Length)
+            return false;
+
+        try
+        {
+            using (var stream = new MemoryStream(
+                buffer.readBuffer,
+                payloadStart,
+                buffer.readBuffer.Length - payloadStart,
+                writable: false))
+            using (var reader = new BinaryReader(stream))
+            {
+                var moduleId = reader.ReadUInt16();
+                if (moduleId != _netTextModuleId)
+                    return false;
+
+                var message = ChatMessage.Deserialize(reader);
+                return TryHandleChatCommand(message, buffer.whoAmI);
+            }
+        }
+        catch (Exception ex)
+        {
+            if (!_chatDecodeFailureLogged)
+            {
+                _chatDecodeFailureLogged = true;
+                Console.Error.WriteLine(
+                    "[Infinite Angler] Failed to decode a NetText packet at MessageBuffer.GetData: " +
+                    Unwrap(ex));
+            }
+
+            return false;
+        }
     }
 
     public static void HandleQuestCompletion(int whoAmI)
@@ -267,34 +308,6 @@ internal static class InfiniteAnglerRuntime
         SendAnglerQuest(whoAmI);
     }
 
-    public static bool TryHandleNetTextMessage(BinaryReader reader, int clientId)
-    {
-        if (!ParticipationCommandsEnabled || reader == null || GetNetMode() != 2)
-            return false;
-
-        var stream = reader.BaseStream;
-        if (stream == null || !stream.CanSeek)
-            return false;
-
-        var start = stream.Position;
-        try
-        {
-            var message = ChatMessage.Deserialize(reader);
-            if (TryHandleChatCommand(message, clientId))
-                return true;
-        }
-        catch
-        {
-            // This is only a look-ahead. If it is not a valid ChatMessage, restore
-            // the reader and let Terraria's own NetTextModule handle the packet.
-            stream.Position = start;
-            return false;
-        }
-
-        stream.Position = start;
-        return false;
-    }
-
     public static bool TryHandleChatCommand(ChatMessage message, int clientId)
     {
         if (!ParticipationCommandsEnabled || message == null || GetNetMode() != 2)
@@ -307,16 +320,25 @@ internal static class InfiniteAnglerRuntime
             return false;
         }
 
-        if (!IsFullyConnectedSlot(clientId))
-            return false;
+        // Once a valid !fish command reaches us, never leak it into public chat. A
+        // sender that is still transitioning into State 10 gets a private response
+        // instead of silently becoming an ordinary Say message.
+        if (!IsValidClientSlot(clientId))
+            return true;
 
-        // The packet is consumed at NetTextModule.Deserialize. Marking this local
-        // ChatMessage consumed as well keeps the command's intent explicit.
         message.Consume();
+
+        if (!IsFullyConnectedSlot(clientId))
+        {
+            SendCommandReply(clientId, "Your player connection is not fully ready yet. Try again in a moment.");
+            return true;
+        }
 
         var argument = text.Length == 5 ? "status" : text.Substring(5).Trim();
         if (argument.Length == 0)
             argument = "status";
+
+        Console.WriteLine("[Infinite Angler] !fish " + argument + " from slot " + clientId + ".");
 
         var finishedToday = GetFinishedToday();
         RefreshRoundState(finishedToday);
@@ -444,6 +466,12 @@ internal static class InfiniteAnglerRuntime
         return anyRequired;
     }
 
+    private static bool IsValidClientSlot(int index)
+    {
+        var clients = (Array)_netplayClients.GetValue(null);
+        return clients != null && index >= 0 && index < clients.Length && clients.GetValue(index) != null;
+    }
+
     private static bool IsFullyConnectedSlot(int index)
     {
         var clients = (Array)_netplayClients.GetValue(null);
@@ -563,6 +591,41 @@ internal static class InfiniteAnglerRuntime
         }
     }
 
+    private static int ResolveNetTextModuleId(Assembly gameAssembly)
+    {
+        var netTextModuleType = gameAssembly.GetType(
+            "Terraria.GameContent.NetModules.NetTextModule",
+            throwOnError: true);
+        var netManagerType = gameAssembly.GetType("Terraria.Net.NetManager", throwOnError: true);
+
+        object instance = null;
+        var instanceField = AccessTools.Field(netManagerType, "Instance");
+        if (instanceField != null)
+            instance = instanceField.GetValue(null);
+
+        if (instance == null)
+        {
+            var instanceProperty = AccessTools.Property(netManagerType, "Instance");
+            if (instanceProperty != null)
+                instance = instanceProperty.GetValue(null, null);
+        }
+
+        if (instance == null)
+            throw new MissingMemberException(netManagerType.FullName, "Instance");
+
+        var getId = netManagerType
+            .GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+            .SingleOrDefault(method =>
+                method.Name == "GetId" &&
+                method.IsGenericMethodDefinition &&
+                method.GetGenericArguments().Length == 1 &&
+                method.GetParameters().Length == 0)
+            ?? throw new MissingMethodException(netManagerType.FullName, "GetId<T>()");
+
+        return Convert.ToInt32(
+            getId.MakeGenericMethod(netTextModuleType).Invoke(instance, null));
+    }
+
     private static bool LoadParticipationConfig(string modDirectory)
     {
         if (string.IsNullOrWhiteSpace(modDirectory))
@@ -649,18 +712,6 @@ internal static class InfiniteAnglerRuntime
         return type
             .GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
             .SingleOrDefault(method => MethodMatches(method, name, typeof(void), parameterTypes))
-            ?? throw new MissingMethodException(type.FullName, name + "()");
-    }
-
-    private static MethodInfo RequireInstanceMethod(
-        Type type,
-        string name,
-        Type returnType,
-        Type[] parameterTypes)
-    {
-        return type
-            .GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
-            .SingleOrDefault(method => MethodMatches(method, name, returnType, parameterTypes))
             ?? throw new MissingMethodException(type.FullName, name + "()");
     }
 
