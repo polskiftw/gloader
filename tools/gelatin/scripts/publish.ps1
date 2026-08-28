@@ -69,6 +69,11 @@ if (-not (Test-Path $Executable -PathType Leaf)) {
     throw "Publish completed without the required Gelatin.exe."
 }
 
+# SkiaSharp/HarfBuzz can contribute native PDBs even when project debug symbols are
+# disabled. They are optional debugging artifacts and are not required at runtime.
+Get-ChildItem $PublishDirectory -File -Filter "*.pdb" -ErrorAction SilentlyContinue |
+    Remove-Item -Force
+
 # Single-file publish bundles Gelatin.deps.json into Gelatin.exe, so resolve the
 # freshly generated intermediate copy to identify the exact shipped dependency versions.
 $DepsJsonPath = Get-ChildItem (Join-Path $ProjectDirectory "obj") -Recurse -File -Filter "Gelatin.deps.json" -ErrorAction SilentlyContinue |
