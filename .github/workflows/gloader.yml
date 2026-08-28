@@ -138,7 +138,17 @@ jobs:
             --repo "${{ github.repository }}" `
             --target "${{ github.sha }}" `
             --title "gloader v$env:RELEASE_VERSION" `
-            --notes "Fixes Infinite Angler command interception by moving !fish handling onto MessageBuffer.GetData, the same server packet boundary already used successfully for packet-75 Angler turn-ins. Participation commands now recognize NetModules packet 82, resolve the runtime NetText module id, decode the vanilla ChatMessage without disturbing unrelated packets, and consume valid !fish commands before vanilla can broadcast them. The synthetic integration fixture now sends a complete packet-82 frame through MessageBuffer.GetData instead of directly calling a fake chat helper, and still covers IN/OUT quorum, opted-out turn-ins, empty quorum, dawn, joins, and disconnects."
+            --notes "Replaces DVDLogo's classic DVD mark asset with the new owl mascot while preserving the existing bouncing/color-change behavior and configuration. This release also includes the repository licensing and third-party notice packaging added since v0.1.17-alpha."
+
+      - name: Refresh owl release notes
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.head_commit.message == 'Refresh 0.1.18-alpha release notes'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release edit "v0.1.18-alpha" `
+            --repo "${{ github.repository }}" `
+            --notes "Replaces DVDLogo's classic DVD mark asset with the new owl mascot while preserving the existing bouncing/color-change behavior and configuration. This release also includes the repository licensing and third-party notice packaging added since v0.1.17-alpha."
 
       - name: Upload
         uses: actions/upload-artifact@v4
