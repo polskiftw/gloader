@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using System.IO.Compression;
 using Gelatin.Core.Models;
 using SkiaSharp;
 
@@ -12,6 +14,7 @@ public readonly record struct PixelRect(int X, int Y, int Width, int Height)
 public static class ImageProcessor
 {
     private static readonly byte[] PngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
+    private static readonly uint[] PngCrcTable = BuildPngCrcTable();
 
     public static (int Width, int Height) GetDimensions(ReadOnlySpan<byte> encoded)
     {
@@ -63,9 +66,9 @@ public static class ImageProcessor
         using var source = Decode(png);
         ValidateRect(rect, source.Width, source.Height);
         using var result = new SKBitmap(new SKImageInfo(rect.Width, rect.Height, SKColorType.Rgba8888, SKAlphaType.Unpremul));
-        using var canvas = new SKCanvas(result);
-        canvas.Clear(SKColors.Transparent);
-        canvas.DrawBitmap(source, new SKRect(rect.X, rect.Y, rect.Right, rect.Bottom), new SKRect(0, 0, rect.Width, rect.Height));
+        for (var y = 0; y < rect.Height; y++)
+        for (var x = 0; x < rect.Width; x++)
+            result.SetPixel(x, y, source.GetPixel(rect.X + x, rect.Y + y));
         return EncodePng(result);
     }
 
@@ -181,11 +184,84 @@ public static class ImageProcessor
         config.Image.Height = crop.Height;
     }
 
+    // Skia's normal PNG encode path may canonicalize fully transparent pixels to transparent black.
+    // Gelatin's alpha-repair workflow requires hidden RGB to survive, so emit lossless RGBA PNG scanlines directly.
     public static byte[] EncodePng(SKBitmap bitmap)
     {
-        using var image = SKImage.FromBitmap(bitmap);
-        using var data = image.Encode(SKEncodedImageFormat.Png, 100) ?? throw new GelFormatException("The processed image could not be encoded as PNG.");
-        return data.ToArray();
+        ArgumentNullException.ThrowIfNull(bitmap);
+        if (bitmap.Width < 1 || bitmap.Height < 1) throw new GelFormatException("The processed image has invalid dimensions.");
+        try
+        {
+            using var output = new MemoryStream();
+            output.Write(PngSignature);
+
+            Span<byte> ihdr = stackalloc byte[13];
+            BinaryPrimitives.WriteUInt32BigEndian(ihdr[..4], (uint)bitmap.Width);
+            BinaryPrimitives.WriteUInt32BigEndian(ihdr[4..8], (uint)bitmap.Height);
+            ihdr[8] = 8;
+            ihdr[9] = 6;
+            ihdr[10] = 0;
+            ihdr[11] = 0;
+            ihdr[12] = 0;
+            WritePngChunk(output, "IHDR"u8, ihdr);
+
+            using var compressed = new MemoryStream();
+            using (var zlib = new ZLibStream(compressed, CompressionLevel.Optimal, leaveOpen: true))
+            {
+                var row = new byte[checked(bitmap.Width * 4 + 1)];
+                row[0] = 0;
+                for (var y = 0; y < bitmap.Height; y++)
+                {
+                    var offset = 1;
+                    for (var x = 0; x < bitmap.Width; x++)
+                    {
+                        var color = bitmap.GetPixel(x, y);
+                        row[offset++] = color.Red;
+                        row[offset++] = color.Green;
+                        row[offset++] = color.Blue;
+                        row[offset++] = color.Alpha;
+                    }
+                    zlib.Write(row);
+                }
+            }
+            WritePngChunk(output, "IDAT"u8, compressed.ToArray());
+            WritePngChunk(output, "IEND"u8, ReadOnlySpan<byte>.Empty);
+            return output.ToArray();
+        }
+        catch (GelFormatException) { throw; }
+        catch (Exception ex) when (ex is IOException or OverflowException or ArgumentException)
+        {
+            throw new GelFormatException("The processed image could not be encoded as PNG.", ex);
+        }
+    }
+
+    private static void WritePngChunk(Stream output, ReadOnlySpan<byte> type, ReadOnlySpan<byte> data)
+    {
+        Span<byte> length = stackalloc byte[4];
+        BinaryPrimitives.WriteUInt32BigEndian(length, checked((uint)data.Length));
+        output.Write(length);
+        output.Write(type);
+        output.Write(data);
+
+        var crc = 0xffffffffu;
+        foreach (var value in type) crc = PngCrcTable[(crc ^ value) & 0xff] ^ (crc >> 8);
+        foreach (var value in data) crc = PngCrcTable[(crc ^ value) & 0xff] ^ (crc >> 8);
+        crc ^= 0xffffffffu;
+        Span<byte> encodedCrc = stackalloc byte[4];
+        BinaryPrimitives.WriteUInt32BigEndian(encodedCrc, crc);
+        output.Write(encodedCrc);
+    }
+
+    private static uint[] BuildPngCrcTable()
+    {
+        var table = new uint[256];
+        for (uint n = 0; n < table.Length; n++)
+        {
+            var c = n;
+            for (var k = 0; k < 8; k++) c = (c & 1) != 0 ? 0xedb88320u ^ (c >> 1) : c >> 1;
+            table[n] = c;
+        }
+        return table;
     }
 
     private static double SmoothStep(double edge0, double edge1, double value)
