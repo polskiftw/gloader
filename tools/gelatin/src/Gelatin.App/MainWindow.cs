@@ -38,7 +38,7 @@ public sealed class MainWindow : Window
 
     public MainWindow()
     {
-        Title = "Gelatin 0.1.3";
+        Title = "Gelatin 0.1.4";
         Width = 1360;
         Height = 880;
         MinWidth = 980;
@@ -109,7 +109,7 @@ public sealed class MainWindow : Window
         panel.Children.Add(ActionButton("Gel", () => ShowWorkspace(Workspace.Gel), accent: true));
         panel.Children.Add(ActionButton("Lab", () => ShowWorkspace(Workspace.Lab), accent: true));
         panel.Children.Add(Separator());
-        panel.Children.Add(ActionButton("About", () => Dialogs.ShowInfoAsync(this, "About Gelatin", "Gelatin 0.1.3\nStandalone gel asset authoring and physics lab.")));
+        panel.Children.Add(ActionButton("About", () => Dialogs.ShowInfoAsync(this, "About Gelatin", "Gelatin 0.1.4\nStandalone gel asset authoring and physics lab.")));
         return new Border { Background = new SolidColorBrush(Color.Parse("#222229")), BorderBrush = new SolidColorBrush(Color.Parse("#33333C")), BorderThickness = new Thickness(0, 0, 0, 1), Child = panel };
     }
 
@@ -855,7 +855,7 @@ public sealed class MainWindow : Window
     private void RefreshChrome()
     {
         var dirty = _controller.IsDirty ? " *" : string.Empty;
-        Title = $"Gelatin 0.1.3 — {_controller.Document.Config.AssetName}{dirty}";
+        Title = $"Gelatin 0.1.4 — {_controller.Document.Config.AssetName}{dirty}";
         var config = _controller.Document.Config;
         var animation = config.Animation is { } animated ? $"   |   {animated.Frames.Count} animated frame(s)" : string.Empty;
         _status.Text = $"{config.Image.Width} × {config.Image.Height} px{animation}   |   {config.Cores.Count} core(s)   |   {config.RigidityStrokes.Count} rigidity stroke(s)   |   {(_controller.IsDirty ? "Unsaved changes" : Path.GetFileName(_controller.CurrentPath))}";

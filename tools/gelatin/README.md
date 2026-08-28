@@ -1,4 +1,4 @@
-# Gelatin 0.1.3
+# Gelatin 0.1.4
 
 Gelatin is a standalone Windows 11 x64 editor for preparing images as deformable `.gel` assets. It does not need Terraria or GLoader, and it never launches or modifies either program.
 
@@ -10,8 +10,8 @@ prepare image -> place jello cores / paint rigidity -> abuse it in the Lab -> sa
 
 ## Run the packaged app
 
-1. Download the `gelatin-0.1.3-win-x64` Actions artifact.
-2. Extract `gelatin-0.1.3-win-x64.zip` to any normal folder.
+1. Download the `gelatin-0.1.4-win-x64` Actions artifact.
+2. Extract `gelatin-0.1.4-win-x64.zip` to any normal folder.
 3. Run `Gelatin.exe`.
 
 The package is self-contained. A separate .NET installation is not required.
@@ -129,7 +129,7 @@ Offset  Size  Meaning
 12+N    M     exact PNG bytes
 ```
 
-Gelatin 0.1.3 keeps the `GEL1` binary container unchanged. Static assets remain `schemaVersion: 1`; animated assets use `schemaVersion: 2`, where the embedded PNG is a texture atlas and JSON stores each logical frame rectangle, exact source delay in milliseconds, and repetition count (`-1` means infinite). Gelatin continues to read 0.1.0/0.1.1/0.1.2 static GEL1 files without migration. Gello therefore only needs PNG-atlas sampling and timing logic; it never needs a GIF decoder. The recovery source is never serialized. The loader rejects incorrect magic, unsafe or impossible lengths, truncation, trailing bytes, invalid UTF-8/JSON, unsupported schema versions, invalid PNG data, invalid animation metadata, atlas rectangles outside the PNG, and dimension mismatches. Saves are atomic. The complete JSON schema is in `gel.schema.json`.
+Gelatin 0.1.4 keeps the `GEL1` binary container unchanged. Static assets remain `schemaVersion: 1`; animated assets use `schemaVersion: 2`, where the embedded PNG is a texture atlas and JSON stores each logical frame rectangle, exact source delay in milliseconds, and repetition count (`-1` means infinite). Gelatin continues to read 0.1.0/0.1.1/0.1.2/0.1.3 static GEL1 files without migration. Gello therefore only needs PNG-atlas sampling and timing logic; it never needs a GIF decoder. The recovery source is never serialized. The loader rejects incorrect magic, unsafe or impossible lengths, truncation, trailing bytes, invalid UTF-8/JSON, unsupported schema versions, invalid PNG data, invalid animation metadata, atlas rectangles outside the PNG, and dimension mismatches. Saves are atomic. The complete JSON schema is in `gel.schema.json`.
 
 Lab-only state—gravity, chamber size, simulation quality/speed, pause state, velocity, deformation, and editor pan/zoom—is not serialized.
 
@@ -171,7 +171,7 @@ Outputs:
 
 ```text
 tools/gelatin/dist/gelatin/Gelatin.exe
-tools/gelatin/dist/gelatin-0.1.3-win-x64.zip
+tools/gelatin/dist/gelatin-0.1.4-win-x64.zip
 ```
 
 The publish script prints the package SHA-256. The dedicated Gelatin workflow performs restore, Release build, tests, self-contained Windows x64 publish, package/hash verification, and artifact upload without changing the GLoader package.

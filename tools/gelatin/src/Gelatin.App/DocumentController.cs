@@ -8,7 +8,7 @@ namespace Gelatin.App;
 
 public sealed class DocumentController
 {
-    private const string ToolVersion = "0.1.3";
+    private const string ToolVersion = "0.1.4";
     private GelDocument _document;
     private readonly DocumentHistory _history = new();
 
