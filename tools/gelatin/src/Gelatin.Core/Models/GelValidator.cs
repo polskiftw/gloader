@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using Gelatin.Core.Runtime;
 
 namespace Gelatin.Core.Models;
 
@@ -18,6 +19,10 @@ public static class GelValidator
         if (string.IsNullOrWhiteSpace(config.AssetName) || config.AssetName.Length > 256) Fail("assetName must contain 1 to 256 characters.");
         var image = config.Image ?? throw new GelFormatException("Invalid GEL configuration: image is required.");
         var material = config.Material ?? throw new GelFormatException("Invalid GEL configuration: material is required.");
+        var appearance = config.Appearance ?? throw new GelFormatException("Invalid GEL configuration: appearance may not be null.");
+        var motion = config.Motion ?? throw new GelFormatException("Invalid GEL configuration: motion may not be null.");
+        var physics = config.Physics ?? throw new GelFormatException("Invalid GEL configuration: physics may not be null.");
+        var bounceEffect = config.BounceEffect ?? throw new GelFormatException("Invalid GEL configuration: bounceEffect may not be null.");
         var cores = config.Cores ?? throw new GelFormatException("Invalid GEL configuration: cores is required.");
         var strokes = config.RigidityStrokes ?? throw new GelFormatException("Invalid GEL configuration: rigidityStrokes is required.");
         var authoring = config.Authoring ?? throw new GelFormatException("Invalid GEL configuration: authoring is required.");
@@ -34,6 +39,15 @@ public static class GelValidator
         Range(material.BendResistance, 0, 1, "material.bendResistance");
         Range(material.MaxStretch, 1.05, 3, "material.maxStretch");
         Range(material.SelfCollisionThickness, 0.0001, 0.1, "material.selfCollisionThickness");
+
+        Range(appearance.Opacity, 0, 1, "appearance.opacity");
+        Range(motion.SpeedPixelsPerSecond, GelRuntimeSemantics.MinSpeedPixelsPerSecond, GelRuntimeSemantics.MaxSpeedPixelsPerSecond, "motion.speedPixelsPerSecond");
+        Range(physics.Restitution, 0, 1, "physics.restitution");
+        Range(physics.Friction, 0, 1, "physics.friction");
+        if (!string.Equals(bounceEffect.Tint, GelRuntimeSemantics.TintOff, StringComparison.Ordinal) &&
+            !string.Equals(bounceEffect.Tint, GelRuntimeSemantics.TintRandomNeon, StringComparison.Ordinal))
+            Fail("bounceEffect.tint must be 'off' or 'random_neon'.");
+        Range(bounceEffect.TintIntensity, 0, 1, "bounceEffect.tintIntensity");
 
         if (cores.Count > MaxCores) Fail($"cores may contain at most {MaxCores} entries.");
         var ids = new HashSet<int>();
