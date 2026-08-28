@@ -4,8 +4,7 @@ on:
   push:
     paths:
       - ".github/workflows/gelatin-cleanup.yml"
-      - ".github/scripts/gelatin_cleanup.py"
-      - ".github/scripts/gelatin_cleanup_fix.py"
+      - ".github/scripts/gelatin_post_cleanup.py"
 
 permissions:
   contents: write
@@ -28,19 +27,16 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
-      - name: Apply cleanup patch
-        run: python .github/scripts/gelatin_cleanup.py
-
-      - name: Apply validation fixes
-        run: python .github/scripts/gelatin_cleanup_fix.py
+      - name: Apply post-cleanup API polish
+        run: python .github/scripts/gelatin_post_cleanup.py
 
       - name: Restore
         working-directory: tools/gelatin
         run: dotnet restore Gelatin.sln
 
-      - name: Build Release
+      - name: Build Release without warnings
         working-directory: tools/gelatin
-        run: dotnet build Gelatin.sln -c Release --no-restore
+        run: dotnet build Gelatin.sln -c Release --no-restore -warnaserror
 
       - name: Run tests
         working-directory: tools/gelatin
@@ -68,13 +64,13 @@ jobs:
             }
           }
 
-      - name: Commit cleanup
+      - name: Commit final cleanup
         shell: pwsh
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add tools/gelatin
           git diff --cached --quiet
-          if ($LASTEXITCODE -eq 0) { throw "Cleanup produced no staged Gelatin changes." }
-          git commit -m "Gelatin 0.1.6: clean up editor internals"
+          if ($LASTEXITCODE -eq 0) { throw "Final cleanup produced no staged Gelatin changes." }
+          git commit -m "Polish Gelatin cancellable APIs"
           git push origin HEAD:main
