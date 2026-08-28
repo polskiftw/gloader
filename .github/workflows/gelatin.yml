@@ -53,7 +53,7 @@ jobs:
       - name: Verify clean single-file package
         shell: pwsh
         run: |
-          $archive = "tools/gelatin/dist/gelatin-0.1.2-win-x64.zip"
+          $archive = "tools/gelatin/dist/gelatin-0.1.3-win-x64.zip"
           $publish = "tools/gelatin/dist/gelatin"
           $executable = Join-Path $publish "Gelatin.exe"
           $licenses = Join-Path $publish "licenses"
@@ -114,6 +114,6 @@ jobs:
       - name: Upload Gelatin artifact
         uses: actions/upload-artifact@v6
         with:
-          name: gelatin-0.1.2-win-x64
-          path: tools/gelatin/dist/gelatin-0.1.2-win-x64.zip
+          name: gelatin-0.1.3-win-x64
+          path: tools/gelatin/dist/gelatin-0.1.3-win-x64.zip
           if-no-files-found: error

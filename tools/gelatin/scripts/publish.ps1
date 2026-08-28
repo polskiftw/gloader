@@ -8,7 +8,7 @@ $ProjectDirectory = Split-Path -Parent $Project
 $DistRoot = Join-Path $ToolRoot "dist"
 $PublishDirectory = Join-Path $DistRoot "gelatin"
 $LegalDirectory = Join-Path $PublishDirectory "licenses"
-$Archive = Join-Path $DistRoot "gelatin-0.1.2-win-x64.zip"
+$Archive = Join-Path $DistRoot "gelatin-0.1.3-win-x64.zip"
 $License = Join-Path $RepoRoot "LICENSE.md"
 $ThirdPartyNotices = Join-Path $RepoRoot "THIRD-PARTY-NOTICES.txt"
 

@@ -26,6 +26,46 @@ public sealed class AnimatedImageTests
         });
     }
 
+
+    [Fact]
+    public void GifImportDecodesDistinctCompositedFrames()
+    {
+        var result = AnimatedImageProcessor.ImportGif(Convert.FromBase64String(TwoFrameGifBase64));
+        var config = new GelConfig
+        {
+            SchemaVersion = 2,
+            Image = new ImageConfig { Width = 2, Height = 2 },
+            Animation = result.Animation,
+            Cores = []
+        };
+        var first = RawRgbaCodec.Decode(AnimatedImageProcessor.GetFramePng(result.PngBytes, config, 0));
+        var second = RawRgbaCodec.Decode(AnimatedImageProcessor.GetFramePng(result.PngBytes, config, 1));
+
+        Assert.Equal(255, first.Pixels[0]);
+        Assert.Equal(0, first.Pixels[1]);
+        Assert.Equal(0, second.Pixels[0]);
+        Assert.Equal(255, second.Pixels[1]);
+    }
+
+    [Fact]
+    public void AnimatedTransformTouchesEveryFrameAndPreservesTiming()
+    {
+        var result = AnimatedImageProcessor.ImportGif(Convert.FromBase64String(TwoFrameGifBase64));
+        var config = new GelConfig
+        {
+            SchemaVersion = 2,
+            Image = new ImageConfig { Width = 2, Height = 2 },
+            Animation = result.Animation,
+            Cores = []
+        };
+
+        var resized = AnimatedImageProcessor.TransformAnimated(result.PngBytes, config, frame => RawRgbaTransforms.Resize(frame, 4, 3));
+
+        Assert.Equal((4, 3), (resized.Width, resized.Height));
+        Assert.Equal([50, 120], resized.Animation!.Frames.Select(frame => frame.DurationMs).ToArray());
+        Assert.All(resized.Animation.Frames, frame => Assert.Equal((4, 3), (frame.Width, frame.Height)));
+    }
+
     [Fact]
     public void AnimatedGelRoundTripsThroughGel1Container()
     {

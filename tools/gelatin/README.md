@@ -1,4 +1,4 @@
-# Gelatin 0.1.2
+# Gelatin 0.1.3
 
 Gelatin is a standalone Windows 11 x64 editor for preparing images as deformable `.gel` assets. It does not need Terraria or GLoader, and it never launches or modifies either program.
 
@@ -10,8 +10,8 @@ prepare image -> place jello cores / paint rigidity -> abuse it in the Lab -> sa
 
 ## Run the packaged app
 
-1. Download the `gelatin-0.1.2-win-x64` Actions artifact.
-2. Extract `gelatin-0.1.2-win-x64.zip` to any normal folder.
+1. Download the `gelatin-0.1.3-win-x64` Actions artifact.
+2. Extract `gelatin-0.1.3-win-x64.zip` to any normal folder.
 3. Run `Gelatin.exe`.
 
 The package is self-contained. A separate .NET installation is not required.
@@ -20,7 +20,7 @@ The package is self-contained. A separate .NET installation is not required.
 
 ### Asset
 
-- Open or drag/drop PNG, JPEG, WebP, and `.gel` files.
+- Open or drag/drop PNG, JPEG, WebP, animated GIF, and `.gel` files. Animated GIF imports preserve per-frame delays and repetition semantics, decode into full RGBA frames, and are stored as a single PNG atlas plus timing metadata in GEL1 schema v2.
 - Draw and apply the existing rectangular crop. Existing normalized cores and rigidity strokes are remapped; elements wholly outside the crop are removed.
 - Use **Polygon cutout** for irregular shapes. Click source-pixel vertices, close with Enter/double-click/the first vertex, then drag vertices or insert one by clicking an edge. Delete removes a selected vertex while at least three remain; arrow keys nudge one source pixel and Shift+arrow nudges ten.
 - Applying a polygon cutout makes everything outside the polygon transparent with an antialiased boundary, then automatically trims margins where alpha is exactly zero. The cutout and trim are one undoable edit.
@@ -30,6 +30,8 @@ The package is self-contained. A separate .NET installation is not required.
 - **Erase alpha** paints alpha to zero with a hard circular source-pixel brush while retaining hidden RGB.
 - **Restore alpha** copies exact RGBA pixels from a synchronized session-only recovery source. Brush drags are interpolated and each drag commits as one undo step.
 - Export the current processed PNG or pretty-printed JSON for inspection.
+
+Animated assets play automatically in the Asset and Gel workspaces with their preserved timing. Image edits apply to every frame, and transparent trimming uses the union of visible pixels across all frames so the asset never shifts between frames.
 
 The canvas has a transparency checkerboard. Use the mouse wheel to zoom and middle/right drag to pan. Polygon coordinates and alpha brush size remain defined in source pixels at every zoom level.
 
@@ -57,7 +59,7 @@ Core coordinates, radii, and rigidity stroke points are normalized, so resizing 
 
 ### Lab
 
-The Lab runs the same UI-independent XPBD solver used to interpret the saved material and core configuration. The PNG is texture-mapped over the live triangulated mesh; it is not a scaled rectangle animation.
+The Lab runs the same UI-independent XPBD solver used to interpret the saved material and core configuration. The PNG is texture-mapped over the live triangulated mesh; it is not a scaled rectangle animation. Animated assets select the correctly timed atlas frame while that same texture is deformed by the mesh, so animation and gel physics run together.
 
 - Drag a local point and release to throw the gel.
 - Use directional **SMACK** controls for large impulses.
@@ -127,7 +129,7 @@ Offset  Size  Meaning
 12+N    M     exact PNG bytes
 ```
 
-Gelatin 0.1.2 keeps the `GEL1` container and `schemaVersion: 1` unchanged and reads 0.1.0/0.1.1-compatible GEL1 files without migration. The recovery source is never serialized. The loader rejects incorrect magic, unsafe or impossible lengths, truncation, trailing bytes, invalid UTF-8/JSON, unsupported schema versions, invalid PNG data, and dimension mismatches. Saves are atomic. The complete JSON schema is in `gel.schema.json`.
+Gelatin 0.1.3 keeps the `GEL1` binary container unchanged. Static assets remain `schemaVersion: 1`; animated assets use `schemaVersion: 2`, where the embedded PNG is a texture atlas and JSON stores each logical frame rectangle, exact source delay in milliseconds, and repetition count (`-1` means infinite). Gelatin continues to read 0.1.0/0.1.1/0.1.2 static GEL1 files without migration. Gello therefore only needs PNG-atlas sampling and timing logic; it never needs a GIF decoder. The recovery source is never serialized. The loader rejects incorrect magic, unsafe or impossible lengths, truncation, trailing bytes, invalid UTF-8/JSON, unsupported schema versions, invalid PNG data, invalid animation metadata, atlas rectangles outside the PNG, and dimension mismatches. Saves are atomic. The complete JSON schema is in `gel.schema.json`.
 
 Lab-only state—gravity, chamber size, simulation quality/speed, pause state, velocity, deformation, and editor pan/zoom—is not serialized.
 
@@ -169,7 +171,7 @@ Outputs:
 
 ```text
 tools/gelatin/dist/gelatin/Gelatin.exe
-tools/gelatin/dist/gelatin-0.1.2-win-x64.zip
+tools/gelatin/dist/gelatin-0.1.3-win-x64.zip
 ```
 
 The publish script prints the package SHA-256. The dedicated Gelatin workflow performs restore, Release build, tests, self-contained Windows x64 publish, package/hash verification, and artifact upload without changing the GLoader package.

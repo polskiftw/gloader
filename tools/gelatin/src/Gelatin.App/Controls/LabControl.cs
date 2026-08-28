@@ -10,6 +10,7 @@ using Avalonia.Skia;
 using Avalonia.Threading;
 using Gelatin.Core.Authoring;
 using Gelatin.Core.Imaging;
+using Gelatin.Core.Models;
 using Gelatin.Core.Physics;
 using SkiaSharp;
 
@@ -23,6 +24,8 @@ public sealed class LabControl : Control
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private FixedStepSimulation? _simulation;
     private SKImage? _texture;
+    private AnimationConfig? _animation;
+    private double _animationElapsedMs;
     private long _lastTicks;
     private bool _advancing;
     private bool _dragging;
@@ -87,6 +90,7 @@ public sealed class LabControl : Control
         lock (_simulationLock)
         {
             _simulation?.ResetToRest();
+            _animationElapsedMs = 0;
             _dragging = false;
         }
         InvalidateVisual();
@@ -117,13 +121,18 @@ public sealed class LabControl : Control
     {
         base.Render(context);
         LabSnapshot? snapshot;
-        lock (_simulationLock) snapshot = _simulation is null ? null : LabSnapshot.Capture(_simulation.Solver);
+        AnimationFrameConfig? frame = null;
+        lock (_simulationLock)
+        {
+            snapshot = _simulation is null ? null : LabSnapshot.Capture(_simulation.Solver);
+            if (_animation is { Frames.Count: > 0 }) frame = _animation.Frames[AnimatedImageProcessor.FrameIndexAtTime(_animation, _animationElapsedMs)];
+        }
         if (snapshot is null || _texture is null)
         {
             context.FillRectangle(new SolidColorBrush(Color.Parse("#101116")), Bounds);
             return;
         }
-        context.Custom(new LabDrawOperation(Bounds, snapshot, _texture, new Diagnostics(ShowMesh, ShowCores, ShowHeatmap, ShowRigidity, ShowContour, ShowVelocity)));
+        context.Custom(new LabDrawOperation(Bounds, snapshot, _texture, frame, new Diagnostics(ShowMesh, ShowCores, ShowHeatmap, ShowRigidity, ShowContour, ShowVelocity)));
     }
 
     private async void Rebuild()
@@ -147,7 +156,7 @@ public sealed class LabControl : Control
                 try
                 {
                     cancellation.Token.ThrowIfCancellationRequested();
-                    return new LabBuildResult(new FixedStepSimulation(solver, quality), texture);
+                    return new LabBuildResult(new FixedStepSimulation(solver, quality), texture, document.Config.Animation?.DeepClone());
                 }
                 catch
                 {
@@ -163,6 +172,8 @@ public sealed class LabControl : Control
             lock (_simulationLock) _simulation = result.Simulation;
             var previousTexture = _texture;
             _texture = result.Texture;
+            _animation = result.Animation;
+            _animationElapsedMs = 0;
             previousTexture?.Dispose();
             _lastTicks = _clock.ElapsedTicks;
             InvalidateVisual();
@@ -197,7 +208,16 @@ public sealed class LabControl : Control
         {
             await Task.Run(() =>
             {
-                lock (_simulationLock) _simulation?.Advance(elapsed);
+                lock (_simulationLock)
+                {
+                    if (_simulation is not null)
+                    {
+                        var paused = _simulation.Paused;
+                        var speed = _simulation.Speed;
+                        _simulation.Advance(elapsed);
+                        if (!paused) _animationElapsedMs += elapsed * 1000 * Math.Clamp(speed, 0.1, 1);
+                    }
+                }
             });
             InvalidateVisual();
         }
@@ -276,7 +296,7 @@ public sealed class LabControl : Control
         }
     }
 
-    private sealed record LabBuildResult(FixedStepSimulation Simulation, SKImage Texture);
+    private sealed record LabBuildResult(FixedStepSimulation Simulation, SKImage Texture, AnimationConfig? Animation);
     private readonly record struct CoreView(Vector2 Center, float Angle, float RadiusX, float RadiusY);
     private readonly record struct Diagnostics(bool Mesh, bool Cores, bool Heatmap, bool Rigidity, bool Contour, bool Velocity);
 
@@ -284,14 +304,16 @@ public sealed class LabControl : Control
     {
         private readonly LabSnapshot _snapshot;
         private readonly SKImage _texture;
+        private readonly AnimationFrameConfig? _frame;
         private readonly Diagnostics _diagnostics;
         public Rect Bounds { get; }
 
-        public LabDrawOperation(Rect bounds, LabSnapshot snapshot, SKImage texture, Diagnostics diagnostics)
+        public LabDrawOperation(Rect bounds, LabSnapshot snapshot, SKImage texture, AnimationFrameConfig? frame, Diagnostics diagnostics)
         {
             Bounds = bounds;
             _snapshot = snapshot;
             _texture = texture;
+            _frame = frame;
             _diagnostics = diagnostics;
         }
 
@@ -309,7 +331,9 @@ public sealed class LabControl : Control
             canvas.DrawRect(MapRect(new SKRect(0.035f, 0.055f, 0.965f, 0.945f)), wallPaint);
 
             var positions = _snapshot.Positions.Select(Map).ToArray();
-            var tex = _snapshot.Uvs.Select(uv => new SKPoint(uv.X * _texture.Width, uv.Y * _texture.Height)).ToArray();
+            var tex = _frame is null
+                ? _snapshot.Uvs.Select(uv => new SKPoint(uv.X * _texture.Width, uv.Y * _texture.Height)).ToArray()
+                : _snapshot.Uvs.Select(uv => new SKPoint(_frame.X + uv.X * _frame.Width, _frame.Y + uv.Y * _frame.Height)).ToArray();
             using (var vertices = SKVertices.CreateCopy(SKVertexMode.Triangles, positions, tex, null, _snapshot.Indices))
             using (var shader = _texture.ToShader(SKShaderTileMode.Clamp, SKShaderTileMode.Clamp))
             using (var paint = new SKPaint { IsAntialias = true, Shader = shader })

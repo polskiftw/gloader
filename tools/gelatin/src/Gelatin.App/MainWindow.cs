@@ -35,7 +35,7 @@ public sealed class MainWindow : Window
 
     public MainWindow()
     {
-        Title = "Gelatin 0.1.2";
+        Title = "Gelatin 0.1.3";
         Width = 1360;
         Height = 880;
         MinWidth = 980;
@@ -66,7 +66,7 @@ public sealed class MainWindow : Window
 
         _controller.Changed += (_, _) => RefreshChrome();
         _editor.CoreSelected += id => { _editor.SelectedCoreId = id; if (_workspace == Workspace.Gel) BuildGelPanels(); };
-        _editor.PixelPicked += (x, y) => { _backgroundColor = RawRgbaTransforms.Sample(_controller.Document.PngBytes, x, y); UpdateBackgroundPreview(); };
+        _editor.PixelPicked += (x, y) => { _backgroundColor = RawRgbaTransforms.Sample(_controller.GetFramePng(_editor.CurrentFrameIndex), x, y); UpdateBackgroundPreview(); };
         _editor.CropChanged += crop =>
         {
             if (crop is { } value) _status.Text = $"Crop: {value.Width} × {value.Height} px at ({value.X}, {value.Y})";
@@ -104,7 +104,7 @@ public sealed class MainWindow : Window
         panel.Children.Add(ActionButton("Gel", () => ShowWorkspace(Workspace.Gel), accent: true));
         panel.Children.Add(ActionButton("Lab", () => ShowWorkspace(Workspace.Lab), accent: true));
         panel.Children.Add(Separator());
-        panel.Children.Add(ActionButton("About", () => Dialogs.ShowInfoAsync(this, "About Gelatin", "Gelatin 0.1.2\nStandalone gel asset authoring and physics lab.")));
+        panel.Children.Add(ActionButton("About", () => Dialogs.ShowInfoAsync(this, "About Gelatin", "Gelatin 0.1.3\nStandalone gel asset authoring and physics lab.")));
         return new Border { Background = new SolidColorBrush(Color.Parse("#222229")), BorderBrush = new SolidColorBrush(Color.Parse("#33333C")), BorderThickness = new Thickness(0, 0, 0, 1), Child = panel };
     }
 
@@ -124,6 +124,12 @@ public sealed class MainWindow : Window
         _editor.Mode = EditorMode.Select;
         var left = SectionStack("IMAGE PREP");
         left.Children.Add(ActionButton("Open image / .gel", async () => await OpenPickerAsync(), wide: true));
+        if (_controller.Document.Config.Animation is { } animation)
+        {
+            var repeat = animation.RepetitionCount < 0 ? "loops forever" : animation.RepetitionCount == 0 ? "plays once" : $"repeats {animation.RepetitionCount} time(s)";
+            var cycleMs = animation.Frames.Sum(frame => AnimatedImageProcessor.EffectiveDuration(frame.DurationMs));
+            left.Children.Add(new TextBlock { Text = $"Animated GIF: {animation.Frames.Count} frames • {cycleMs} ms/cycle • {repeat}", TextWrapping = TextWrapping.Wrap, Foreground = MutedBrush(), FontSize = 11 });
+        }
         left.Children.Add(Header("Crop"));
         left.Children.Add(ActionButton("Draw crop rectangle", () => _editor.Mode = EditorMode.Crop, wide: true));
         var cropRow = Row();
@@ -210,7 +216,7 @@ public sealed class MainWindow : Window
         backgroundRow.Children.Add(ActionButton("Cancel", CancelBackground));
         right.Children.Add(backgroundRow);
         right.Children.Add(Header("Inspection exports"));
-        right.Children.Add(ActionButton("Export processed PNG", async () => await ExportPngAsync(), wide: true));
+        right.Children.Add(ActionButton("Export embedded PNG / atlas", async () => await ExportPngAsync(), wide: true));
         right.Children.Add(ActionButton("Export JSON", async () => await ExportJsonAsync(), wide: true));
         SetPanels(left, right);
     }
@@ -354,11 +360,21 @@ public sealed class MainWindow : Window
         try
         {
             _status.Text = "Cropping image…";
-            var png = await Task.Run(() => RawRgbaTransforms.Crop(document.PngBytes, crop));
-            if (!ReferenceEquals(document, _controller.Document)) return;
-            _controller.CommitImage(png,
-                config => ImageProcessor.RemapAuthoringForCrop(config, crop, oldWidth, oldHeight),
-                recovery => RawRgbaTransforms.Crop(recovery, crop));
+            if (AnimatedImageProcessor.IsAnimated(document.Config))
+            {
+                var visible = await Task.Run(() => AnimatedImageProcessor.TransformAnimated(document.PngBytes, document.Config, frame => RawRgbaTransforms.Crop(frame, crop)));
+                var recovery = await Task.Run(() => AnimatedImageProcessor.TransformAnimated(document.RecoveryPngBytes ?? document.PngBytes, document.Config, frame => RawRgbaTransforms.Crop(frame, crop)));
+                if (!ReferenceEquals(document, _controller.Document)) return;
+                _controller.CommitStorage(visible, config => ImageProcessor.RemapAuthoringForCrop(config, crop, oldWidth, oldHeight), recovery);
+            }
+            else
+            {
+                var png = await Task.Run(() => RawRgbaTransforms.Crop(document.PngBytes, crop));
+                if (!ReferenceEquals(document, _controller.Document)) return;
+                _controller.CommitImage(png,
+                    config => ImageProcessor.RemapAuthoringForCrop(config, crop, oldWidth, oldHeight),
+                    recovery => RawRgbaTransforms.Crop(recovery, crop));
+            }
             _editor.CancelCrop();
             _editor.Mode = EditorMode.Select;
         }
@@ -386,30 +402,50 @@ public sealed class MainWindow : Window
         try
         {
             _status.Text = "Applying polygon cutout and trimming transparent margins…";
-            var result = await Task.Run(() =>
+            if (AnimatedImageProcessor.IsAnimated(document.Config))
             {
-                var masked = ImageAlphaEditing.ApplyPolygonCutout(document.PngBytes, polygon);
-                var bounds = RawRgbaTransforms.FindTrimBounds(masked, 0);
-                return bounds is null ? (Bounds: (ImagePixelRect?)null, Png: (byte[]?)null) :
-                    (Bounds: (ImagePixelRect?)bounds.Value, Png: (byte[]?)RawRgbaTransforms.Crop(masked, bounds.Value));
-            });
-            if (!ReferenceEquals(document, _controller.Document)) return;
-            if (result.Bounds is not ImagePixelRect bounds || result.Png is null)
-            {
-                _status.Text = "The polygon cutout would make the image completely transparent; nothing was changed.";
-                return;
+                var result = await Task.Run(() =>
+                {
+                    var masked = AnimatedImageProcessor.TransformAnimated(document.PngBytes, document.Config, frame => ImageAlphaEditing.ApplyPolygonCutout(frame, polygon));
+                    var maskedConfig = document.Config.DeepClone();
+                    maskedConfig.Animation = masked.Animation?.DeepClone();
+                    var bounds = AnimatedImageProcessor.FindUnionTrimBounds(masked.PngBytes, maskedConfig, 0);
+                    if (bounds is null) return (Bounds: (ImagePixelRect?)null, Visible: (ImageStorageResult?)null, Recovery: (ImageStorageResult?)null);
+                    var visible = AnimatedImageProcessor.TransformAnimated(masked.PngBytes, maskedConfig, frame => RawRgbaTransforms.Crop(frame, bounds.Value));
+                    var recovery = AnimatedImageProcessor.TransformAnimated(document.RecoveryPngBytes ?? document.PngBytes, document.Config, frame => RawRgbaTransforms.Crop(frame, bounds.Value));
+                    return (Bounds: (ImagePixelRect?)bounds.Value, Visible: (ImageStorageResult?)visible, Recovery: (ImageStorageResult?)recovery);
+                });
+                if (!ReferenceEquals(document, _controller.Document)) return;
+                if (result.Bounds is not ImagePixelRect bounds || result.Visible is null || result.Recovery is null)
+                {
+                    _status.Text = "The polygon cutout would make every animation frame completely transparent; nothing was changed.";
+                    return;
+                }
+                _controller.CommitStorage(result.Visible, config => ImageProcessor.RemapAuthoringForCrop(config, bounds, oldWidth, oldHeight), result.Recovery);
             }
-
-            _controller.CommitImage(result.Png,
-                config => ImageProcessor.RemapAuthoringForCrop(config, bounds, oldWidth, oldHeight),
-                recovery => RawRgbaTransforms.Crop(recovery, bounds));
+            else
+            {
+                var result = await Task.Run(() =>
+                {
+                    var masked = ImageAlphaEditing.ApplyPolygonCutout(document.PngBytes, polygon);
+                    var bounds = RawRgbaTransforms.FindTrimBounds(masked, 0);
+                    return bounds is null ? (Bounds: (ImagePixelRect?)null, Png: (byte[]?)null) :
+                        (Bounds: (ImagePixelRect?)bounds.Value, Png: (byte[]?)RawRgbaTransforms.Crop(masked, bounds.Value));
+                });
+                if (!ReferenceEquals(document, _controller.Document)) return;
+                if (result.Bounds is not ImagePixelRect bounds || result.Png is null)
+                {
+                    _status.Text = "The polygon cutout would make the image completely transparent; nothing was changed.";
+                    return;
+                }
+                _controller.CommitImage(result.Png,
+                    config => ImageProcessor.RemapAuthoringForCrop(config, bounds, oldWidth, oldHeight),
+                    recovery => RawRgbaTransforms.Crop(recovery, bounds));
+            }
             _editor.Mode = EditorMode.Select;
             RefreshChrome();
         }
-        catch (GelFormatException ex)
-        {
-            _status.Text = ex.Message;
-        }
+        catch (GelFormatException ex) { _status.Text = ex.Message; }
         catch (Exception ex) { await Dialogs.ShowErrorAsync(this, "Polygon cutout failed", ex.Message); }
     }
 
@@ -419,9 +455,18 @@ public sealed class MainWindow : Window
         try
         {
             _status.Text = $"Resizing image to {width} × {height}…";
-            var png = await Task.Run(() => RawRgbaTransforms.Resize(document.PngBytes, width, height));
-            if (ReferenceEquals(document, _controller.Document))
-                _controller.CommitImage(png, recoveryTransform: recovery => RawRgbaTransforms.Resize(recovery, width, height));
+            if (AnimatedImageProcessor.IsAnimated(document.Config))
+            {
+                var visible = await Task.Run(() => AnimatedImageProcessor.TransformAnimated(document.PngBytes, document.Config, frame => RawRgbaTransforms.Resize(frame, width, height)));
+                var recovery = await Task.Run(() => AnimatedImageProcessor.TransformAnimated(document.RecoveryPngBytes ?? document.PngBytes, document.Config, frame => RawRgbaTransforms.Resize(frame, width, height)));
+                if (ReferenceEquals(document, _controller.Document)) _controller.CommitStorage(visible, recoveryStorage: recovery);
+            }
+            else
+            {
+                var png = await Task.Run(() => RawRgbaTransforms.Resize(document.PngBytes, width, height));
+                if (ReferenceEquals(document, _controller.Document))
+                    _controller.CommitImage(png, recoveryTransform: recovery => RawRgbaTransforms.Resize(recovery, width, height));
+            }
         }
         catch (Exception ex) { await Dialogs.ShowErrorAsync(this, "Resize failed", ex.Message); }
     }
@@ -435,27 +480,35 @@ public sealed class MainWindow : Window
             var oldHeight = document.Config.Image.Height;
             var threshold = document.Config.Image.AlphaThreshold;
             _status.Text = "Finding transparent edges…";
-            var result = await Task.Run(() =>
-            {
-                var bounds = RawRgbaTransforms.FindTrimBounds(document.PngBytes, threshold);
-                return (Bounds: bounds, Png: bounds is null ? null : RawRgbaTransforms.Crop(document.PngBytes, bounds.Value));
-            });
+            var bounds = await Task.Run(() => AnimatedImageProcessor.IsAnimated(document.Config)
+                ? AnimatedImageProcessor.FindUnionTrimBounds(document.PngBytes, document.Config, threshold)
+                : RawRgbaTransforms.FindTrimBounds(document.PngBytes, threshold));
             if (!ReferenceEquals(document, _controller.Document)) return;
-            if (result.Bounds is null)
+            if (bounds is null)
             {
                 await Dialogs.ShowErrorAsync(this, "Nothing to trim", "The image is completely transparent at the current alpha threshold.");
                 RefreshChrome();
                 return;
             }
-            if (result.Bounds.Value is { X: 0, Y: 0 } value && value.Width == oldWidth && value.Height == oldHeight)
+            if (bounds.Value is { X: 0, Y: 0 } full && full.Width == oldWidth && full.Height == oldHeight)
             {
                 RefreshChrome();
                 return;
             }
-            var trim = result.Bounds.Value;
-            _controller.CommitImage(result.Png!,
-                config => ImageProcessor.RemapAuthoringForCrop(config, trim, oldWidth, oldHeight),
-                recovery => RawRgbaTransforms.Crop(recovery, trim));
+            var trim = bounds.Value;
+            if (AnimatedImageProcessor.IsAnimated(document.Config))
+            {
+                var visible = await Task.Run(() => AnimatedImageProcessor.TransformAnimated(document.PngBytes, document.Config, frame => RawRgbaTransforms.Crop(frame, trim)));
+                var recovery = await Task.Run(() => AnimatedImageProcessor.TransformAnimated(document.RecoveryPngBytes ?? document.PngBytes, document.Config, frame => RawRgbaTransforms.Crop(frame, trim)));
+                if (ReferenceEquals(document, _controller.Document))
+                    _controller.CommitStorage(visible, config => ImageProcessor.RemapAuthoringForCrop(config, trim, oldWidth, oldHeight), recovery);
+            }
+            else
+            {
+                var png = await Task.Run(() => RawRgbaTransforms.Crop(document.PngBytes, trim));
+                if (ReferenceEquals(document, _controller.Document))
+                    _controller.CommitImage(png, config => ImageProcessor.RemapAuthoringForCrop(config, trim, oldWidth, oldHeight), recovery => RawRgbaTransforms.Crop(recovery, trim));
+            }
         }
         catch (Exception ex) { await Dialogs.ShowErrorAsync(this, "Trim failed", ex.Message); }
     }
@@ -503,9 +556,21 @@ public sealed class MainWindow : Window
         try
         {
             _status.Text = "Applying background removal…";
-            var preview = _backgroundPreview ?? await GenerateBackgroundPreviewAsync(cancellation.Token);
-            if (!ReferenceEquals(document, _controller.Document)) return;
-            _controller.CommitImage(preview);
+            if (AnimatedImageProcessor.IsAnimated(document.Config))
+            {
+                var color = _backgroundColor;
+                var tolerance = _backgroundTolerance;
+                var feather = _backgroundFeather;
+                var visible = await Task.Run(() => AnimatedImageProcessor.TransformAnimated(document.PngBytes, document.Config, frame => RawRgbaTransforms.RemoveBackground(frame, color, tolerance, feather)), cancellation.Token);
+                if (!ReferenceEquals(document, _controller.Document)) return;
+                _controller.CommitStorage(visible, recoveryStorage: _controller.GetRecoveryStorage());
+            }
+            else
+            {
+                var preview = _backgroundPreview ?? await GenerateBackgroundPreviewAsync(cancellation.Token);
+                if (!ReferenceEquals(document, _controller.Document)) return;
+                _controller.CommitImage(preview);
+            }
             _backgroundPreview = null;
             _editor.SetPreview(null);
             _editor.Mode = EditorMode.Select;
@@ -521,7 +586,7 @@ public sealed class MainWindow : Window
 
     private Task<byte[]> GenerateBackgroundPreviewAsync(CancellationToken cancellationToken)
     {
-        var png = _controller.Document.PngBytes;
+        var png = _controller.GetFramePng(_editor.CurrentFrameIndex);
         var color = _backgroundColor;
         var tolerance = _backgroundTolerance;
         var feather = _backgroundFeather;
@@ -580,7 +645,7 @@ public sealed class MainWindow : Window
         {
             Title = "Open image or GEL asset",
             AllowMultiple = false,
-            FileTypeFilter = [new FilePickerFileType("Gelatin assets and images") { Patterns = ["*.gel", "*.png", "*.jpg", "*.jpeg", "*.webp"] }]
+            FileTypeFilter = [new FilePickerFileType("Gelatin assets and images") { Patterns = ["*.gel", "*.png", "*.jpg", "*.jpeg", "*.webp", "*.gif"] }]
         });
         var path = files.FirstOrDefault()?.TryGetLocalPath();
         if (path is not null) await OpenPathAsync(path);
@@ -678,9 +743,10 @@ public sealed class MainWindow : Window
     private void RefreshChrome()
     {
         var dirty = _controller.IsDirty ? " *" : string.Empty;
-        Title = $"Gelatin 0.1.2 — {_controller.Document.Config.AssetName}{dirty}";
+        Title = $"Gelatin 0.1.3 — {_controller.Document.Config.AssetName}{dirty}";
         var config = _controller.Document.Config;
-        _status.Text = $"{config.Image.Width} × {config.Image.Height} px   |   {config.Cores.Count} core(s)   |   {config.RigidityStrokes.Count} rigidity stroke(s)   |   {(_controller.IsDirty ? "Unsaved changes" : Path.GetFileName(_controller.CurrentPath))}";
+        var animation = config.Animation is { } animated ? $"   |   {animated.Frames.Count} animated frame(s)" : string.Empty;
+        _status.Text = $"{config.Image.Width} × {config.Image.Height} px{animation}   |   {config.Cores.Count} core(s)   |   {config.RigidityStrokes.Count} rigidity stroke(s)   |   {(_controller.IsDirty ? "Unsaved changes" : Path.GetFileName(_controller.CurrentPath))}";
     }
 
     private void SetPanels(Control left, Control right)

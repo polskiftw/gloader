@@ -1,8 +1,10 @@
+using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using Avalonia.Threading;
 using Gelatin.Core.Authoring;
 using Gelatin.Core.Imaging;
 using Gelatin.Core.Models;
@@ -28,7 +30,10 @@ public sealed class EditorCanvas : Control
     private readonly DocumentController _controller;
     private Bitmap? _bitmap;
     private Bitmap? _preview;
-    private byte[]? _bitmapSource;
+    private GelDocument? _bitmapDocument;
+    private int _loadedFrameIndex = -1;
+    private readonly DispatcherTimer _animationTimer;
+    private readonly Stopwatch _animationClock = Stopwatch.StartNew();
     private CancellationTokenSource? _bitmapCancellation;
     private CancellationTokenSource? _previewCancellation;
     private bool _shutdown;
@@ -53,6 +58,7 @@ public sealed class EditorCanvas : Control
     private PixelPoint? _polygonPointer;
 
     private AlphaBrushSession? _alphaBrush;
+    private AnimationAlphaBrushSession? _animatedAlphaBrush;
     private GelDocument? _alphaBrushDocument;
     private PixelPoint? _lastAlphaPoint;
     private PixelPoint? _alphaCursor;
@@ -84,6 +90,9 @@ public sealed class EditorCanvas : Control
     public int? SelectedPolygonVertex => _selectedPolygonVertex;
     public double Zoom => _zoom;
     public Point Pan => _pan;
+    public int CurrentFrameIndex => AnimatedImageProcessor.IsAnimated(_controller.Document.Config)
+        ? AnimatedImageProcessor.FrameIndexAtTime(_controller.Document.Config.Animation, _animationClock.Elapsed.TotalMilliseconds)
+        : 0;
     public double AlphaBrushSize
     {
         get => _alphaBrushSize;
@@ -109,6 +118,9 @@ public sealed class EditorCanvas : Control
         ClipToBounds = true;
         Focusable = true;
         _controller.Changed += (_, _) => Reload();
+        _animationTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
+        _animationTimer.Tick += (_, _) => RefreshAnimationFrame();
+        _animationTimer.Start();
         Reload();
         PointerPressed += OnPointerPressed;
         PointerMoved += OnPointerMoved;
@@ -289,6 +301,7 @@ public sealed class EditorCanvas : Control
     public void Shutdown()
     {
         _shutdown = true;
+        _animationTimer.Stop();
         CancelAlphaStroke();
         _bitmapCancellation?.Cancel();
         _previewCancellation?.Cancel();
@@ -323,18 +336,32 @@ public sealed class EditorCanvas : Control
         DrawAlphaCursor(context, imageRect);
     }
 
+    private void RefreshAnimationFrame()
+    {
+        if (_shutdown || _preview is not null || !AnimatedImageProcessor.IsAnimated(_controller.Document.Config)) return;
+        if (CurrentFrameIndex != _loadedFrameIndex) Reload();
+    }
+
     private async void Reload()
     {
-        var png = _controller.Document.PngBytes;
-        if (ReferenceEquals(_bitmapSource, png))
+        var document = _controller.Document;
+        var changedDocument = !ReferenceEquals(_bitmapDocument, document);
+        if (changedDocument)
+        {
+            _bitmapDocument = document;
+            _loadedFrameIndex = -1;
+            _animationClock.Restart();
+        }
+        var frameIndex = CurrentFrameIndex;
+        if (!changedDocument && frameIndex == _loadedFrameIndex)
         {
             InvalidateVisual();
             return;
         }
-
-        if (_alphaPainting || _alphaBrush is not null) CancelAlphaStroke();
-        if (_polygon.Count > 0) ClearPolygon();
-        _bitmapSource = png;
+        var png = AnimatedImageProcessor.IsAnimated(document.Config)
+            ? AnimatedImageProcessor.GetFramePng(document, frameIndex)
+            : document.PngBytes;
+        _loadedFrameIndex = frameIndex;
         _bitmapCancellation?.Cancel();
         _previewCancellation?.Cancel();
         _previewCancellation = null;
@@ -501,10 +528,19 @@ public sealed class EditorCanvas : Control
             {
                 try
                 {
-                    if (_lastAlphaPoint is PixelPoint last) _alphaBrush!.ApplySegment(last, current);
-                    else _alphaBrush!.ApplyPoint(current);
+                    if (_animatedAlphaBrush is not null)
+                    {
+                        if (_lastAlphaPoint is PixelPoint last) _animatedAlphaBrush.ApplySegment(last, current);
+                        else _animatedAlphaBrush.ApplyPoint(current);
+                        SetPreview(_animatedAlphaBrush.EncodePreview(CurrentFrameIndex));
+                    }
+                    else
+                    {
+                        if (_lastAlphaPoint is PixelPoint last) _alphaBrush!.ApplySegment(last, current);
+                        else _alphaBrush!.ApplyPoint(current);
+                        SetPreview(_alphaBrush!.Encode());
+                    }
                     _lastAlphaPoint = current;
-                    SetPreview(_alphaBrush.Encode());
                 }
                 catch (Exception ex)
                 {
@@ -633,12 +669,21 @@ public sealed class EditorCanvas : Control
             CancelAlphaStroke();
             var mode = _mode == EditorMode.AlphaErase ? AlphaBrushMode.Erase : AlphaBrushMode.Restore;
             _alphaBrushDocument = _controller.Document;
-            _alphaBrush = new AlphaBrushSession(_controller.Document.PngBytes, _controller.RecoveryPngBytes, mode, _alphaBrushSize);
-            _alphaBrush.ApplyPoint(pixel.Value);
+            if (AnimatedImageProcessor.IsAnimated(_controller.Document.Config))
+            {
+                _animatedAlphaBrush = new AnimationAlphaBrushSession(_controller.Document.PngBytes, _controller.RecoveryPngBytes, _controller.Document.Config, mode, _alphaBrushSize);
+                _animatedAlphaBrush.ApplyPoint(pixel.Value);
+                SetPreview(_animatedAlphaBrush.EncodePreview(CurrentFrameIndex));
+            }
+            else
+            {
+                _alphaBrush = new AlphaBrushSession(_controller.Document.PngBytes, _controller.RecoveryPngBytes, mode, _alphaBrushSize);
+                _alphaBrush.ApplyPoint(pixel.Value);
+                SetPreview(_alphaBrush.Encode());
+            }
             _lastAlphaPoint = pixel;
             _alphaCursor = pixel;
             _alphaPainting = true;
-            SetPreview(_alphaBrush.Encode());
             e.Pointer.Capture(this);
         }
         catch (Exception ex)
@@ -651,25 +696,41 @@ public sealed class EditorCanvas : Control
     private void CommitAlphaStroke()
     {
         var brush = _alphaBrush;
+        var animatedBrush = _animatedAlphaBrush;
         var sourceDocument = _alphaBrushDocument;
         _alphaBrush = null;
+        _animatedAlphaBrush = null;
         _alphaBrushDocument = null;
         _alphaPainting = false;
         _lastAlphaPoint = null;
-        if (brush is null) return;
+        if (brush is null && animatedBrush is null) return;
         try
         {
-            var png = brush.Encode();
-            brush.Dispose();
             SetPreview(null);
-            if (ReferenceEquals(sourceDocument, _controller.Document)) _controller.CommitImage(png);
-            else EditorError?.Invoke("The image changed while painting; the unfinished alpha stroke was discarded.");
+            if (!ReferenceEquals(sourceDocument, _controller.Document))
+            {
+                EditorError?.Invoke("The image changed while painting; the unfinished alpha stroke was discarded.");
+                return;
+            }
+            if (animatedBrush is not null)
+            {
+                var result = animatedBrush.Encode();
+                var recovery = _controller.GetRecoveryStorage();
+                _controller.CommitStorage(result, recoveryStorage: recovery);
+            }
+            else
+            {
+                _controller.CommitImage(brush!.Encode());
+            }
         }
         catch (Exception ex)
         {
-            brush.Dispose();
-            SetPreview(null);
             EditorError?.Invoke($"Alpha brush could not be committed: {ex.Message}");
+        }
+        finally
+        {
+            brush?.Dispose();
+            animatedBrush?.Dispose();
         }
     }
 
@@ -679,7 +740,9 @@ public sealed class EditorCanvas : Control
         _lastAlphaPoint = null;
         _alphaBrushDocument = null;
         _alphaBrush?.Dispose();
+        _animatedAlphaBrush?.Dispose();
         _alphaBrush = null;
+        _animatedAlphaBrush = null;
         if (_preview is not null) SetPreview(null);
     }
 

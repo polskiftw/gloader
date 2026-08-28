@@ -8,7 +8,7 @@ namespace Gelatin.App;
 
 public sealed class DocumentController
 {
-    private const string ToolVersion = "0.1.2";
+    private const string ToolVersion = "0.1.3";
     private GelDocument _document;
     private readonly DocumentHistory _history = new();
 
@@ -19,6 +19,15 @@ public sealed class DocumentController
     public bool CanUndo => _history.CanUndo;
     public bool CanRedo => _history.CanRedo;
     public event EventHandler? Changed;
+
+    public bool IsAnimated => AnimatedImageProcessor.IsAnimated(_document.Config);
+    public int AnimationFrameCount => _document.Config.Animation?.Frames.Count ?? 1;
+    public byte[] GetFramePng(int frameIndex) => AnimatedImageProcessor.GetFramePng(_document, frameIndex);
+    public ImageStorageResult GetRecoveryStorage() => new(
+        (byte[])EnsureRecoverySource().Clone(),
+        _document.Config.Image.Width,
+        _document.Config.Image.Height,
+        _document.Config.Animation?.DeepClone());
 
     public DocumentController() => _document = EstablishRecoveryBaseline(CreateWelcomeDocument());
 
@@ -79,6 +88,34 @@ public sealed class DocumentController
 
         _history.Record(_document);
         _document = new GelDocument { Config = nextConfig, PngBytes = png, RecoveryPngBytes = nextRecovery };
+        IsDirty = true;
+        Notify();
+    }
+
+    public void CommitStorage(ImageStorageResult storage, Action<GelConfig>? remap = null, ImageStorageResult? recoveryStorage = null)
+    {
+        ArgumentNullException.ThrowIfNull(storage);
+        var nextConfig = _document.Config.DeepClone();
+        remap?.Invoke(nextConfig);
+        nextConfig.SchemaVersion = storage.IsAnimated ? 2 : 1;
+        nextConfig.Animation = storage.Animation?.DeepClone();
+        nextConfig.Image.Width = storage.Width;
+        nextConfig.Image.Height = storage.Height;
+        nextConfig.Authoring.ToolVersion = ToolVersion;
+        GelValidator.Validate(nextConfig);
+
+        var storageDimensions = ImageProcessor.GetDimensions(storage.PngBytes);
+        if (storage.IsAnimated) AnimatedImageProcessor.ValidateAtlas(nextConfig, storageDimensions.Width, storageDimensions.Height);
+        else if (storageDimensions != (storage.Width, storage.Height))
+            throw new GelFormatException("The processed image dimensions do not match the logical image dimensions.");
+
+        var recovery = recoveryStorage?.PngBytes is { } bytes ? (byte[])bytes.Clone() : (byte[])storage.PngBytes.Clone();
+        var recoveryDimensions = ImageProcessor.GetDimensions(recovery);
+        if (storage.IsAnimated) AnimatedImageProcessor.ValidateAtlas(nextConfig, recoveryDimensions.Width, recoveryDimensions.Height);
+        else if (recoveryDimensions != (storage.Width, storage.Height)) recovery = (byte[])storage.PngBytes.Clone();
+
+        _history.Record(_document);
+        _document = new GelDocument { Config = nextConfig, PngBytes = storage.PngBytes, RecoveryPngBytes = recovery };
         IsDirty = true;
         Notify();
     }
@@ -148,15 +185,16 @@ public sealed class DocumentController
 
     private static GelDocument CreateFromImage(byte[] bytes, string name)
     {
-        var png = ImageProcessor.NormalizeToPng(bytes);
-        var (width, height) = ImageProcessor.GetDimensions(png);
+        var storage = AnimatedImageProcessor.NormalizeInput(bytes);
         return new GelDocument
         {
-            PngBytes = png,
+            PngBytes = storage.PngBytes,
             Config = new GelConfig
             {
+                SchemaVersion = storage.IsAnimated ? 2 : 1,
+                Animation = storage.Animation?.DeepClone(),
                 AssetName = string.IsNullOrWhiteSpace(name) ? "Untitled Gel" : name,
-                Image = new ImageConfig { Width = width, Height = height },
+                Image = new ImageConfig { Width = storage.Width, Height = storage.Height },
                 Cores = [new CoreConfig { Id = 1, Name = "Core 1", RadiusX = 0.24, RadiusY = 0.24 }]
             }
         };
