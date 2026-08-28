@@ -1,0 +1,34 @@
+name: Gelatin frame edit patch
+
+on:
+  push:
+    branches:
+      - gelatin-frame-edit
+    paths:
+      - ".github/scripts/apply-gelatin-frame-edit.py"
+      - ".github/workflows/gelatin-frame-edit-patch.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: gelatin-frame-edit
+          fetch-depth: 0
+
+      - name: Apply frame-edit implementation
+        run: python .github/scripts/apply-gelatin-frame-edit.py
+
+      - name: Commit implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tools/gelatin
+          git diff --cached --quiet && exit 0
+          git commit -m "Gelatin: add frame-by-frame GIF editing"
+          git push origin HEAD:gelatin-frame-edit
