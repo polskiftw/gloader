@@ -78,6 +78,6 @@ public sealed class CleanupRegressionTests
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
         Assert.Throws<OperationCanceledException>(() =>
-            RawRgbaTransforms.RemoveBackground(png, SKColors.White, 0.1, 0.1, cancellation.Token));
+            RawRgbaTransforms.RemoveBackgroundCancellable(png, SKColors.White, 0.1, 0.1, cancellation.Token));
     }
 }

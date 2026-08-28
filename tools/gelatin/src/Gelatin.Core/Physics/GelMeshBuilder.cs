@@ -8,9 +8,9 @@ namespace Gelatin.Core.Physics;
 public static class GelMeshBuilder
 {
     public static GelMesh Build(GelDocument document, QualitySettings quality)
-        => Build(document, quality, CancellationToken.None);
+        => BuildCancellable(document, quality, CancellationToken.None);
 
-    public static GelMesh Build(GelDocument document, QualitySettings quality, CancellationToken cancellationToken)
+    public static GelMesh BuildCancellable(GelDocument document, QualitySettings quality, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var aspect = document.Config.Image.Width / (double)document.Config.Image.Height;
@@ -80,7 +80,7 @@ public static class GelMeshBuilder
         foreach (var pair in structural.ToArray()) AddDistance(pair.Item1, pair.Item2, 0, true);
 
         cancellationToken.ThrowIfCancellationRequested();
-        var contourSource = AnimatedImageProcessor.BuildUnionAlphaPng(document.PngBytes, document.Config, cancellationToken);
+        var contourSource = AnimatedImageProcessor.BuildUnionAlphaPngCancellable(document.PngBytes, document.Config, cancellationToken);
         var contours = AlphaContourExtractor.Extract(contourSource, document.Config.Image.AlphaThreshold, quality.ContourSamples);
         var bindings = new List<ContourBinding>();
         for (var loop = 0; loop < contours.Count; loop++)

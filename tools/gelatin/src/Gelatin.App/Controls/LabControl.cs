@@ -179,7 +179,7 @@ public sealed class LabControl : Control
             var result = await Task.Run(() =>
             {
                 cancellation.Token.ThrowIfCancellationRequested();
-                var mesh = GelMeshBuilder.Build(document, quality, cancellation.Token);
+                var mesh = GelMeshBuilder.BuildCancellable(document, quality, cancellation.Token);
                 var physics = document.Config.Physics;
                 var chamber = new Chamber(0.035f, 0.055f, 0.965f, 0.945f, (float)physics.Restitution, (float)physics.Friction);
                 var solver = new GelSolver(mesh, document.Config.Material, quality, chamber);

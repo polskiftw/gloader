@@ -48,26 +48,18 @@ public static class ImageProcessor
     public static byte[] Crop(ReadOnlySpan<byte> png, PixelRect rect)
         => RawRgbaTransforms.Crop(png, rect);
 
-    public static byte[] Crop(ReadOnlySpan<byte> png, PixelRect rect, CancellationToken cancellationToken)
-        => RawRgbaTransforms.Crop(png, rect, cancellationToken);
 
     public static byte[] Resize(ReadOnlySpan<byte> png, int width, int height)
         => RawRgbaTransforms.Resize(png, width, height);
 
-    public static byte[] Resize(ReadOnlySpan<byte> png, int width, int height, CancellationToken cancellationToken)
-        => RawRgbaTransforms.Resize(png, width, height, cancellationToken);
 
     public static PixelRect? FindTrimBounds(ReadOnlySpan<byte> png, double alphaThreshold)
         => RawRgbaTransforms.FindTrimBounds(png, alphaThreshold);
 
-    public static PixelRect? FindTrimBounds(ReadOnlySpan<byte> png, double alphaThreshold, CancellationToken cancellationToken)
-        => RawRgbaTransforms.FindTrimBounds(png, alphaThreshold, cancellationToken);
 
     public static byte[] RemoveBackground(ReadOnlySpan<byte> png, SKColor background, double tolerance, double feather)
         => RawRgbaTransforms.RemoveBackground(png, background, tolerance, feather);
 
-    public static byte[] RemoveBackground(ReadOnlySpan<byte> png, SKColor background, double tolerance, double feather, CancellationToken cancellationToken)
-        => RawRgbaTransforms.RemoveBackground(png, background, tolerance, feather, cancellationToken);
 
     public static SKColor Sample(ReadOnlySpan<byte> png, int x, int y)
         => RawRgbaTransforms.Sample(png, x, y);

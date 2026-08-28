@@ -743,11 +743,11 @@ public sealed class MainWindow : Window
                 if (_editor.EditCurrentAnimationFrameOnly)
                 {
                     var frameIndex = _editor.CurrentFrameIndex;
-                    visible = await Task.Run(() => AnimatedImageProcessor.TransformFrame(document.PngBytes, document.Config, frameIndex, frame => RawRgbaTransforms.RemoveBackground(frame, color, tolerance, feather, cancellation.Token), cancellation.Token), cancellation.Token);
+                    visible = await Task.Run(() => AnimatedImageProcessor.TransformFrameCancellable(document.PngBytes, document.Config, frameIndex, frame => RawRgbaTransforms.RemoveBackgroundCancellable(frame, color, tolerance, feather, cancellation.Token), cancellation.Token), cancellation.Token);
                 }
                 else
                 {
-                    visible = await Task.Run(() => AnimatedImageProcessor.TransformAnimated(document.PngBytes, document.Config, frame => RawRgbaTransforms.RemoveBackground(frame, color, tolerance, feather, cancellation.Token), cancellation.Token), cancellation.Token);
+                    visible = await Task.Run(() => AnimatedImageProcessor.TransformAnimatedCancellable(document.PngBytes, document.Config, frame => RawRgbaTransforms.RemoveBackgroundCancellable(frame, color, tolerance, feather, cancellation.Token), cancellation.Token), cancellation.Token);
                 }
                 if (!ReferenceEquals(document, _controller.Document)) return;
                 _controller.CommitStorage(visible, recoveryStorage: _controller.GetRecoveryStorage());
@@ -780,7 +780,7 @@ public sealed class MainWindow : Window
         return Task.Run(() =>
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var result = RawRgbaTransforms.RemoveBackground(png, color, tolerance, feather, cancellationToken);
+            var result = RawRgbaTransforms.RemoveBackgroundCancellable(png, color, tolerance, feather, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             return result;
         }, cancellationToken);

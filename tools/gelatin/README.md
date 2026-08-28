@@ -198,4 +198,4 @@ tools/gelatin/dist/gelatin/Gelatin.exe
 tools/gelatin/dist/gelatin-<version>-win-x64.zip
 ```
 
-The publish script prints the package SHA-256. The dedicated Gelatin workflow performs restore, Release build, tests, self-contained Windows x64 publish, package/hash verification, and artifact upload without changing the GLoader package.
+`Directory.Build.props` is the single source of truth for the Gelatin product/package version; assembly metadata, the UI/tool version, publish archive, and CI artifact name derive from it. The publish script prints the package SHA-256. The dedicated Gelatin workflow performs restore, Release build, tests, self-contained Windows x64 publish, package/hash verification, and artifact upload without changing the GLoader package.
