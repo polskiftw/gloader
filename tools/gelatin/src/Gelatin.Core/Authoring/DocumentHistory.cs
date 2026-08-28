@@ -25,12 +25,7 @@ public sealed class DocumentHistory
         _undo.AddLast(snapshot);
         _undoBytes += Estimate(snapshot);
         _redo.Clear();
-        while (_undo.Count > _maximumEntries || (_undoBytes > _maximumBytes && _undo.Count > 1))
-        {
-            var first = _undo.First!.Value;
-            _undoBytes -= Estimate(first);
-            _undo.RemoveFirst();
-        }
+        TrimUndo();
     }
 
     public GelDocument Undo(GelDocument current)
@@ -63,8 +58,21 @@ public sealed class DocumentHistory
     {
         _undo.AddLast(document);
         _undoBytes += Estimate(document);
+        TrimUndo();
+    }
+
+    private void TrimUndo()
+    {
+        while (_undo.Count > _maximumEntries || (_undoBytes > _maximumBytes && _undo.Count > 1))
+        {
+            var first = _undo.First!.Value;
+            _undoBytes -= Estimate(first);
+            _undo.RemoveFirst();
+        }
     }
 
     private static long Estimate(GelDocument document)
-        => document.PngBytes.LongLength + document.Config.Cores.Count * 256L + document.Config.RigidityStrokes.Sum(stroke => 64L + stroke.Points.Count * 24L);
+        => document.PngBytes.LongLength + (document.RecoveryPngBytes?.LongLength ?? 0) +
+           document.Config.Cores.Count * 256L +
+           document.Config.RigidityStrokes.Sum(stroke => 64L + stroke.Points.Count * 24L);
 }

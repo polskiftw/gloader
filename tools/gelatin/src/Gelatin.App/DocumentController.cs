@@ -8,25 +8,26 @@ namespace Gelatin.App;
 
 public sealed class DocumentController
 {
-    private const string ToolVersion = "0.1.1";
+    private const string ToolVersion = "0.1.2";
     private GelDocument _document;
     private readonly DocumentHistory _history = new();
 
     public GelDocument Document => _document;
+    public byte[] RecoveryPngBytes => EnsureRecoverySource();
     public string? CurrentPath { get; private set; }
     public bool IsDirty { get; private set; }
     public bool CanUndo => _history.CanUndo;
     public bool CanRedo => _history.CanRedo;
     public event EventHandler? Changed;
 
-    public DocumentController() => _document = CreateWelcomeDocument();
+    public DocumentController() => _document = EstablishRecoveryBaseline(CreateWelcomeDocument());
 
     public async Task OpenAsync(string path)
     {
         var document = await Task.Run(() => Path.GetExtension(path).Equals(".gel", StringComparison.OrdinalIgnoreCase)
             ? GelFile.Read(path)
             : CreateFromImage(File.ReadAllBytes(path), Path.GetFileNameWithoutExtension(path)));
-        _document = document;
+        _document = EstablishRecoveryBaseline(document);
         CurrentPath = Path.GetExtension(path).Equals(".gel", StringComparison.OrdinalIgnoreCase) ? path : null;
         IsDirty = CurrentPath is null;
         _history.Clear();
@@ -54,15 +55,30 @@ public sealed class DocumentController
         Notify();
     }
 
-    public void CommitImage(byte[] png, Action<GelConfig>? remap = null)
+    public void CommitImage(byte[] png, Action<GelConfig>? remap = null, Func<byte[], byte[]>? recoveryTransform = null)
     {
+        ArgumentNullException.ThrowIfNull(png);
         var dimensions = ImageProcessor.GetDimensions(png);
+        var currentRecovery = EnsureRecoverySource();
+        var nextRecovery = recoveryTransform is null
+            ? (byte[])currentRecovery.Clone()
+            : recoveryTransform((byte[])currentRecovery.Clone());
+
+        var recoveryDimensions = ImageProcessor.GetDimensions(nextRecovery);
+        if (recoveryDimensions != dimensions)
+        {
+            // Never permit stale recovery geometry to survive an edit. Resetting loses hidden pixels but is safe.
+            nextRecovery = (byte[])png.Clone();
+        }
+
+        var nextConfig = _document.Config.DeepClone();
+        remap?.Invoke(nextConfig);
+        nextConfig.Image.Width = dimensions.Width;
+        nextConfig.Image.Height = dimensions.Height;
+        nextConfig.Authoring.ToolVersion = ToolVersion;
+
         _history.Record(_document);
-        remap?.Invoke(_document.Config);
-        _document.Config.Image.Width = dimensions.Width;
-        _document.Config.Image.Height = dimensions.Height;
-        StampVersion();
-        _document = new GelDocument { Config = _document.Config, PngBytes = png };
+        _document = new GelDocument { Config = nextConfig, PngBytes = png, RecoveryPngBytes = nextRecovery };
         IsDirty = true;
         Notify();
     }
@@ -81,6 +97,7 @@ public sealed class DocumentController
     {
         if (!CanUndo) return;
         _document = _history.Undo(_document);
+        EnsureRecoverySource();
         IsDirty = true;
         Notify();
     }
@@ -89,12 +106,45 @@ public sealed class DocumentController
     {
         if (!CanRedo) return;
         _document = _history.Redo(_document);
+        EnsureRecoverySource();
         IsDirty = true;
         Notify();
     }
 
     private void StampVersion() => _document.Config.Authoring.ToolVersion = ToolVersion;
     private void Notify() => Changed?.Invoke(this, EventArgs.Empty);
+
+    private byte[] EnsureRecoverySource()
+    {
+        var recovery = _document.RecoveryPngBytes;
+        if (recovery is not null)
+        {
+            try
+            {
+                if (ImageProcessor.GetDimensions(recovery) == ImageProcessor.GetDimensions(_document.PngBytes)) return recovery;
+            }
+            catch (GelFormatException)
+            {
+                // Fall through to a safe current-image baseline.
+            }
+        }
+
+        recovery = (byte[])_document.PngBytes.Clone();
+        _document = new GelDocument
+        {
+            Config = _document.Config,
+            PngBytes = _document.PngBytes,
+            RecoveryPngBytes = recovery
+        };
+        return recovery;
+    }
+
+    private static GelDocument EstablishRecoveryBaseline(GelDocument document) => new()
+    {
+        Config = document.Config,
+        PngBytes = document.PngBytes,
+        RecoveryPngBytes = (byte[])document.PngBytes.Clone()
+    };
 
     private static GelDocument CreateFromImage(byte[] bytes, string name)
     {

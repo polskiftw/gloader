@@ -97,7 +97,7 @@ public sealed class AuthoringConfig
     [JsonRequired]
     public string Tool { get; set; } = "Gelatin";
     [JsonRequired]
-    public string ToolVersion { get; set; } = "0.1.1";
+    public string ToolVersion { get; set; } = "0.1.2";
 }
 
 public sealed class GelDocument
@@ -105,7 +105,15 @@ public sealed class GelDocument
     public required GelConfig Config { get; init; }
     public required byte[] PngBytes { get; init; }
 
-    public GelDocument DeepClone() => new() { Config = Config.DeepClone(), PngBytes = (byte[])PngBytes.Clone() };
+    // Session-only recovery pixels for alpha Restore. GelFile deliberately ignores this field.
+    public byte[]? RecoveryPngBytes { get; init; }
+
+    public GelDocument DeepClone() => new()
+    {
+        Config = Config.DeepClone(),
+        PngBytes = (byte[])PngBytes.Clone(),
+        RecoveryPngBytes = RecoveryPngBytes is null ? null : (byte[])RecoveryPngBytes.Clone()
+    };
 }
 
 public sealed class GelFormatException : Exception
