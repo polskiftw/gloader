@@ -47,9 +47,7 @@ public static class GelFile
 
         var config = GelJson.Deserialize(json);
         GelValidator.Validate(config);
-        var dimensions = ImageProcessor.GetDimensions(png);
-        if (dimensions.Width != config.Image.Width || dimensions.Height != config.Image.Height)
-            throw new GelFormatException($"Embedded PNG dimensions ({dimensions.Width}x{dimensions.Height}) do not match the GEL configuration ({config.Image.Width}x{config.Image.Height}).");
+        ValidateImagePayload(config, png);
         return new GelDocument { Config = config, PngBytes = png };
     }
 
@@ -57,11 +55,9 @@ public static class GelFile
     {
         ArgumentNullException.ThrowIfNull(document);
         GelValidator.Validate(document.Config);
-        var dimensions = ImageProcessor.GetDimensions(document.PngBytes);
-        if (dimensions.Width != document.Config.Image.Width || dimensions.Height != document.Config.Image.Height)
-            throw new GelFormatException("The processed PNG dimensions do not match the GEL configuration.");
+        ValidateImagePayload(document.Config, document.PngBytes);
         var json = GelJson.Serialize(document.Config);
-        if (json.Length > MaxJsonBytes || document.PngBytes.Length > MaxPngBytes) throw new GelFormatException("The GEL asset exceeds the v1 size limits.");
+        if (json.Length > MaxJsonBytes || document.PngBytes.Length > MaxPngBytes) throw new GelFormatException("The GEL asset exceeds the v1 container size limits.");
         var result = new byte[checked(HeaderSize + json.Length + document.PngBytes.Length)];
         Magic.CopyTo(result.AsSpan(0, 4));
         BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(4, 4), (uint)json.Length);
@@ -92,6 +88,18 @@ public static class GelFile
             try { if (File.Exists(temporary)) File.Delete(temporary); } catch (IOException) { }
             throw;
         }
+    }
+
+    private static void ValidateImagePayload(GelConfig config, byte[] png)
+    {
+        var dimensions = ImageProcessor.GetDimensions(png);
+        if (AnimatedImageProcessor.IsAnimated(config))
+        {
+            AnimatedImageProcessor.ValidateAtlas(config, dimensions.Width, dimensions.Height);
+            return;
+        }
+        if (dimensions.Width != config.Image.Width || dimensions.Height != config.Image.Height)
+            throw new GelFormatException($"Embedded PNG dimensions ({dimensions.Width}x{dimensions.Height}) do not match the GEL configuration ({config.Image.Width}x{config.Image.Height}).");
     }
 
     private static void ReadExactly(Stream stream, Span<byte> target, string error)

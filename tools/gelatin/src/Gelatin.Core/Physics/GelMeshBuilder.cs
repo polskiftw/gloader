@@ -1,5 +1,6 @@
 using System.Numerics;
 using Gelatin.Core.Authoring;
+using Gelatin.Core.Imaging;
 using Gelatin.Core.Models;
 
 namespace Gelatin.Core.Physics;
@@ -73,7 +74,8 @@ public static class GelMeshBuilder
 
         foreach (var pair in structural.ToArray()) AddDistance(pair.Item1, pair.Item2, 0, true);
 
-        var contours = AlphaContourExtractor.Extract(document.PngBytes, document.Config.Image.AlphaThreshold, quality.ContourSamples);
+        var contourSource = AnimatedImageProcessor.BuildUnionAlphaPng(document.PngBytes, document.Config);
+        var contours = AlphaContourExtractor.Extract(contourSource, document.Config.Image.AlphaThreshold, quality.ContourSamples);
         var bindings = new List<ContourBinding>();
         for (var loop = 0; loop < contours.Count; loop++)
         for (var order = 0; order < contours[loop].Points.Count; order++)

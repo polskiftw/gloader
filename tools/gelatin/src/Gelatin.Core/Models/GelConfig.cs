@@ -11,6 +11,8 @@ public sealed class GelConfig
     public string AssetName { get; set; } = "Untitled Gel";
     [JsonRequired]
     public ImageConfig Image { get; set; } = new();
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AnimationConfig? Animation { get; set; }
     [JsonRequired]
     public MaterialConfig Material { get; set; } = new();
     [JsonRequired]
@@ -31,6 +33,47 @@ public sealed class ImageConfig
     public int Height { get; set; } = 1;
     [JsonRequired]
     public double AlphaThreshold { get; set; } = 0.0625;
+}
+
+public sealed class AnimationConfig
+{
+    // Mirrors SKCodec/GIF repetition semantics: -1 = infinite, 0 = play once,
+    // N > 0 = repeat N additional times after the first pass.
+    [JsonRequired]
+    public int RepetitionCount { get; set; } = -1;
+    [JsonRequired]
+    public List<AnimationFrameConfig> Frames { get; set; } = [];
+
+    public AnimationConfig DeepClone() => new()
+    {
+        RepetitionCount = RepetitionCount,
+        Frames = Frames.Select(frame => frame.DeepClone()).ToList()
+    };
+}
+
+public sealed class AnimationFrameConfig
+{
+    [JsonRequired]
+    public int X { get; set; }
+    [JsonRequired]
+    public int Y { get; set; }
+    [JsonRequired]
+    public int Width { get; set; }
+    [JsonRequired]
+    public int Height { get; set; }
+    // The exact decoded GIF delay in milliseconds. Zero is preserved in the file;
+    // playback helpers clamp zero-delay frames to a safe 10 ms display interval.
+    [JsonRequired]
+    public int DurationMs { get; set; }
+
+    public AnimationFrameConfig DeepClone() => new()
+    {
+        X = X,
+        Y = Y,
+        Width = Width,
+        Height = Height,
+        DurationMs = DurationMs
+    };
 }
 
 public sealed class MaterialConfig
@@ -97,15 +140,17 @@ public sealed class AuthoringConfig
     [JsonRequired]
     public string Tool { get; set; } = "Gelatin";
     [JsonRequired]
-    public string ToolVersion { get; set; } = "0.1.2";
+    public string ToolVersion { get; set; } = "0.1.3";
 }
 
 public sealed class GelDocument
 {
     public required GelConfig Config { get; init; }
+    // Schema 1: a single processed PNG. Schema 2: the animation atlas PNG.
     public required byte[] PngBytes { get; init; }
 
-    // Session-only recovery pixels for alpha Restore. GelFile deliberately ignores this field.
+    // Session-only recovery pixels for alpha Restore. For animated assets this is
+    // an atlas with the same frame layout as PngBytes. GelFile deliberately ignores it.
     public byte[]? RecoveryPngBytes { get; init; }
 
     public GelDocument DeepClone() => new()

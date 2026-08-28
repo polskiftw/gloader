@@ -8,11 +8,13 @@ public static class GelValidator
     public const int MaxCores = 128;
     public const int MaxStrokes = 8192;
     public const int MaxPointsPerStroke = 8192;
+    public const int MaxAnimationFrames = 512;
+    public const int MaxAnimationFrameDurationMs = 600_000;
 
     public static void Validate(GelConfig config)
     {
         ArgumentNullException.ThrowIfNull(config);
-        if (config.SchemaVersion != 1) Fail("schemaVersion must be exactly 1.");
+        if (config.SchemaVersion is not (1 or 2)) Fail("schemaVersion must be 1 or 2.");
         if (string.IsNullOrWhiteSpace(config.AssetName) || config.AssetName.Length > 256) Fail("assetName must contain 1 to 256 characters.");
         var image = config.Image ?? throw new GelFormatException("Invalid GEL configuration: image is required.");
         var material = config.Material ?? throw new GelFormatException("Invalid GEL configuration: material is required.");
@@ -23,6 +25,7 @@ public static class GelValidator
         Range(image.Width, 1, MaxDimension, "image.width");
         Range(image.Height, 1, MaxDimension, "image.height");
         Range(image.AlphaThreshold, 0, 1, "image.alphaThreshold");
+        ValidateAnimation(config, image);
 
         Range(material.Softness, 0, 1, "material.softness");
         Range(material.Damping, 0, 1, "material.damping");
@@ -70,6 +73,33 @@ public static class GelValidator
         if (authoring.Tool != "Gelatin") Fail("authoring.tool must be Gelatin.");
         if (string.IsNullOrWhiteSpace(authoring.ToolVersion) || authoring.ToolVersion.Length > 64)
             Fail("authoring.toolVersion must contain 1 to 64 characters.");
+    }
+
+    private static void ValidateAnimation(GelConfig config, ImageConfig image)
+    {
+        if (config.SchemaVersion == 1)
+        {
+            if (config.Animation is not null) Fail("schemaVersion 1 assets may not contain animation metadata.");
+            return;
+        }
+
+        var animation = config.Animation ?? throw new GelFormatException("Invalid GEL configuration: schemaVersion 2 requires animation metadata.");
+        if (animation.RepetitionCount < -1 || animation.RepetitionCount > 1_000_000)
+            Fail("animation.repetitionCount must be -1 (infinite) or between 0 and 1000000.");
+        if (animation.Frames is null || animation.Frames.Count is < 2 or > MaxAnimationFrames)
+            Fail($"animation.frames must contain 2 to {MaxAnimationFrames} frames.");
+
+        foreach (var frame in animation.Frames)
+        {
+            if (frame is null) Fail("animation.frames may not contain null entries.");
+            if (frame.X < 0 || frame.Y < 0) Fail("animation frame coordinates may not be negative.");
+            if (frame.Width != image.Width || frame.Height != image.Height)
+                Fail("every animation frame must match image.width and image.height.");
+            if (frame.DurationMs < 0 || frame.DurationMs > MaxAnimationFrameDurationMs)
+                Fail($"animation frame durationMs must be between 0 and {MaxAnimationFrameDurationMs}.");
+            if ((long)frame.X + frame.Width > MaxDimension || (long)frame.Y + frame.Height > MaxDimension)
+                Fail($"animation frame rectangles must fit inside a {MaxDimension} by {MaxDimension} atlas.");
+        }
     }
 
     private static void Range(double value, double min, double max, string name)
