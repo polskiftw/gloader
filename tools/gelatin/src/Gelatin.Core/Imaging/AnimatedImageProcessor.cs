@@ -205,7 +205,7 @@ public static class AnimatedImageProcessor
     public static byte[] BuildUnionAlphaPng(ReadOnlySpan<byte> atlasPng, GelConfig config)
     {
         if (!IsAnimated(config)) return atlasPng.ToArray();
-        var frames = ExtractFrames(atlasPng, config).Select(RawRgbaCodec.Decode).ToList();
+        var frames = ExtractFrames(atlasPng, config).Select(frame => RawRgbaCodec.Decode(frame)).ToList();
         var width = config.Image.Width;
         var height = config.Image.Height;
         var union = (byte[])frames[0].Pixels.Clone();
