@@ -121,8 +121,8 @@ public enum AlphaBrushMode
 
 public sealed class AlphaBrushSession : IDisposable
 {
-    private readonly SKBitmap _working;
-    private readonly SKBitmap? _recovery;
+    private readonly RgbaBuffer _working;
+    private readonly RgbaBuffer? _recovery;
     private readonly AlphaBrushMode _mode;
     private readonly double _size;
     private bool _disposed;
@@ -134,19 +134,15 @@ public sealed class AlphaBrushSession : IDisposable
     {
         if (!double.IsFinite(size) || size < 1 || size > 4096)
             throw new GelFormatException("Alpha brush size must be between 1 and 4096 source pixels.");
-        _working = ImageProcessor.Decode(png);
+        _working = RawRgbaCodec.Decode(png);
         _mode = mode;
         _size = size;
 
         if (mode == AlphaBrushMode.Restore)
         {
-            _recovery = ImageProcessor.Decode(recoveryPng);
+            _recovery = RawRgbaCodec.Decode(recoveryPng);
             if (_recovery.Width != _working.Width || _recovery.Height != _working.Height)
-            {
-                _recovery.Dispose();
-                _working.Dispose();
                 throw new GelFormatException("The alpha recovery source does not match the current image geometry.");
-            }
         }
     }
 
@@ -172,16 +168,10 @@ public sealed class AlphaBrushSession : IDisposable
     public byte[] Encode()
     {
         ThrowIfDisposed();
-        return ImageProcessor.EncodePng(_working);
+        return RawRgbaCodec.Encode(Width, Height, _working.Pixels);
     }
 
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-        _recovery?.Dispose();
-        _working.Dispose();
-    }
+    public void Dispose() => _disposed = true;
 
     private PixelPoint ClampCenter(PixelPoint point)
     {
@@ -206,14 +196,14 @@ public sealed class AlphaBrushSession : IDisposable
             var dx = x + 0.5 - center.X;
             var dy = y + 0.5 - center.Y;
             if (dx * dx + dy * dy > radiusSquared) continue;
+            var offset = (y * Width + x) * 4;
             if (_mode == AlphaBrushMode.Erase)
             {
-                var color = _working.GetPixel(x, y);
-                if (color.Alpha != 0) _working.SetPixel(x, y, new SKColor(color.Red, color.Green, color.Blue, 0));
+                _working.Pixels[offset + 3] = 0;
             }
             else
             {
-                _working.SetPixel(x, y, _recovery!.GetPixel(x, y));
+                _recovery!.Pixels.AsSpan(offset, 4).CopyTo(_working.Pixels.AsSpan(offset, 4));
             }
         }
     }
@@ -231,7 +221,7 @@ public static class ImageAlphaEditing
         var validation = PolygonGeometry.Validate(polygon);
         if (!validation.IsValid) throw new GelFormatException(validation.Error!);
 
-        using var source = ImageProcessor.Decode(png);
+        var source = RawRgbaCodec.Decode(png);
         if (polygon.Any(point => point.X < 0 || point.Y < 0 || point.X > source.Width || point.Y > source.Height))
             throw new GelFormatException("Polygon vertices must stay inside the current image bounds.");
 
@@ -251,13 +241,12 @@ public static class ImageAlphaEditing
         for (var y = 0; y < source.Height; y++)
         for (var x = 0; x < source.Width; x++)
         {
-            var original = source.GetPixel(x, y);
+            var offset = (y * source.Width + x) * 4;
+            var originalAlpha = source.Pixels[offset + 3];
             var coverage = mask.GetPixel(x, y).Alpha;
-            var alpha = (byte)Math.Min(original.Alpha, (original.Alpha * coverage + 127) / 255);
-            if (alpha != original.Alpha)
-                source.SetPixel(x, y, new SKColor(original.Red, original.Green, original.Blue, alpha));
+            source.Pixels[offset + 3] = (byte)Math.Min(originalAlpha, (originalAlpha * coverage + 127) / 255);
         }
 
-        return ImageProcessor.EncodePng(source);
+        return RawRgbaCodec.Encode(source.Width, source.Height, source.Pixels);
     }
 }

@@ -50,10 +50,8 @@ public sealed class IrregularCutoutTests
         var png = TestAssets.Png(8, 8, (x, y) => x == 3 && y == 2 ? inside : outside);
         var cut = ImageAlphaEditing.ApplyPolygonCutout(png, [new(1, 1), new(7, 1), new(1, 7)]);
         Assert.Equal((8, 8), ImageProcessor.GetDimensions(cut));
-        using var bitmap = ImageProcessor.Decode(cut);
-
-        Assert.Equal(inside, bitmap.GetPixel(3, 2));
-        var removed = bitmap.GetPixel(7, 7);
+        Assert.Equal(inside, RawRgbaTransforms.Sample(cut, 3, 2));
+        var removed = RawRgbaTransforms.Sample(cut, 7, 7);
         Assert.Equal((byte)0, removed.Alpha);
         Assert.Equal(outside.Red, removed.Red);
         Assert.Equal(outside.Green, removed.Green);
@@ -98,12 +96,12 @@ public sealed class IrregularCutoutTests
         var png = TestAssets.Png(5, 5, (x, y) => new SKColor((byte)(20 + x), (byte)(30 + y), 40, 170));
         using var brush = new AlphaBrushSession(png, png, AlphaBrushMode.Erase, 1);
         brush.ApplyPoint(new PixelPoint(2.5, 2.5));
-        using var bitmap = ImageProcessor.Decode(brush.Encode());
-        var erased = bitmap.GetPixel(2, 2);
+        var edited = brush.Encode();
+        var erased = RawRgbaTransforms.Sample(edited, 2, 2);
         Assert.Equal((byte)0, erased.Alpha);
         Assert.Equal((byte)22, erased.Red);
         Assert.Equal((byte)32, erased.Green);
-        Assert.Equal((byte)170, bitmap.GetPixel(1, 2).Alpha);
+        Assert.Equal((byte)170, RawRgbaTransforms.Sample(edited, 1, 2).Alpha);
     }
 
     [Fact]
@@ -124,10 +122,9 @@ public sealed class IrregularCutoutTests
         var current = TestAssets.Png(5, 5, (_, _) => new SKColor(1, 2, 3, 0));
         using var brush = new AlphaBrushSession(current, recovery, AlphaBrushMode.Restore, 1);
         brush.ApplyPoint(new PixelPoint(2.5, 3.5));
-        using var restored = ImageProcessor.Decode(brush.Encode());
-        using var source = ImageProcessor.Decode(recovery);
-        Assert.Equal(source.GetPixel(2, 3), restored.GetPixel(2, 3));
-        Assert.Equal(new SKColor(1, 2, 3, 0), restored.GetPixel(1, 3));
+        var edited = brush.Encode();
+        Assert.Equal(RawRgbaTransforms.Sample(recovery, 2, 3), RawRgbaTransforms.Sample(edited, 2, 3));
+        Assert.Equal(RawRgbaTransforms.Sample(current, 1, 3), RawRgbaTransforms.Sample(edited, 1, 3));
     }
 
     [Fact]
@@ -290,11 +287,7 @@ public sealed class IrregularCutoutTests
         return brush.Encode();
     }
 
-    private static SKColor Pixel(byte[] png, int x, int y)
-    {
-        using var bitmap = ImageProcessor.Decode(png);
-        return bitmap.GetPixel(x, y);
-    }
+    private static SKColor Pixel(byte[] png, int x, int y) => RawRgbaTransforms.Sample(png, x, y);
 
     private static async Task<(DocumentController Controller, string Path)> OpenPatternAsync(int width, int height)
     {
