@@ -5,7 +5,7 @@ $ToolRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $Project = Join-Path $ToolRoot "src\Gelatin.App\Gelatin.App.csproj"
 $DistRoot = Join-Path $ToolRoot "dist"
 $PublishDirectory = Join-Path $DistRoot "gelatin"
-$Archive = Join-Path $DistRoot "gelatin-0.1.1-win-x64.zip"
+$Archive = Join-Path $DistRoot "gelatin-0.1.2-win-x64.zip"
 
 $env:AVALONIA_TELEMETRY_OPTOUT = "1"
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = "1"
@@ -40,6 +40,8 @@ if (-not (Test-Path $Archive -PathType Leaf)) {
     throw "Gelatin package archive was not created."
 }
 
+$Hash = (Get-FileHash -Path $Archive -Algorithm SHA256).Hash
 Write-Host ""
 Write-Host "Published: $PublishDirectory"
 Write-Host "Packaged:  $Archive"
+Write-Host "SHA256:    $Hash"

@@ -1,4 +1,4 @@
-# Gelatin 0.1.1
+# Gelatin 0.1.2
 
 Gelatin is a standalone Windows 11 x64 editor for preparing images as deformable `.gel` assets. It does not need Terraria or GLoader, and it never launches or modifies either program.
 
@@ -10,8 +10,8 @@ prepare image -> place jello cores / paint rigidity -> abuse it in the Lab -> sa
 
 ## Run the packaged app
 
-1. Download the `gelatin-0.1.1-win-x64` Actions artifact.
-2. Extract `gelatin-0.1.1-win-x64.zip` to any normal folder.
+1. Download the `gelatin-0.1.2-win-x64` Actions artifact.
+2. Extract `gelatin-0.1.2-win-x64.zip` to any normal folder.
 3. Run `Gelatin.exe`.
 
 The package is self-contained. A separate .NET installation is not required.
@@ -21,13 +21,28 @@ The package is self-contained. A separate .NET installation is not required.
 ### Asset
 
 - Open or drag/drop PNG, JPEG, WebP, and `.gel` files.
-- Draw and apply a crop rectangle. Existing normalized cores and rigidity strokes are remapped; elements wholly outside the crop are removed.
-- Resize with high-quality sampling and an optional aspect-ratio lock. Re-enabling the lock captures the current width/height ratio.
+- Draw and apply the existing rectangular crop. Existing normalized cores and rigidity strokes are remapped; elements wholly outside the crop are removed.
+- Use **Polygon cutout** for irregular shapes. Click source-pixel vertices, close with Enter/double-click/the first vertex, then drag vertices or insert one by clicking an edge. Delete removes a selected vertex while at least three remain; arrow keys nudge one source pixel and Shift+arrow nudges ten.
+- Applying a polygon cutout makes everything outside the polygon transparent with an antialiased boundary, then automatically trims margins where alpha is exactly zero. The cutout and trim are one undoable edit.
+- Resize with deterministic RGBA sampling and an optional aspect-ratio lock. Re-enabling the lock captures the current width/height ratio.
 - Trim transparent edges using the editable alpha threshold.
 - Pick a background color with the eyedropper, preview tolerance and feather changes live, then apply or cancel.
+- **Erase alpha** paints alpha to zero with a hard circular source-pixel brush while retaining hidden RGB.
+- **Restore alpha** copies exact RGBA pixels from a synchronized session-only recovery source. Brush drags are interpolated and each drag commits as one undo step.
 - Export the current processed PNG or pretty-printed JSON for inspection.
 
-The canvas has a transparency checkerboard. Use the mouse wheel to zoom and middle/right drag to pan.
+The canvas has a transparency checkerboard. Use the mouse wheel to zoom and middle/right drag to pan. Polygon coordinates and alpha brush size remain defined in source pixels at every zoom level.
+
+#### Recovery-source behavior
+
+Restore is intentionally an editor-session facility, not a new `.gel` format feature:
+
+- Opening a normal image uses its normalized PNG as the recovery baseline.
+- Opening a `.gel` uses the embedded processed PNG as the recovery baseline.
+- Crop, resize, transparent trim, and the automatic post-cutout trim transform the recovery source in lockstep with the visible image.
+- Background removal, polygon masking before trim, Erase, and Restore do **not** overwrite the recovery source.
+- Undo/redo snapshots the visible image and recovery source together.
+- Saving persists only the ordinary GEL1 JSON + processed PNG. Reopening that file starts a new recovery baseline from the saved processed PNG.
 
 ### Gel
 
@@ -75,6 +90,19 @@ Global:
 | `Ctrl+Z` | Undo |
 | `Ctrl+Y` | Redo |
 
+Polygon cutout while the canvas/editor owns keyboard input:
+
+| Shortcut | Action |
+|---|---|
+| `Enter` | Close an open polygon if valid |
+| `Backspace` | Remove the last open vertex; on a closed polygon delete the selected vertex if 3 remain |
+| `Delete` | Delete the selected closed-polygon vertex if 3 remain |
+| `Arrow keys` | Nudge the selected vertex by 1 source pixel |
+| `Shift+Arrow` | Nudge the selected vertex by 10 source pixels |
+| `Escape` | Cancel/clear the polygon selection |
+
+Text and numeric inputs suppress polygon editing shortcuts while focused.
+
 Lab (workspace-wide when a text or numeric field is not active):
 
 | Shortcut | Action |
@@ -84,7 +112,7 @@ Lab (workspace-wide when a text or numeric field is not active):
 | `H` | Toggle Hammer |
 | `M` | Toggle mesh |
 
-Gelatin tracks dirty state and prompts before discarding unsaved work. Undo/redo covers image operations, material changes, core editing, and rigidity editing through a bounded snapshot history.
+Gelatin tracks dirty state and prompts before discarding unsaved work. Undo/redo covers image operations, material changes, core editing, rigidity editing, polygon cutout/trim, and alpha-repair brush strokes through a bounded snapshot history.
 
 ## GEL1 format
 
@@ -99,7 +127,7 @@ Offset  Size  Meaning
 12+N    M     exact PNG bytes
 ```
 
-Gelatin 0.1.1 keeps the `GEL1` container and `schemaVersion: 1` unchanged and reads 0.1.0-compatible GEL1 files without migration. The loader rejects incorrect magic, unsafe or impossible lengths, truncation, trailing bytes, invalid UTF-8/JSON, unsupported schema versions, invalid PNG data, and dimension mismatches. Saves are atomic. The complete JSON schema is in `gel.schema.json`.
+Gelatin 0.1.2 keeps the `GEL1` container and `schemaVersion: 1` unchanged and reads 0.1.0/0.1.1-compatible GEL1 files without migration. The recovery source is never serialized. The loader rejects incorrect magic, unsafe or impossible lengths, truncation, trailing bytes, invalid UTF-8/JSON, unsupported schema versions, invalid PNG data, and dimension mismatches. Saves are atomic. The complete JSON schema is in `gel.schema.json`.
 
 Lab-only state—gravity, chamber size, simulation quality/speed, pause state, velocity, deformation, and editor pan/zoom—is not serialized.
 
@@ -127,6 +155,8 @@ dotnet build Gelatin.sln -c Release --no-restore
 dotnet test Gelatin.sln -c Release --no-build
 ```
 
+The authoritative repository workflow is `.github/workflows/gelatin.yml`; it runs the Windows build/test/package loop used for release verification.
+
 ## Publish
 
 From the repository root on Windows:
@@ -139,7 +169,7 @@ Outputs:
 
 ```text
 tools/gelatin/dist/gelatin/Gelatin.exe
-tools/gelatin/dist/gelatin-0.1.1-win-x64.zip
+tools/gelatin/dist/gelatin-0.1.2-win-x64.zip
 ```
 
-The dedicated `.github/workflows/gelatin.yml` workflow performs restore, Release build, tests, self-contained Windows x64 publish, verification, and artifact upload without changing the GLoader package.
+The publish script prints the package SHA-256. The dedicated Gelatin workflow performs restore, Release build, tests, self-contained Windows x64 publish, package/hash verification, and artifact upload without changing the GLoader package.

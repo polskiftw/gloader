@@ -29,7 +29,7 @@ public sealed class UiSmokeTests
         var window = new MainWindow();
         window.Show();
 
-        Assert.Contains("Gelatin 0.1.1", window.Title);
+        Assert.Contains("Gelatin 0.1.2", window.Title);
         var buttons = window.GetLogicalDescendants().OfType<Button>().ToArray();
         Assert.Contains(buttons, button => Equals(button.Content, "Open"));
         Assert.Contains(buttons, button => Equals(button.Content, "Save .gel"));

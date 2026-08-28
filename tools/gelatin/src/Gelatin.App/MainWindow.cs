@@ -31,10 +31,11 @@ public sealed class MainWindow : Window
     private double _backgroundFeather = 0.08;
     private byte[]? _backgroundPreview;
     private CancellationTokenSource? _backgroundPreviewCancellation;
+    private Button? _polygonApplyButton;
 
     public MainWindow()
     {
-        Title = "Gelatin 0.1.1";
+        Title = "Gelatin 0.1.2";
         Width = 1360;
         Height = 880;
         MinWidth = 980;
@@ -65,12 +66,13 @@ public sealed class MainWindow : Window
 
         _controller.Changed += (_, _) => RefreshChrome();
         _editor.CoreSelected += id => { _editor.SelectedCoreId = id; if (_workspace == Workspace.Gel) BuildGelPanels(); };
-        _editor.PixelPicked += (x, y) => { _backgroundColor = ImageProcessor.Sample(_controller.Document.PngBytes, x, y); UpdateBackgroundPreview(); };
+        _editor.PixelPicked += (x, y) => { _backgroundColor = RawRgbaTransforms.Sample(_controller.Document.PngBytes, x, y); UpdateBackgroundPreview(); };
         _editor.CropChanged += crop =>
         {
             if (crop is { } value) _status.Text = $"Crop: {value.Width} × {value.Height} px at ({value.X}, {value.Y})";
             else RefreshChrome();
         };
+        _editor.PolygonChanged += UpdatePolygonChrome;
         _editor.ImageError += message => _status.Text = message;
         _editor.EditorError += message => _status.Text = message;
         _lab.SimulationError += message => _status.Text = message;
@@ -102,12 +104,13 @@ public sealed class MainWindow : Window
         panel.Children.Add(ActionButton("Gel", () => ShowWorkspace(Workspace.Gel), accent: true));
         panel.Children.Add(ActionButton("Lab", () => ShowWorkspace(Workspace.Lab), accent: true));
         panel.Children.Add(Separator());
-        panel.Children.Add(ActionButton("About", () => Dialogs.ShowInfoAsync(this, "About Gelatin", "Gelatin 0.1.1\nStandalone gel asset authoring and physics lab.")));
+        panel.Children.Add(ActionButton("About", () => Dialogs.ShowInfoAsync(this, "About Gelatin", "Gelatin 0.1.2\nStandalone gel asset authoring and physics lab.")));
         return new Border { Background = new SolidColorBrush(Color.Parse("#222229")), BorderBrush = new SolidColorBrush(Color.Parse("#33333C")), BorderThickness = new Thickness(0, 0, 0, 1), Child = panel };
     }
 
     private void ShowWorkspace(Workspace workspace)
     {
+        if (workspace != _workspace) _editor.CancelTransientInteraction();
         _workspace = workspace;
         _editor.IsVisible = workspace != Workspace.Lab;
         _lab.IsVisible = workspace == Workspace.Lab;
@@ -127,6 +130,27 @@ public sealed class MainWindow : Window
         cropRow.Children.Add(ActionButton("Apply", ApplyCropAsync));
         cropRow.Children.Add(ActionButton("Cancel", () => { _editor.CancelCrop(); _editor.Mode = EditorMode.Select; }));
         left.Children.Add(cropRow);
+
+        left.Children.Add(Header("Irregular cutout"));
+        left.Children.Add(ActionButton("Polygon cutout", () =>
+        {
+            _editor.BeginPolygonCutout();
+            UpdatePolygonChrome();
+        }, wide: true));
+        var polygonRow = Row();
+        _polygonApplyButton = ActionButton("Apply Cutout", ApplyPolygonCutoutAsync);
+        _polygonApplyButton.IsEnabled = _editor.PolygonCanApply;
+        polygonRow.Children.Add(_polygonApplyButton);
+        polygonRow.Children.Add(ActionButton("Cancel", () => { _editor.Mode = EditorMode.Select; RefreshChrome(); }));
+        left.Children.Add(polygonRow);
+        left.Children.Add(new TextBlock
+        {
+            Text = "Click points; Enter/first point/double-click closes. Closed shapes support vertex drag, edge insertion, Delete, and pixel arrow nudging.",
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = MutedBrush(),
+            FontSize = 11
+        });
+
         left.Children.Add(Header("Resize"));
         var width = Number(_controller.Document.Config.Image.Width, 1, GelValidator.MaxDimension, 1);
         var height = Number(_controller.Document.Config.Image.Height, 1, GelValidator.MaxDimension, 1);
@@ -156,11 +180,21 @@ public sealed class MainWindow : Window
         left.Children.Add(Labeled("Height", height));
         left.Children.Add(aspect);
         left.Children.Add(ActionButton("Resize image", () => ResizeImageAsync((int)(width.Value ?? 1), (int)(height.Value ?? 1)), wide: true));
+
         left.Children.Add(Header("Transparency"));
         var alpha = Number(_controller.Document.Config.Image.AlphaThreshold, 0, 1, 0.005, "0.000");
         alpha.ValueChanged += (_, _) => _controller.Mutate(config => config.Image.AlphaThreshold = (double)(alpha.Value ?? 0.0625m));
         left.Children.Add(Labeled("Alpha threshold", alpha));
         left.Children.Add(ActionButton("Trim transparent edges", TrimTransparencyAsync, wide: true));
+
+        left.Children.Add(Header("Precision alpha cleanup"));
+        var alphaModes = Row();
+        alphaModes.Children.Add(ActionButton("Erase alpha", () => _editor.BeginAlphaBrush(AlphaBrushMode.Erase)));
+        alphaModes.Children.Add(ActionButton("Restore alpha", () => _editor.BeginAlphaBrush(AlphaBrushMode.Restore)));
+        left.Children.Add(alphaModes);
+        var alphaBrush = Number(_editor.AlphaBrushSize, 1, 256, 1, "0");
+        alphaBrush.ValueChanged += (_, _) => _editor.AlphaBrushSize = (double)(alphaBrush.Value ?? 24);
+        left.Children.Add(Labeled("Brush size (source px)", alphaBrush));
 
         var right = SectionStack("BACKGROUND REMOVAL");
         right.Children.Add(new TextBlock { Text = "Pick the background, tune the live preview, then apply.", TextWrapping = TextWrapping.Wrap, Foreground = MutedBrush() });
@@ -320,13 +354,63 @@ public sealed class MainWindow : Window
         try
         {
             _status.Text = "Cropping image…";
-            var png = await Task.Run(() => ImageProcessor.Crop(document.PngBytes, crop));
+            var png = await Task.Run(() => RawRgbaTransforms.Crop(document.PngBytes, crop));
             if (!ReferenceEquals(document, _controller.Document)) return;
-            _controller.CommitImage(png, config => ImageProcessor.RemapAuthoringForCrop(config, crop, oldWidth, oldHeight));
+            _controller.CommitImage(png,
+                config => ImageProcessor.RemapAuthoringForCrop(config, crop, oldWidth, oldHeight),
+                recovery => RawRgbaTransforms.Crop(recovery, crop));
             _editor.CancelCrop();
             _editor.Mode = EditorMode.Select;
         }
         catch (Exception ex) { await Dialogs.ShowErrorAsync(this, "Crop failed", ex.Message); }
+    }
+
+    private async Task ApplyPolygonCutoutAsync()
+    {
+        if (!_editor.PolygonClosed)
+        {
+            _status.Text = "Close the polygon before applying the cutout.";
+            return;
+        }
+        var polygon = _editor.GetPolygonSnapshot();
+        var validation = PolygonGeometry.Validate(polygon);
+        if (!validation.IsValid)
+        {
+            _status.Text = validation.Error!;
+            return;
+        }
+
+        var document = _controller.Document;
+        var oldWidth = document.Config.Image.Width;
+        var oldHeight = document.Config.Image.Height;
+        try
+        {
+            _status.Text = "Applying polygon cutout and trimming transparent margins…";
+            var result = await Task.Run(() =>
+            {
+                var masked = ImageAlphaEditing.ApplyPolygonCutout(document.PngBytes, polygon);
+                var bounds = RawRgbaTransforms.FindTrimBounds(masked, 0);
+                return bounds is null ? (Bounds: (ImagePixelRect?)null, Png: (byte[]?)null) :
+                    (Bounds: (ImagePixelRect?)bounds.Value, Png: (byte[]?)RawRgbaTransforms.Crop(masked, bounds.Value));
+            });
+            if (!ReferenceEquals(document, _controller.Document)) return;
+            if (result.Bounds is not ImagePixelRect bounds || result.Png is null)
+            {
+                _status.Text = "The polygon cutout would make the image completely transparent; nothing was changed.";
+                return;
+            }
+
+            _controller.CommitImage(result.Png,
+                config => ImageProcessor.RemapAuthoringForCrop(config, bounds, oldWidth, oldHeight),
+                recovery => RawRgbaTransforms.Crop(recovery, bounds));
+            _editor.Mode = EditorMode.Select;
+            RefreshChrome();
+        }
+        catch (GelFormatException ex)
+        {
+            _status.Text = ex.Message;
+        }
+        catch (Exception ex) { await Dialogs.ShowErrorAsync(this, "Polygon cutout failed", ex.Message); }
     }
 
     private async Task ResizeImageAsync(int width, int height)
@@ -335,8 +419,9 @@ public sealed class MainWindow : Window
         try
         {
             _status.Text = $"Resizing image to {width} × {height}…";
-            var png = await Task.Run(() => ImageProcessor.Resize(document.PngBytes, width, height));
-            if (ReferenceEquals(document, _controller.Document)) _controller.CommitImage(png);
+            var png = await Task.Run(() => RawRgbaTransforms.Resize(document.PngBytes, width, height));
+            if (ReferenceEquals(document, _controller.Document))
+                _controller.CommitImage(png, recoveryTransform: recovery => RawRgbaTransforms.Resize(recovery, width, height));
         }
         catch (Exception ex) { await Dialogs.ShowErrorAsync(this, "Resize failed", ex.Message); }
     }
@@ -352,8 +437,8 @@ public sealed class MainWindow : Window
             _status.Text = "Finding transparent edges…";
             var result = await Task.Run(() =>
             {
-                var bounds = ImageProcessor.FindTrimBounds(document.PngBytes, threshold);
-                return (Bounds: bounds, Png: bounds is null ? null : ImageProcessor.Crop(document.PngBytes, bounds.Value));
+                var bounds = RawRgbaTransforms.FindTrimBounds(document.PngBytes, threshold);
+                return (Bounds: bounds, Png: bounds is null ? null : RawRgbaTransforms.Crop(document.PngBytes, bounds.Value));
             });
             if (!ReferenceEquals(document, _controller.Document)) return;
             if (result.Bounds is null)
@@ -367,7 +452,10 @@ public sealed class MainWindow : Window
                 RefreshChrome();
                 return;
             }
-            _controller.CommitImage(result.Png!, config => ImageProcessor.RemapAuthoringForCrop(config, result.Bounds.Value, oldWidth, oldHeight));
+            var trim = result.Bounds.Value;
+            _controller.CommitImage(result.Png!,
+                config => ImageProcessor.RemapAuthoringForCrop(config, trim, oldWidth, oldHeight),
+                recovery => RawRgbaTransforms.Crop(recovery, trim));
         }
         catch (Exception ex) { await Dialogs.ShowErrorAsync(this, "Trim failed", ex.Message); }
     }
@@ -440,7 +528,7 @@ public sealed class MainWindow : Window
         return Task.Run(() =>
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var result = ImageProcessor.RemoveBackground(png, color, tolerance, feather);
+            var result = RawRgbaTransforms.RemoveBackground(png, color, tolerance, feather);
             cancellationToken.ThrowIfCancellationRequested();
             return result;
         }, cancellationToken);
@@ -568,6 +656,7 @@ public sealed class MainWindow : Window
         else if (control && e.Key == Key.S) { e.Handled = true; await SaveAsync(false); }
         else if (control && e.Key == Key.Z) { e.Handled = true; _controller.Undo(); }
         else if (control && e.Key == Key.Y) { e.Handled = true; _controller.Redo(); }
+        else if (_workspace == Workspace.Asset && _editor.HandleEditorKey(e.Key, e.KeyModifiers)) e.Handled = true;
         else if (_workspace == Workspace.Lab && e.KeyModifiers == KeyModifiers.None)
         {
             if (e.Key == Key.Space) { _lab.Paused = !_lab.Paused; e.Handled = true; }
@@ -577,10 +666,19 @@ public sealed class MainWindow : Window
         }
     }
 
+    private void UpdatePolygonChrome()
+    {
+        if (_polygonApplyButton is not null) _polygonApplyButton.IsEnabled = _editor.PolygonCanApply;
+        if (_workspace != Workspace.Asset || _editor.Mode != EditorMode.PolygonCutout) return;
+        var validation = _editor.PolygonClosed ? PolygonGeometry.Validate(_editor.PolygonPoints) : default;
+        var state = _editor.PolygonClosed ? validation.IsValid ? "closed / ready" : validation.Error : "placing points";
+        _status.Text = $"Polygon: {_editor.PolygonPoints.Count} vertices — {state}";
+    }
+
     private void RefreshChrome()
     {
         var dirty = _controller.IsDirty ? " *" : string.Empty;
-        Title = $"Gelatin 0.1.1 — {_controller.Document.Config.AssetName}{dirty}";
+        Title = $"Gelatin 0.1.2 — {_controller.Document.Config.AssetName}{dirty}";
         var config = _controller.Document.Config;
         _status.Text = $"{config.Image.Width} × {config.Image.Height} px   |   {config.Cores.Count} core(s)   |   {config.RigidityStrokes.Count} rigidity stroke(s)   |   {(_controller.IsDirty ? "Unsaved changes" : Path.GetFileName(_controller.CurrentPath))}";
     }

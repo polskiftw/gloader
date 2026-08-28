@@ -10,7 +10,18 @@ using ImagePixelRect = Gelatin.Core.Imaging.PixelRect;
 
 namespace Gelatin.App.Controls;
 
-public enum EditorMode { Select, Core, Rigid, Erase, Crop, Eyedropper }
+public enum EditorMode
+{
+    Select,
+    Core,
+    Rigid,
+    Erase,
+    Crop,
+    PolygonCutout,
+    AlphaErase,
+    AlphaRestore,
+    Eyedropper
+}
 
 public sealed class EditorCanvas : Control
 {
@@ -33,8 +44,34 @@ public sealed class EditorCanvas : Control
     private CoreConfig? _activeCore;
     private RigidityStroke? _activeStroke;
     private bool _compoundStarted;
+    private EditorMode _mode;
 
-    public EditorMode Mode { get; set; }
+    private readonly List<PixelPoint> _polygon = [];
+    private bool _polygonClosed;
+    private int? _selectedPolygonVertex;
+    private int? _dragPolygonVertex;
+    private PixelPoint? _polygonPointer;
+
+    private AlphaBrushSession? _alphaBrush;
+    private GelDocument? _alphaBrushDocument;
+    private PixelPoint? _lastAlphaPoint;
+    private PixelPoint? _alphaCursor;
+    private bool _alphaPainting;
+    private double _alphaBrushSize = 24;
+
+    public EditorMode Mode
+    {
+        get => _mode;
+        set
+        {
+            if (_mode == value) return;
+            if (IsAlphaMode(_mode)) CancelAlphaStroke();
+            if (_mode == EditorMode.PolygonCutout && value != EditorMode.PolygonCutout) ClearPolygon();
+            _mode = value;
+            InvalidateVisual();
+        }
+    }
+
     public bool ShowOverlays { get; set; } = true;
     public bool ShowHeatmap { get; set; }
     public bool ShowRigidity { get; set; } = true;
@@ -42,8 +79,26 @@ public sealed class EditorCanvas : Control
     public double BrushStrength { get; set; } = 0.8;
     public int? SelectedCoreId { get; set; }
     public ImagePixelRect? CropRect { get; private set; }
+    public IReadOnlyList<PixelPoint> PolygonPoints => _polygon;
+    public bool PolygonClosed => _polygonClosed;
+    public int? SelectedPolygonVertex => _selectedPolygonVertex;
+    public double Zoom => _zoom;
+    public Point Pan => _pan;
+    public double AlphaBrushSize
+    {
+        get => _alphaBrushSize;
+        set
+        {
+            _alphaBrushSize = Math.Clamp(value, 1, 256);
+            InvalidateVisual();
+        }
+    }
+
+    public bool PolygonCanApply => _polygonClosed && PolygonGeometry.Validate(_polygon).IsValid;
+
     public event Action<int?>? CoreSelected;
     public event Action<ImagePixelRect?>? CropChanged;
+    public event Action? PolygonChanged;
     public event Action<int, int>? PixelPicked;
     public event Action<string>? ImageError;
     public event Action<string>? EditorError;
@@ -58,7 +113,138 @@ public sealed class EditorCanvas : Control
         PointerPressed += OnPointerPressed;
         PointerMoved += OnPointerMoved;
         PointerReleased += OnPointerReleased;
+        PointerExited += (_, _) => { _alphaCursor = null; _polygonPointer = null; InvalidateVisual(); };
         PointerWheelChanged += OnWheel;
+    }
+
+    public void BeginPolygonCutout()
+    {
+        CancelAlphaStroke();
+        _mode = EditorMode.PolygonCutout;
+        ClearPolygon();
+        Focus();
+        InvalidateVisual();
+    }
+
+    public void AddPolygonVertex(PixelPoint point)
+    {
+        if (_polygonClosed) return;
+        var width = _controller.Document.Config.Image.Width;
+        var height = _controller.Document.Config.Image.Height;
+        _polygon.Add(PolygonGeometry.Clamp(point, width, height));
+        _selectedPolygonVertex = _polygon.Count - 1;
+        RaisePolygonChanged();
+    }
+
+    public bool ClosePolygon()
+    {
+        if (_polygonClosed) return PolygonCanApply;
+        var validation = PolygonGeometry.Validate(_polygon);
+        if (!validation.IsValid)
+        {
+            EditorError?.Invoke(validation.Error!);
+            return false;
+        }
+        _polygonClosed = true;
+        _polygonPointer = null;
+        _selectedPolygonVertex ??= 0;
+        RaisePolygonChanged();
+        return true;
+    }
+
+    public void SelectPolygonVertex(int? index)
+    {
+        _selectedPolygonVertex = index is >= 0 && index < _polygon.Count ? index : null;
+        RaisePolygonChanged();
+    }
+
+    public PixelPoint[] GetPolygonSnapshot() => _polygon.ToArray();
+
+    public bool HandleEditorKey(Key key, KeyModifiers modifiers)
+    {
+        if (_mode != EditorMode.PolygonCutout) return false;
+        var shift = modifiers.HasFlag(KeyModifiers.Shift);
+        if ((modifiers & ~KeyModifiers.Shift) != KeyModifiers.None) return false;
+
+        if (!_polygonClosed)
+        {
+            if (key == Key.Back)
+            {
+                if (_polygon.Count > 0)
+                {
+                    _polygon.RemoveAt(_polygon.Count - 1);
+                    _selectedPolygonVertex = _polygon.Count == 0 ? null : _polygon.Count - 1;
+                    RaisePolygonChanged();
+                }
+                return true;
+            }
+            if (key == Key.Escape)
+            {
+                ClearPolygon();
+                return true;
+            }
+            if (key == Key.Enter)
+            {
+                ClosePolygon();
+                return true;
+            }
+            return false;
+        }
+
+        if (key == Key.Escape)
+        {
+            ClearPolygon();
+            return true;
+        }
+        if (key is Key.Delete or Key.Back)
+        {
+            if (_selectedPolygonVertex is int index)
+            {
+                if (_polygon.Count <= 3)
+                    EditorError?.Invoke("A polygon needs at least 3 vertices; this vertex cannot be deleted.");
+                else
+                {
+                    _polygon.RemoveAt(index);
+                    _selectedPolygonVertex = Math.Min(index, _polygon.Count - 1);
+                    RaisePolygonChanged();
+                }
+            }
+            return true;
+        }
+
+        var dx = key == Key.Left ? -1 : key == Key.Right ? 1 : 0;
+        var dy = key == Key.Up ? -1 : key == Key.Down ? 1 : 0;
+        if ((dx != 0 || dy != 0) && _selectedPolygonVertex is int selected)
+        {
+            var step = shift ? 10 : 1;
+            var width = _controller.Document.Config.Image.Width;
+            var height = _controller.Document.Config.Image.Height;
+            _polygon[selected] = PolygonGeometry.Nudge(_polygon[selected], dx * step, dy * step, width, height);
+            RaisePolygonChanged();
+            return true;
+        }
+        return false;
+    }
+
+    public void BeginAlphaBrush(AlphaBrushMode mode)
+    {
+        ClearPolygon();
+        CancelAlphaStroke();
+        _mode = mode == AlphaBrushMode.Erase ? EditorMode.AlphaErase : EditorMode.AlphaRestore;
+        Focus();
+        InvalidateVisual();
+    }
+
+    public void CancelTransientInteraction()
+    {
+        CancelAlphaStroke();
+        ClearPolygon();
+        _cropDrag = CropDrag.None;
+        _coreDrag = CoreDrag.None;
+        _activeCore = null;
+        _activeStroke = null;
+        _compoundStarted = false;
+        _panning = false;
     }
 
     public async void SetPreview(byte[]? png)
@@ -103,6 +289,7 @@ public sealed class EditorCanvas : Control
     public void Shutdown()
     {
         _shutdown = true;
+        CancelAlphaStroke();
         _bitmapCancellation?.Cancel();
         _previewCancellation?.Cancel();
         _bitmap?.Dispose();
@@ -131,17 +318,9 @@ public sealed class EditorCanvas : Control
             if (ShowRigidity) DrawRigidity(context, imageRect);
             DrawCores(context, imageRect);
         }
-        if (CropRect is ImagePixelRect crop)
-        {
-            var rect = PixelToCanvas(crop, imageRect, _controller.Document.Config.Image.Width, _controller.Document.Config.Image.Height);
-            context.DrawRectangle(new SolidColorBrush(Color.FromArgb(40, 0, 0, 0)), new Pen(Brushes.White, 2), rect);
-            context.DrawLine(new Pen(Brushes.White, 1), new Point(rect.X + rect.Width / 3, rect.Y), new Point(rect.X + rect.Width / 3, rect.Bottom));
-            context.DrawLine(new Pen(Brushes.White, 1), new Point(rect.X + rect.Width * 2 / 3, rect.Y), new Point(rect.X + rect.Width * 2 / 3, rect.Bottom));
-            context.DrawLine(new Pen(Brushes.White, 1), new Point(rect.X, rect.Y + rect.Height / 3), new Point(rect.Right, rect.Y + rect.Height / 3));
-            context.DrawLine(new Pen(Brushes.White, 1), new Point(rect.X, rect.Y + rect.Height * 2 / 3), new Point(rect.Right, rect.Y + rect.Height * 2 / 3));
-            foreach (var handle in CropHandles(rect))
-                context.FillRectangle(Brushes.White, new Rect(handle.X - 4, handle.Y - 4, 8, 8));
-        }
+        DrawCrop(context, imageRect);
+        DrawPolygon(context, imageRect);
+        DrawAlphaCursor(context, imageRect);
     }
 
     private async void Reload()
@@ -152,6 +331,9 @@ public sealed class EditorCanvas : Control
             InvalidateVisual();
             return;
         }
+
+        if (_alphaPainting || _alphaBrush is not null) CancelAlphaStroke();
+        if (_polygon.Count > 0) ClearPolygon();
         _bitmapSource = png;
         _bitmapCancellation?.Cancel();
         _previewCancellation?.Cancel();
@@ -187,7 +369,7 @@ public sealed class EditorCanvas : Control
 
     private Rect ImageRect()
     {
-        var size = _bitmap?.Size ?? new Size(1, 1);
+        var size = _bitmap?.Size ?? new Size(Math.Max(1, _controller.Document.Config.Image.Width), Math.Max(1, _controller.Document.Config.Image.Height));
         var scale = Math.Min(Math.Max(1, Bounds.Width - 40) / size.Width, Math.Max(1, Bounds.Height - 40) / size.Height) * _zoom;
         var width = size.Width * scale;
         var height = size.Height * scale;
@@ -206,11 +388,24 @@ public sealed class EditorCanvas : Control
             e.Pointer.Capture(this);
             return;
         }
+
+        if (!properties.IsLeftButtonPressed) return;
+        if (_mode == EditorMode.PolygonCutout)
+        {
+            HandlePolygonPress(e, point);
+            return;
+        }
+        if (IsAlphaMode(_mode))
+        {
+            BeginAlphaStroke(e, point);
+            return;
+        }
+
         var uv = CanvasToUv(point);
         if (uv is null) return;
         _dragStart = point;
         _compoundStarted = false;
-        switch (Mode)
+        switch (_mode)
         {
             case EditorMode.Eyedropper:
                 PixelPicked?.Invoke((int)Math.Clamp(uv.Value.X * _controller.Document.Config.Image.Width, 0, _controller.Document.Config.Image.Width - 1),
@@ -285,10 +480,46 @@ public sealed class EditorCanvas : Control
             InvalidateVisual();
             return;
         }
+
+        if (_mode == EditorMode.PolygonCutout)
+        {
+            _polygonPointer = CanvasToPixelClamped(point);
+            if (_dragPolygonVertex is int vertex && e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+            {
+                _polygon[vertex] = _polygonPointer.Value;
+                _selectedPolygonVertex = vertex;
+                RaisePolygonChanged();
+            }
+            else InvalidateVisual();
+            return;
+        }
+
+        if (IsAlphaMode(_mode))
+        {
+            _alphaCursor = CanvasToPixel(point);
+            if (_alphaPainting && e.GetCurrentPoint(this).Properties.IsLeftButtonPressed && _alphaCursor is PixelPoint current)
+            {
+                try
+                {
+                    if (_lastAlphaPoint is PixelPoint last) _alphaBrush!.ApplySegment(last, current);
+                    else _alphaBrush!.ApplyPoint(current);
+                    _lastAlphaPoint = current;
+                    SetPreview(_alphaBrush.Encode());
+                }
+                catch (Exception ex)
+                {
+                    EditorError?.Invoke($"Alpha brush failed: {ex.Message}");
+                    CancelAlphaStroke();
+                }
+            }
+            InvalidateVisual();
+            return;
+        }
+
         if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
-        var uv = Mode == EditorMode.Crop ? CanvasToUvClamped(point) : CanvasToUv(point);
+        var uv = _mode == EditorMode.Crop ? CanvasToUvClamped(point) : CanvasToUv(point);
         if (uv is null) return;
-        if (Mode == EditorMode.Crop)
+        if (_mode == EditorMode.Crop)
         {
             UpdateCrop(uv.Value);
             CropChanged?.Invoke(CropRect);
@@ -307,7 +538,7 @@ public sealed class EditorCanvas : Control
                 _activeStroke.Points.Add([uv.Value.X, uv.Value.Y]);
             _controller.CompoundMutate(_ => { });
         }
-        else if (Mode == EditorMode.Erase)
+        else if (_mode == EditorMode.Erase)
         {
             InfluenceFields.Erase(_controller.Document.Config.RigidityStrokes, new System.Numerics.Vector2((float)uv.Value.X, (float)uv.Value.Y), BrushRadius, 1);
             _controller.CompoundMutate(_ => { });
@@ -317,7 +548,14 @@ public sealed class EditorCanvas : Control
 
     private void OnPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
+        if (_alphaPainting)
+        {
+            CommitAlphaStroke();
+            e.Pointer.Capture(null);
+            return;
+        }
         _panning = false;
+        _dragPolygonVertex = null;
         _activeCore = null;
         _activeStroke = null;
         _compoundStarted = false;
@@ -335,6 +573,159 @@ public sealed class EditorCanvas : Control
         _pan = new Point(before.X - Bounds.Width / 2 - (before.X - Bounds.Width / 2 - _pan.X) * ratio,
             before.Y - Bounds.Height / 2 - (before.Y - Bounds.Height / 2 - _pan.Y) * ratio);
         InvalidateVisual();
+    }
+
+    private void HandlePolygonPress(PointerPressedEventArgs e, Point canvas)
+    {
+        var pixel = CanvasToPixel(canvas);
+        if (pixel is null) return;
+        _polygonPointer = pixel;
+
+        if (!_polygonClosed)
+        {
+            if (_polygon.Count >= 3 && HitPolygonVertex(canvas) == 0)
+            {
+                ClosePolygon();
+                return;
+            }
+            if (e.ClickCount >= 2 && _polygon.Count >= 3)
+            {
+                ClosePolygon();
+                return;
+            }
+            AddPolygonVertex(pixel.Value);
+            return;
+        }
+
+        var vertex = HitPolygonVertex(canvas);
+        if (vertex is int hit)
+        {
+            _selectedPolygonVertex = hit;
+            _dragPolygonVertex = hit;
+            e.Pointer.Capture(this);
+            RaisePolygonChanged();
+            return;
+        }
+
+        var edge = HitPolygonEdge(canvas);
+        if (edge is int edgeIndex)
+        {
+            var inserted = PolygonGeometry.InsertOnEdge(_polygon, edgeIndex, pixel.Value);
+            _polygon.Clear();
+            _polygon.AddRange(inserted);
+            _selectedPolygonVertex = edgeIndex + 1;
+            _dragPolygonVertex = edgeIndex + 1;
+            e.Pointer.Capture(this);
+            RaisePolygonChanged();
+            return;
+        }
+
+        _selectedPolygonVertex = null;
+        RaisePolygonChanged();
+    }
+
+    private void BeginAlphaStroke(PointerPressedEventArgs e, Point canvas)
+    {
+        var pixel = CanvasToPixel(canvas);
+        if (pixel is null) return;
+        try
+        {
+            CancelAlphaStroke();
+            var mode = _mode == EditorMode.AlphaErase ? AlphaBrushMode.Erase : AlphaBrushMode.Restore;
+            _alphaBrushDocument = _controller.Document;
+            _alphaBrush = new AlphaBrushSession(_controller.Document.PngBytes, _controller.RecoveryPngBytes, mode, _alphaBrushSize);
+            _alphaBrush.ApplyPoint(pixel.Value);
+            _lastAlphaPoint = pixel;
+            _alphaCursor = pixel;
+            _alphaPainting = true;
+            SetPreview(_alphaBrush.Encode());
+            e.Pointer.Capture(this);
+        }
+        catch (Exception ex)
+        {
+            EditorError?.Invoke($"Alpha brush could not start: {ex.Message}");
+            CancelAlphaStroke();
+        }
+    }
+
+    private void CommitAlphaStroke()
+    {
+        var brush = _alphaBrush;
+        var sourceDocument = _alphaBrushDocument;
+        _alphaBrush = null;
+        _alphaBrushDocument = null;
+        _alphaPainting = false;
+        _lastAlphaPoint = null;
+        if (brush is null) return;
+        try
+        {
+            var png = brush.Encode();
+            brush.Dispose();
+            SetPreview(null);
+            if (ReferenceEquals(sourceDocument, _controller.Document)) _controller.CommitImage(png);
+            else EditorError?.Invoke("The image changed while painting; the unfinished alpha stroke was discarded.");
+        }
+        catch (Exception ex)
+        {
+            brush.Dispose();
+            SetPreview(null);
+            EditorError?.Invoke($"Alpha brush could not be committed: {ex.Message}");
+        }
+    }
+
+    private void CancelAlphaStroke()
+    {
+        _alphaPainting = false;
+        _lastAlphaPoint = null;
+        _alphaBrushDocument = null;
+        _alphaBrush?.Dispose();
+        _alphaBrush = null;
+        if (_preview is not null) SetPreview(null);
+    }
+
+    private void ClearPolygon()
+    {
+        _polygon.Clear();
+        _polygonClosed = false;
+        _selectedPolygonVertex = null;
+        _dragPolygonVertex = null;
+        _polygonPointer = null;
+        RaisePolygonChanged();
+    }
+
+    private void RaisePolygonChanged()
+    {
+        PolygonChanged?.Invoke();
+        InvalidateVisual();
+    }
+
+    private int? HitPolygonVertex(Point canvas)
+    {
+        if (_polygon.Count == 0) return null;
+        var imageRect = ImageRect();
+        for (var i = 0; i < _polygon.Count; i++)
+            if (Distance(canvas, PixelToCanvas(_polygon[i], imageRect)) <= 11) return i;
+        return null;
+    }
+
+    private int? HitPolygonEdge(Point canvas)
+    {
+        if (!_polygonClosed || _polygon.Count < 3) return null;
+        var imageRect = ImageRect();
+        var best = double.MaxValue;
+        int? bestIndex = null;
+        for (var i = 0; i < _polygon.Count; i++)
+        {
+            var a = PixelToCanvas(_polygon[i], imageRect);
+            var b = PixelToCanvas(_polygon[(i + 1) % _polygon.Count], imageRect);
+            var distance = DistanceToSegment(canvas, a, b);
+            if (distance < best)
+            {
+                best = distance;
+                bestIndex = i;
+            }
+        }
+        return best <= 9 ? bestIndex : null;
     }
 
     private void PickOrBeginCoreDrag(Point canvas, Point uv)
@@ -442,6 +833,71 @@ public sealed class EditorCanvas : Control
         CropRect = new ImagePixelRect(left, top, Math.Max(1, right - left), Math.Max(1, bottom - top));
     }
 
+    private void DrawCrop(DrawingContext context, Rect imageRect)
+    {
+        if (CropRect is not ImagePixelRect crop) return;
+        var rect = PixelToCanvas(crop, imageRect, _controller.Document.Config.Image.Width, _controller.Document.Config.Image.Height);
+        context.DrawRectangle(new SolidColorBrush(Color.FromArgb(40, 0, 0, 0)), new Pen(Brushes.White, 2), rect);
+        context.DrawLine(new Pen(Brushes.White, 1), new Point(rect.X + rect.Width / 3, rect.Y), new Point(rect.X + rect.Width / 3, rect.Bottom));
+        context.DrawLine(new Pen(Brushes.White, 1), new Point(rect.X + rect.Width * 2 / 3, rect.Y), new Point(rect.X + rect.Width * 2 / 3, rect.Bottom));
+        context.DrawLine(new Pen(Brushes.White, 1), new Point(rect.X, rect.Y + rect.Height / 3), new Point(rect.Right, rect.Y + rect.Height / 3));
+        context.DrawLine(new Pen(Brushes.White, 1), new Point(rect.X, rect.Y + rect.Height * 2 / 3), new Point(rect.Right, rect.Y + rect.Height * 2 / 3));
+        foreach (var handle in CropHandles(rect)) context.FillRectangle(Brushes.White, new Rect(handle.X - 4, handle.Y - 4, 8, 8));
+    }
+
+    private void DrawPolygon(DrawingContext context, Rect imageRect)
+    {
+        if (_mode != EditorMode.PolygonCutout || _polygon.Count == 0) return;
+        var points = _polygon.Select(point => PixelToCanvas(point, imageRect)).ToArray();
+        var linePen = new Pen(new SolidColorBrush(Color.Parse("#FFE58A")), 2);
+        for (var i = 1; i < points.Length; i++) context.DrawLine(linePen, points[i - 1], points[i]);
+        if (_polygonClosed && points.Length >= 3)
+        {
+            context.DrawLine(linePen, points[^1], points[0]);
+            DrawOutsidePolygonPreview(context, imageRect, points);
+        }
+        else if (_polygonPointer is PixelPoint prospective)
+        {
+            context.DrawLine(new Pen(new SolidColorBrush(Color.FromArgb(190, 255, 229, 138)), 1), points[^1], PixelToCanvas(prospective, imageRect));
+        }
+
+        for (var i = 0; i < points.Length; i++)
+        {
+            var selected = i == _selectedPolygonVertex;
+            var first = i == 0;
+            var radius = selected ? 7 : first ? 6 : 5;
+            var fill = selected ? Brushes.White : first ? new SolidColorBrush(Color.Parse("#FF9CF0")) : new SolidColorBrush(Color.Parse("#FFE58A"));
+            context.DrawEllipse(fill, new Pen(Brushes.Black, 1), points[i], radius, radius);
+        }
+    }
+
+    private static void DrawOutsidePolygonPreview(DrawingContext context, Rect imageRect, IReadOnlyList<Point> polygon)
+    {
+        var geometry = new StreamGeometry { FillRule = FillRule.EvenOdd };
+        using (var path = geometry.Open())
+        {
+            path.BeginFigure(imageRect.TopLeft, true);
+            path.LineTo(imageRect.TopRight);
+            path.LineTo(imageRect.BottomRight);
+            path.LineTo(imageRect.BottomLeft);
+            path.EndFigure(true);
+            path.BeginFigure(polygon[0], true);
+            for (var i = 1; i < polygon.Count; i++) path.LineTo(polygon[i]);
+            path.EndFigure(true);
+        }
+        context.DrawGeometry(new SolidColorBrush(Color.FromArgb(92, 20, 16, 28)), null, geometry);
+    }
+
+    private void DrawAlphaCursor(DrawingContext context, Rect imageRect)
+    {
+        if (!IsAlphaMode(_mode) || _alphaCursor is not PixelPoint cursor) return;
+        var center = PixelToCanvas(cursor, imageRect);
+        var sourceScale = imageRect.Width / Math.Max(1, _controller.Document.Config.Image.Width);
+        var radius = Math.Max(0.5, _alphaBrushSize * sourceScale / 2);
+        context.DrawEllipse(null, new Pen(Brushes.White, 1.5), center, radius, radius);
+        context.DrawEllipse(null, new Pen(Brushes.Black, 0.75), center, radius + 1.5, radius + 1.5);
+    }
+
     private void DrawCores(DrawingContext context, Rect imageRect)
     {
         foreach (var core in _controller.Document.Config.Cores)
@@ -511,6 +967,23 @@ public sealed class EditorCanvas : Control
         return new Point(Math.Clamp((point.X - rect.X) / rect.Width, 0, 1), Math.Clamp((point.Y - rect.Y) / rect.Height, 0, 1));
     }
 
+    private PixelPoint? CanvasToPixel(Point point)
+    {
+        var uv = CanvasToUv(point);
+        if (uv is null) return null;
+        return new PixelPoint(uv.Value.X * _controller.Document.Config.Image.Width, uv.Value.Y * _controller.Document.Config.Image.Height);
+    }
+
+    private PixelPoint CanvasToPixelClamped(Point point)
+    {
+        var uv = CanvasToUvClamped(point);
+        return new PixelPoint(uv.X * _controller.Document.Config.Image.Width, uv.Y * _controller.Document.Config.Image.Height);
+    }
+
+    private Point PixelToCanvas(PixelPoint pixel, Rect rect) => new(
+        rect.X + pixel.X / Math.Max(1, _controller.Document.Config.Image.Width) * rect.Width,
+        rect.Y + pixel.Y / Math.Max(1, _controller.Document.Config.Image.Height) * rect.Height);
+
     private static Point[] CropHandles(Rect rect) =>
     [
         rect.TopLeft, new Point(rect.Center.X, rect.Top), rect.TopRight,
@@ -535,6 +1008,7 @@ public sealed class EditorCanvas : Control
         }
     }
 
+    private static bool IsAlphaMode(EditorMode mode) => mode is EditorMode.AlphaErase or EditorMode.AlphaRestore;
     private static Point UvToCanvas(Point uv, Rect rect) => new(rect.X + uv.X * rect.Width, rect.Y + uv.Y * rect.Height);
     private static Rect PixelToCanvas(ImagePixelRect crop, Rect rect, int imageWidth, int imageHeight) => new(
         rect.X + crop.X / (double)imageWidth * rect.Width,
@@ -542,6 +1016,16 @@ public sealed class EditorCanvas : Control
         crop.Width / (double)imageWidth * rect.Width,
         crop.Height / (double)imageHeight * rect.Height);
     private static double Distance(Point a, Point b) => Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
+    private static double DistanceToSegment(Point point, Point a, Point b)
+    {
+        var dx = b.X - a.X;
+        var dy = b.Y - a.Y;
+        var lengthSquared = dx * dx + dy * dy;
+        if (lengthSquared <= 1e-9) return Distance(point, a);
+        var t = Math.Clamp(((point.X - a.X) * dx + (point.Y - a.Y) * dy) / lengthSquared, 0, 1);
+        return Distance(point, new Point(a.X + dx * t, a.Y + dy * t));
+    }
+
     private enum CoreDrag { None, Create, Move, ResizeX, ResizeY }
     private enum CropDrag { None, Draw, Move, Left, Right, Top, Bottom, TopLeft, TopRight, BottomLeft, BottomRight }
 }
