@@ -1,0 +1,38 @@
+name: Gelatin GIF source patch
+
+on:
+  push:
+    branches:
+      - gelatin-gif-support
+    paths:
+      - ".github/scripts/apply-gelatin-gif-support.py"
+      - ".github/workflows/gelatin-gif-source-patch.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: gelatin-gif-support
+          fetch-depth: 0
+
+      - name: Apply source patch
+        run: python .github/scripts/apply-gelatin-gif-support.py
+
+      - name: Remove temporary patch machinery
+        run: |
+          rm .github/scripts/apply-gelatin-gif-support.py
+          rm .github/workflows/gelatin-gif-source-patch.yml
+
+      - name: Commit integrated implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "Gelatin: integrate animated GIF editor and Lab support"
+          git push origin HEAD:gelatin-gif-support
