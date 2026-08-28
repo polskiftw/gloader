@@ -1,0 +1,99 @@
+name: Gelatin Runtime Properties Finalize
+
+on:
+  push:
+    branches:
+      - gelatin-runtime-properties-015
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  AVALONIA_TELEMETRY_OPTOUT: "1"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+
+jobs:
+  finalize:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Apply implementation and deterministic bounce regression
+        shell: pwsh
+        run: |
+          $line = Get-Content .github/workflows/gelatin-runtime-properties-impl.yml | Where-Object { $_ -match '^\s*PATCH_B64:\s*' } | Select-Object -First 1
+          if (-not $line) { throw 'PATCH_B64 not found in implementation workflow.' }
+          $b64 = ($line -replace '^\s*PATCH_B64:\s*', '').Trim()
+          [IO.File]::WriteAllBytes('.github/runtime-properties-patch.py.gz', [Convert]::FromBase64String($b64))
+          python -c "import gzip,pathlib; pathlib.Path('.github/runtime-properties-patch.py').write_bytes(gzip.decompress(pathlib.Path('.github/runtime-properties-patch.py.gz').read_bytes()))"
+          python .github/runtime-properties-patch.py
+
+          $testPath = 'tools/gelatin/tests/Gelatin.Tests/RuntimePropertiesTests.cs'
+          $text = Get-Content $testPath -Raw
+          $pattern = '(?s)    \[Fact\]\r?\n    public void SolverReportsBounceWhenWallReflectionActuallyOccurs\(\)\r?\n    \{.*?\r?\n    \}(?=\r?\n\r?\n    \[(?:Fact|Theory)\])'
+          $replacement = @'
+    [Fact]
+    public void SolverReportsBounceWhenWallReflectionActuallyOccurs()
+    {
+        var quality = new QualitySettings(10, 240, 8, 1, 48);
+        var document = TestAssets.Document(20, 14);
+        document.Config.Material = new MaterialConfig { Damping = 0 };
+        var mesh = GelMeshBuilder.Build(document, quality);
+        var solver = new GelSolver(mesh, document.Config.Material, quality, new Chamber(-0.35f, -0.35f, 0.35f, 0.35f, 1f, 0f));
+        solver.Reset(new Vector2(8f, 0f));
+
+        Assert.True(solver.AverageVelocity().X > 0f);
+        var reflected = false;
+        for (var step = 0; step < 120; step++)
+        {
+            solver.Step(1f / quality.PhysicsHz);
+            if (!solver.BouncedThisStep) continue;
+            reflected = true;
+            break;
+        }
+
+        Assert.True(reflected, "The test body must reach the wall and execute a real inward wall reflection.");
+    }
+'@
+          $updated = [regex]::Replace($text, $pattern, $replacement, 1)
+          if ($updated -eq $text) { throw 'Bounce regression method was not replaced.' }
+          [IO.File]::WriteAllText($testPath, $updated, [Text.UTF8Encoding]::new($false))
+
+          Remove-Item .github/runtime-properties-patch.py,.github/runtime-properties-patch.py.gz -Force
+          Remove-Item .github/workflows/gelatin-runtime-properties-impl.yml -Force
+          Remove-Item .github/workflows/gelatin-runtime-properties-diagnostics.yml -Force
+          Remove-Item .github/workflows/gelatin-runtime-properties-finalize.yml -Force
+
+      - name: Verify patch hygiene
+        shell: pwsh
+        run: git diff --check
+
+      - name: Restore
+        working-directory: tools/gelatin
+        run: dotnet restore Gelatin.sln
+
+      - name: Build Release
+        working-directory: tools/gelatin
+        run: dotnet build Gelatin.sln -c Release --no-restore
+
+      - name: Run full test suite
+        working-directory: tools/gelatin
+        run: dotnet test Gelatin.sln -c Release --no-build
+
+      - name: Commit tested implementation
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if (git diff --cached --quiet) { throw 'Implementation produced no changes.' }
+          git commit -m "Gelatin 0.1.5: add GEL1 runtime properties"
+          git push origin "HEAD:${{ github.ref_name }}"
