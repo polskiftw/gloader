@@ -92,6 +92,75 @@ public sealed class AnimatedImageTests
     }
 
     [Fact]
+    public void SelectedFrameTransformTouchesOnlyThatFrameAndKeepsTiming()
+    {
+        var imported = AnimatedImageProcessor.ImportGif(Convert.FromBase64String(TwoFrameGifBase64));
+        var config = new GelConfig
+        {
+            SchemaVersion = 2,
+            Image = new ImageConfig { Width = 2, Height = 2 },
+            Animation = imported.Animation,
+            Cores = []
+        };
+
+        var edited = AnimatedImageProcessor.TransformFrame(imported.PngBytes, config, 1, frame =>
+            ImageAlphaEditing.ApplyRectCutout(frame, new PixelRect(0, 0, 1, 2)));
+        var editedConfig = config.DeepClone();
+        editedConfig.Animation = edited.Animation;
+        var first = RawRgbaCodec.Decode(AnimatedImageProcessor.GetFramePng(edited.PngBytes, editedConfig, 0));
+        var second = RawRgbaCodec.Decode(AnimatedImageProcessor.GetFramePng(edited.PngBytes, editedConfig, 1));
+
+        Assert.Equal(255, first.Pixels[3]);
+        Assert.Equal(255, first.Pixels[7]);
+        Assert.Equal(255, second.Pixels[3]);
+        Assert.Equal(0, second.Pixels[7]);
+        Assert.Equal([50, 120], edited.Animation!.Frames.Select(frame => frame.DurationMs).ToArray());
+        Assert.All(edited.Animation.Frames, frame => Assert.Equal((2, 2), (frame.Width, frame.Height)));
+    }
+
+    [Fact]
+    public void SelectedFrameAlphaBrushDoesNotTouchOtherFrames()
+    {
+        var imported = AnimatedImageProcessor.ImportGif(Convert.FromBase64String(TwoFrameGifBase64));
+        var config = new GelConfig
+        {
+            SchemaVersion = 2,
+            Image = new ImageConfig { Width = 2, Height = 2 },
+            Animation = imported.Animation,
+            Cores = []
+        };
+
+        using var brush = new AnimationAlphaBrushSession(imported.PngBytes, imported.PngBytes, config, AlphaBrushMode.Erase, 1, 1);
+        brush.ApplyPoint(new PixelPoint(0.5, 0.5));
+        var edited = brush.Encode();
+        var editedConfig = config.DeepClone();
+        editedConfig.Animation = edited.Animation;
+        var first = RawRgbaCodec.Decode(AnimatedImageProcessor.GetFramePng(edited.PngBytes, editedConfig, 0));
+        var second = RawRgbaCodec.Decode(AnimatedImageProcessor.GetFramePng(edited.PngBytes, editedConfig, 1));
+
+        Assert.Equal(255, first.Pixels[3]);
+        Assert.Equal(0, second.Pixels[3]);
+    }
+
+    [Fact]
+    public void FrameStartTimeUsesPreservedPerFrameDurations()
+    {
+        var animation = new AnimationConfig
+        {
+            Frames =
+            [
+                new AnimationFrameConfig { Width = 1, Height = 1, DurationMs = 50 },
+                new AnimationFrameConfig { Width = 1, Height = 1, DurationMs = 120 },
+                new AnimationFrameConfig { Width = 1, Height = 1, DurationMs = 30 }
+            ]
+        };
+
+        Assert.Equal(0, AnimatedImageProcessor.FrameStartTimeMilliseconds(animation, 0));
+        Assert.Equal(50, AnimatedImageProcessor.FrameStartTimeMilliseconds(animation, 1));
+        Assert.Equal(170, AnimatedImageProcessor.FrameStartTimeMilliseconds(animation, 2));
+    }
+
+    [Fact]
     public void AnimatedGelRoundTripsThroughGel1Container()
     {
         var imported = AnimatedImageProcessor.ImportGif(Convert.FromBase64String(TwoFrameGifBase64));

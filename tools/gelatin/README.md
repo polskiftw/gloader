@@ -31,7 +31,7 @@ The package is self-contained. A separate .NET installation is not required.
 - **Restore alpha** copies exact RGBA pixels from a synchronized session-only recovery source. Brush drags are interpolated and each drag commits as one undo step.
 - Export the current processed PNG or pretty-printed JSON for inspection.
 
-Animated assets play automatically in the Asset and Gel workspaces with their preserved timing. Image edits apply to every frame, and transparent trimming uses the union of visible pixels across all frames so the asset never shifts between frames.
+Animated assets play automatically in the Asset and Gel workspaces with their preserved timing. In Asset, animation transport controls let you pause, step backward/forward, or jump directly to a frame. **Apply edits to** switches between the compatibility default **All frames** and **Current frame** for crop masking, polygon cutout, background removal, and alpha erase/restore. Current-frame crop/cutout keeps the shared canvas dimensions and turns pixels outside the selected region transparent only on that frame. Resize and transparent trim remain animation-wide; trim uses the union of visible pixels across all frames so the asset never shifts between frames.
 
 The canvas has a transparency checkerboard. Use the mouse wheel to zoom and middle/right drag to pan. Polygon coordinates and alpha brush size remain defined in source pixels at every zoom level.
 

@@ -183,6 +183,17 @@ public static class AnimatedImageProcessor
         return PackFrames(transformed, animation.Frames.Select(frame => frame.DurationMs).ToArray(), animation.RepetitionCount);
     }
 
+    public static ImageStorageResult TransformFrame(ReadOnlySpan<byte> atlasPng, GelConfig config, int frameIndex, Func<byte[], byte[]> transform)
+    {
+        ArgumentNullException.ThrowIfNull(transform);
+        if (!IsAnimated(config)) throw new GelFormatException("The requested operation requires an animated GEL asset.");
+        var animation = config.Animation!;
+        if (frameIndex < 0 || frameIndex >= animation.Frames.Count) throw new ArgumentOutOfRangeException(nameof(frameIndex));
+        var frames = ExtractFrames(atlasPng, config);
+        frames[frameIndex] = transform(frames[frameIndex]);
+        return PackFrames(frames, animation.Frames.Select(frame => frame.DurationMs).ToArray(), animation.RepetitionCount);
+    }
+
     public static PixelRect? FindUnionTrimBounds(ReadOnlySpan<byte> atlasPng, GelConfig config, double alphaThreshold)
     {
         if (!IsAnimated(config)) return RawRgbaTransforms.FindTrimBounds(atlasPng, alphaThreshold);
@@ -222,6 +233,16 @@ public static class AnimatedImageProcessor
             }
         }
         return RawRgbaCodec.Encode(width, height, union);
+    }
+
+    public static long FrameStartTimeMilliseconds(AnimationConfig? animation, int frameIndex)
+    {
+        if (animation is null || animation.Frames.Count == 0) return 0;
+        frameIndex = Math.Clamp(frameIndex, 0, animation.Frames.Count - 1);
+        long start = 0;
+        for (var index = 0; index < frameIndex; index++)
+            start = checked(start + EffectiveDuration(animation.Frames[index].DurationMs));
+        return start;
     }
 
     public static int FrameIndexAtTime(AnimationConfig? animation, double elapsedMilliseconds)
@@ -275,14 +296,17 @@ public sealed class AnimationAlphaBrushSession : IDisposable
 {
     private readonly List<AlphaBrushSession> _frames;
     private readonly AnimationConfig _animation;
+    private readonly int? _targetFrameIndex;
     private bool _disposed;
 
     public int FrameCount => _frames.Count;
 
-    public AnimationAlphaBrushSession(ReadOnlySpan<byte> atlasPng, ReadOnlySpan<byte> recoveryAtlasPng, GelConfig config, AlphaBrushMode mode, double size)
+    public AnimationAlphaBrushSession(ReadOnlySpan<byte> atlasPng, ReadOnlySpan<byte> recoveryAtlasPng, GelConfig config, AlphaBrushMode mode, double size, int? targetFrameIndex = null)
     {
         if (!AnimatedImageProcessor.IsAnimated(config)) throw new GelFormatException("Animated alpha painting requires an animated GEL asset.");
         _animation = config.Animation!.DeepClone();
+        if (targetFrameIndex is int target && (target < 0 || target >= _animation.Frames.Count)) throw new ArgumentOutOfRangeException(nameof(targetFrameIndex));
+        _targetFrameIndex = targetFrameIndex;
         var current = AnimatedImageProcessor.ExtractFrames(atlasPng, config);
         var recovery = AnimatedImageProcessor.ExtractFrames(recoveryAtlasPng, config);
         if (current.Count != recovery.Count) throw new GelFormatException("The animated alpha recovery source has the wrong frame count.");
@@ -302,13 +326,13 @@ public sealed class AnimationAlphaBrushSession : IDisposable
     public void ApplyPoint(PixelPoint point)
     {
         ThrowIfDisposed();
-        foreach (var frame in _frames) frame.ApplyPoint(point);
+        foreach (var frame in TargetFrames()) frame.ApplyPoint(point);
     }
 
     public void ApplySegment(PixelPoint start, PixelPoint end)
     {
         ThrowIfDisposed();
-        foreach (var frame in _frames) frame.ApplySegment(start, end);
+        foreach (var frame in TargetFrames()) frame.ApplySegment(start, end);
     }
 
     public byte[] EncodePreview(int frameIndex)
@@ -324,6 +348,16 @@ public sealed class AnimationAlphaBrushSession : IDisposable
             _frames.Select(frame => frame.Encode()).ToArray(),
             _animation.Frames.Select(frame => frame.DurationMs).ToArray(),
             _animation.RepetitionCount);
+    }
+
+    private IEnumerable<AlphaBrushSession> TargetFrames()
+    {
+        if (_targetFrameIndex is int target)
+        {
+            yield return _frames[target];
+            yield break;
+        }
+        foreach (var frame in _frames) yield return frame;
     }
 
     public void Dispose()

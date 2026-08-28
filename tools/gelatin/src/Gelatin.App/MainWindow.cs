@@ -32,6 +32,9 @@ public sealed class MainWindow : Window
     private byte[]? _backgroundPreview;
     private CancellationTokenSource? _backgroundPreviewCancellation;
     private Button? _polygonApplyButton;
+    private Button? _animationPlayButton;
+    private NumericUpDown? _animationFrameNumber;
+    private bool _syncAnimationControls;
 
     public MainWindow()
     {
@@ -67,6 +70,8 @@ public sealed class MainWindow : Window
         _controller.Changed += (_, _) => RefreshChrome();
         _editor.CoreSelected += id => { _editor.SelectedCoreId = id; if (_workspace == Workspace.Gel) BuildGelPanels(); };
         _editor.PixelPicked += (x, y) => { _backgroundColor = RawRgbaTransforms.Sample(_controller.GetFramePng(_editor.CurrentFrameIndex), x, y); UpdateBackgroundPreview(); };
+        _editor.AnimationFrameChanged += _ => RefreshAnimationControls();
+        _editor.AnimationPlaybackChanged += RefreshAnimationControls;
         _editor.CropChanged += crop =>
         {
             if (crop is { } value) _status.Text = $"Crop: {value.Width} × {value.Height} px at ({value.X}, {value.Y})";
@@ -123,12 +128,15 @@ public sealed class MainWindow : Window
     {
         _editor.Mode = EditorMode.Select;
         var left = SectionStack("IMAGE PREP");
+        _animationPlayButton = null;
+        _animationFrameNumber = null;
         left.Children.Add(ActionButton("Open image / .gel", async () => await OpenPickerAsync(), wide: true));
         if (_controller.Document.Config.Animation is { } animation)
         {
             var repeat = animation.RepetitionCount < 0 ? "loops forever" : animation.RepetitionCount == 0 ? "plays once" : $"repeats {animation.RepetitionCount} time(s)";
             var cycleMs = animation.Frames.Sum(frame => AnimatedImageProcessor.EffectiveDuration(frame.DurationMs));
             left.Children.Add(new TextBlock { Text = $"Animated GIF: {animation.Frames.Count} frames • {cycleMs} ms/cycle • {repeat}", TextWrapping = TextWrapping.Wrap, Foreground = MutedBrush(), FontSize = 11 });
+            AddAnimationControls(left, animation);
         }
         left.Children.Add(Header("Crop"));
         left.Children.Add(ActionButton("Draw crop rectangle", () => _editor.Mode = EditorMode.Crop, wide: true));
@@ -219,6 +227,68 @@ public sealed class MainWindow : Window
         right.Children.Add(ActionButton("Export embedded PNG / atlas", async () => await ExportPngAsync(), wide: true));
         right.Children.Add(ActionButton("Export JSON", async () => await ExportJsonAsync(), wide: true));
         SetPanels(left, right);
+    }
+
+    private void AddAnimationControls(StackPanel panel, AnimationConfig animation)
+    {
+        panel.Children.Add(Header("Animation frames"));
+        var transport = Row();
+        transport.Children.Add(ActionButton("◀ Prev", () => { ClearBackgroundPreview(); _editor.StepAnimation(-1); }));
+        _animationPlayButton = ActionButton(_editor.AnimationPlaying ? "Pause" : "Play", () =>
+        {
+            ClearBackgroundPreview();
+            _editor.SetAnimationPlaying(!_editor.AnimationPlaying);
+            RefreshAnimationControls();
+        });
+        transport.Children.Add(_animationPlayButton);
+        transport.Children.Add(ActionButton("Next ▶", () => { ClearBackgroundPreview(); _editor.StepAnimation(1); }));
+        panel.Children.Add(transport);
+
+        _animationFrameNumber = Number(_editor.CurrentFrameIndex + 1, 1, animation.Frames.Count, 1, "0");
+        _animationFrameNumber.ValueChanged += (_, _) =>
+        {
+            if (_syncAnimationControls) return;
+            ClearBackgroundPreview();
+            _editor.SetAnimationFrame((int)(_animationFrameNumber.Value ?? 1) - 1);
+        };
+        panel.Children.Add(Labeled("Frame", _animationFrameNumber));
+
+        var scope = new ComboBox
+        {
+            ItemsSource = new[] { "All frames", "Current frame" },
+            SelectedIndex = _editor.EditCurrentAnimationFrameOnly ? 1 : 0,
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        scope.SelectionChanged += (_, _) =>
+        {
+            _editor.EditCurrentAnimationFrameOnly = scope.SelectedIndex == 1;
+            if (_editor.EditCurrentAnimationFrameOnly) _editor.SetAnimationPlaying(false);
+            RefreshAnimationControls();
+        };
+        panel.Children.Add(Labeled("Apply edits to", scope));
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Current-frame crop/cutout masks only that frame and keeps the shared canvas aligned. Resize and Trim transparent edges remain animation-wide; Trim uses the union of every frame.",
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = MutedBrush(),
+            FontSize = 11
+        });
+        RefreshAnimationControls();
+    }
+
+    private void RefreshAnimationControls()
+    {
+        if (_animationPlayButton is null || _animationFrameNumber is null) return;
+        var animation = _controller.Document.Config.Animation;
+        if (animation is null || animation.Frames.Count == 0) return;
+        _syncAnimationControls = true;
+        try
+        {
+            _animationPlayButton.Content = _editor.AnimationPlaying ? "Pause" : "Play";
+            _animationFrameNumber.Maximum = animation.Frames.Count;
+            _animationFrameNumber.Value = _editor.CurrentFrameIndex + 1;
+        }
+        finally { _syncAnimationControls = false; }
     }
 
     private void BuildGelPanels()
@@ -359,21 +429,33 @@ public sealed class MainWindow : Window
         var oldHeight = document.Config.Image.Height;
         try
         {
-            _status.Text = "Cropping image…";
-            if (AnimatedImageProcessor.IsAnimated(document.Config))
+            if (AnimatedImageProcessor.IsAnimated(document.Config) && _editor.EditCurrentAnimationFrameOnly)
             {
-                var visible = await Task.Run(() => AnimatedImageProcessor.TransformAnimated(document.PngBytes, document.Config, frame => RawRgbaTransforms.Crop(frame, crop)));
-                var recovery = await Task.Run(() => AnimatedImageProcessor.TransformAnimated(document.RecoveryPngBytes ?? document.PngBytes, document.Config, frame => RawRgbaTransforms.Crop(frame, crop)));
+                var frameIndex = _editor.CurrentFrameIndex;
+                _status.Text = $"Masking frame {frameIndex + 1} outside crop…";
+                var visible = await Task.Run(() => AnimatedImageProcessor.TransformFrame(document.PngBytes, document.Config, frameIndex, frame => ImageAlphaEditing.ApplyRectCutout(frame, crop)));
                 if (!ReferenceEquals(document, _controller.Document)) return;
-                _controller.CommitStorage(visible, config => ImageProcessor.RemapAuthoringForCrop(config, crop, oldWidth, oldHeight), recovery);
+                _controller.CommitStorage(visible, recoveryStorage: _controller.GetRecoveryStorage());
+                _status.Text = $"Frame {frameIndex + 1}: pixels outside the crop are transparent; animation canvas unchanged.";
             }
             else
             {
-                var png = await Task.Run(() => RawRgbaTransforms.Crop(document.PngBytes, crop));
-                if (!ReferenceEquals(document, _controller.Document)) return;
-                _controller.CommitImage(png,
-                    config => ImageProcessor.RemapAuthoringForCrop(config, crop, oldWidth, oldHeight),
-                    recovery => RawRgbaTransforms.Crop(recovery, crop));
+                _status.Text = "Cropping image…";
+                if (AnimatedImageProcessor.IsAnimated(document.Config))
+                {
+                    var visible = await Task.Run(() => AnimatedImageProcessor.TransformAnimated(document.PngBytes, document.Config, frame => RawRgbaTransforms.Crop(frame, crop)));
+                    var recovery = await Task.Run(() => AnimatedImageProcessor.TransformAnimated(document.RecoveryPngBytes ?? document.PngBytes, document.Config, frame => RawRgbaTransforms.Crop(frame, crop)));
+                    if (!ReferenceEquals(document, _controller.Document)) return;
+                    _controller.CommitStorage(visible, config => ImageProcessor.RemapAuthoringForCrop(config, crop, oldWidth, oldHeight), recovery);
+                }
+                else
+                {
+                    var png = await Task.Run(() => RawRgbaTransforms.Crop(document.PngBytes, crop));
+                    if (!ReferenceEquals(document, _controller.Document)) return;
+                    _controller.CommitImage(png,
+                        config => ImageProcessor.RemapAuthoringForCrop(config, crop, oldWidth, oldHeight),
+                        recovery => RawRgbaTransforms.Crop(recovery, crop));
+                }
             }
             _editor.CancelCrop();
             _editor.Mode = EditorMode.Select;
@@ -401,9 +483,18 @@ public sealed class MainWindow : Window
         var oldHeight = document.Config.Image.Height;
         try
         {
-            _status.Text = "Applying polygon cutout and trimming transparent margins…";
-            if (AnimatedImageProcessor.IsAnimated(document.Config))
+            if (AnimatedImageProcessor.IsAnimated(document.Config) && _editor.EditCurrentAnimationFrameOnly)
             {
+                var frameIndex = _editor.CurrentFrameIndex;
+                _status.Text = $"Applying polygon cutout to frame {frameIndex + 1}…";
+                var visible = await Task.Run(() => AnimatedImageProcessor.TransformFrame(document.PngBytes, document.Config, frameIndex, frame => ImageAlphaEditing.ApplyPolygonCutout(frame, polygon)));
+                if (!ReferenceEquals(document, _controller.Document)) return;
+                _controller.CommitStorage(visible, recoveryStorage: _controller.GetRecoveryStorage());
+                _status.Text = $"Frame {frameIndex + 1}: polygon mask applied; animation canvas unchanged.";
+            }
+            else if (AnimatedImageProcessor.IsAnimated(document.Config))
+            {
+                _status.Text = "Applying polygon cutout and trimming transparent margins…";
                 var result = await Task.Run(() =>
                 {
                     var masked = AnimatedImageProcessor.TransformAnimated(document.PngBytes, document.Config, frame => ImageAlphaEditing.ApplyPolygonCutout(frame, polygon));
@@ -425,6 +516,7 @@ public sealed class MainWindow : Window
             }
             else
             {
+                _status.Text = "Applying polygon cutout and trimming transparent margins…";
                 var result = await Task.Run(() =>
                 {
                     var masked = ImageAlphaEditing.ApplyPolygonCutout(document.PngBytes, polygon);
@@ -561,7 +653,16 @@ public sealed class MainWindow : Window
                 var color = _backgroundColor;
                 var tolerance = _backgroundTolerance;
                 var feather = _backgroundFeather;
-                var visible = await Task.Run(() => AnimatedImageProcessor.TransformAnimated(document.PngBytes, document.Config, frame => RawRgbaTransforms.RemoveBackground(frame, color, tolerance, feather)), cancellation.Token);
+                ImageStorageResult visible;
+                if (_editor.EditCurrentAnimationFrameOnly)
+                {
+                    var frameIndex = _editor.CurrentFrameIndex;
+                    visible = await Task.Run(() => AnimatedImageProcessor.TransformFrame(document.PngBytes, document.Config, frameIndex, frame => RawRgbaTransforms.RemoveBackground(frame, color, tolerance, feather)), cancellation.Token);
+                }
+                else
+                {
+                    visible = await Task.Run(() => AnimatedImageProcessor.TransformAnimated(document.PngBytes, document.Config, frame => RawRgbaTransforms.RemoveBackground(frame, color, tolerance, feather)), cancellation.Token);
+                }
                 if (!ReferenceEquals(document, _controller.Document)) return;
                 _controller.CommitStorage(visible, recoveryStorage: _controller.GetRecoveryStorage());
             }
@@ -599,12 +700,17 @@ public sealed class MainWindow : Window
         }, cancellationToken);
     }
 
-    private void CancelBackground()
+    private void ClearBackgroundPreview()
     {
         _backgroundPreviewCancellation?.Cancel();
         _backgroundPreviewCancellation = null;
         _backgroundPreview = null;
         _editor.SetPreview(null);
+    }
+
+    private void CancelBackground()
+    {
+        ClearBackgroundPreview();
         _editor.Mode = EditorMode.Select;
     }
 
@@ -653,7 +759,13 @@ public sealed class MainWindow : Window
 
     private async Task OpenPathAsync(string path)
     {
-        try { await _controller.OpenAsync(path); ShowWorkspace(Workspace.Asset); }
+        try
+        {
+            await _controller.OpenAsync(path);
+            _editor.EditCurrentAnimationFrameOnly = false;
+            _editor.ResetAnimationPlayback();
+            ShowWorkspace(Workspace.Asset);
+        }
         catch (Exception ex) { await Dialogs.ShowErrorAsync(this, "Could not open asset", ex.Message); }
     }
 
@@ -747,6 +859,7 @@ public sealed class MainWindow : Window
         var config = _controller.Document.Config;
         var animation = config.Animation is { } animated ? $"   |   {animated.Frames.Count} animated frame(s)" : string.Empty;
         _status.Text = $"{config.Image.Width} × {config.Image.Height} px{animation}   |   {config.Cores.Count} core(s)   |   {config.RigidityStrokes.Count} rigidity stroke(s)   |   {(_controller.IsDirty ? "Unsaved changes" : Path.GetFileName(_controller.CurrentPath))}";
+        RefreshAnimationControls();
     }
 
     private void SetPanels(Control left, Control right)

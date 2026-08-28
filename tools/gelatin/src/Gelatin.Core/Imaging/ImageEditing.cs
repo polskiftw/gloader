@@ -218,6 +218,20 @@ public sealed class AlphaBrushSession : IDisposable
 
 public static class ImageAlphaEditing
 {
+    public static byte[] ApplyRectCutout(ReadOnlySpan<byte> png, PixelRect keep)
+    {
+        var source = RawRgbaCodec.Decode(png);
+        if (keep.Width < 1 || keep.Height < 1 || keep.X < 0 || keep.Y < 0 || keep.Right > source.Width || keep.Bottom > source.Height)
+            throw new GelFormatException("The crop rectangle must be inside the current image.");
+        for (var y = 0; y < source.Height; y++)
+        for (var x = 0; x < source.Width; x++)
+        {
+            if (x >= keep.X && x < keep.Right && y >= keep.Y && y < keep.Bottom) continue;
+            source.Pixels[(y * source.Width + x) * 4 + 3] = 0;
+        }
+        return RawRgbaCodec.Encode(source.Width, source.Height, source.Pixels);
+    }
+
     public static byte[] ApplyPolygonCutout(ReadOnlySpan<byte> png, IReadOnlyList<PixelPoint> polygon)
     {
         var validation = PolygonGeometry.Validate(polygon);

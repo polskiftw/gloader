@@ -34,6 +34,9 @@ public sealed class EditorCanvas : Control
     private int _loadedFrameIndex = -1;
     private readonly DispatcherTimer _animationTimer;
     private readonly Stopwatch _animationClock = Stopwatch.StartNew();
+    private bool _animationPlaying = true;
+    private int _manualFrameIndex;
+    private double _animationBaseMs;
     private CancellationTokenSource? _bitmapCancellation;
     private CancellationTokenSource? _previewCancellation;
     private bool _shutdown;
@@ -90,9 +93,18 @@ public sealed class EditorCanvas : Control
     public int? SelectedPolygonVertex => _selectedPolygonVertex;
     public double Zoom => _zoom;
     public Point Pan => _pan;
-    public int CurrentFrameIndex => AnimatedImageProcessor.IsAnimated(_controller.Document.Config)
-        ? AnimatedImageProcessor.FrameIndexAtTime(_controller.Document.Config.Animation, _animationClock.Elapsed.TotalMilliseconds)
-        : 0;
+    public bool EditCurrentAnimationFrameOnly { get; set; }
+    public bool AnimationPlaying => _animationPlaying;
+    public int CurrentFrameIndex
+    {
+        get
+        {
+            var config = _controller.Document.Config;
+            if (!AnimatedImageProcessor.IsAnimated(config) || config.Animation is not { Frames.Count: > 0 } animation) return 0;
+            if (!_animationPlaying) return Math.Clamp(_manualFrameIndex, 0, animation.Frames.Count - 1);
+            return AnimatedImageProcessor.FrameIndexAtTime(animation, _animationBaseMs + _animationClock.Elapsed.TotalMilliseconds);
+        }
+    }
     public double AlphaBrushSize
     {
         get => _alphaBrushSize;
@@ -111,6 +123,8 @@ public sealed class EditorCanvas : Control
     public event Action<int, int>? PixelPicked;
     public event Action<string>? ImageError;
     public event Action<string>? EditorError;
+    public event Action<int>? AnimationFrameChanged;
+    public event Action? AnimationPlaybackChanged;
 
     public EditorCanvas(DocumentController controller)
     {
@@ -127,6 +141,61 @@ public sealed class EditorCanvas : Control
         PointerReleased += OnPointerReleased;
         PointerExited += (_, _) => { _alphaCursor = null; _polygonPointer = null; InvalidateVisual(); };
         PointerWheelChanged += OnWheel;
+    }
+
+    public void ResetAnimationPlayback()
+    {
+        _manualFrameIndex = 0;
+        _animationBaseMs = 0;
+        _animationPlaying = true;
+        _animationClock.Restart();
+        AnimationPlaybackChanged?.Invoke();
+        Reload();
+    }
+
+    public void SetAnimationPlaying(bool playing)
+    {
+        var animation = _controller.Document.Config.Animation;
+        if (!AnimatedImageProcessor.IsAnimated(_controller.Document.Config) || animation is null) return;
+        if (_animationPlaying == playing) return;
+        if (!playing)
+        {
+            _manualFrameIndex = CurrentFrameIndex;
+            _animationPlaying = false;
+            _animationBaseMs = 0;
+            _animationClock.Reset();
+        }
+        else
+        {
+            _manualFrameIndex = Math.Clamp(_manualFrameIndex, 0, animation.Frames.Count - 1);
+            _animationBaseMs = AnimatedImageProcessor.FrameStartTimeMilliseconds(animation, _manualFrameIndex);
+            _animationPlaying = true;
+            _animationClock.Restart();
+        }
+        AnimationPlaybackChanged?.Invoke();
+        Reload();
+    }
+
+    public void SetAnimationFrame(int frameIndex)
+    {
+        var animation = _controller.Document.Config.Animation;
+        if (!AnimatedImageProcessor.IsAnimated(_controller.Document.Config) || animation is null) return;
+        var wasPlaying = _animationPlaying;
+        _animationPlaying = false;
+        _animationBaseMs = 0;
+        _animationClock.Reset();
+        _manualFrameIndex = Math.Clamp(frameIndex, 0, animation.Frames.Count - 1);
+        if (wasPlaying) AnimationPlaybackChanged?.Invoke();
+        Reload();
+    }
+
+    public void StepAnimation(int delta)
+    {
+        var animation = _controller.Document.Config.Animation;
+        if (!AnimatedImageProcessor.IsAnimated(_controller.Document.Config) || animation is null || animation.Frames.Count == 0) return;
+        var current = CurrentFrameIndex;
+        var next = ((current + delta) % animation.Frames.Count + animation.Frames.Count) % animation.Frames.Count;
+        SetAnimationFrame(next);
     }
 
     public void BeginPolygonCutout()
@@ -350,7 +419,19 @@ public sealed class EditorCanvas : Control
         {
             _bitmapDocument = document;
             _loadedFrameIndex = -1;
-            _animationClock.Restart();
+            var frameCount = document.Config.Animation?.Frames.Count ?? 1;
+            if (_animationPlaying)
+            {
+                _manualFrameIndex = 0;
+                _animationBaseMs = 0;
+                _animationClock.Restart();
+            }
+            else
+            {
+                _manualFrameIndex = Math.Clamp(_manualFrameIndex, 0, Math.Max(0, frameCount - 1));
+                _animationBaseMs = 0;
+                _animationClock.Reset();
+            }
         }
         var frameIndex = CurrentFrameIndex;
         if (!changedDocument && frameIndex == _loadedFrameIndex)
@@ -362,6 +443,7 @@ public sealed class EditorCanvas : Control
             ? AnimatedImageProcessor.GetFramePng(document, frameIndex)
             : document.PngBytes;
         _loadedFrameIndex = frameIndex;
+        AnimationFrameChanged?.Invoke(frameIndex);
         _bitmapCancellation?.Cancel();
         _previewCancellation?.Cancel();
         _previewCancellation = null;
@@ -671,7 +753,8 @@ public sealed class EditorCanvas : Control
             _alphaBrushDocument = _controller.Document;
             if (AnimatedImageProcessor.IsAnimated(_controller.Document.Config))
             {
-                _animatedAlphaBrush = new AnimationAlphaBrushSession(_controller.Document.PngBytes, _controller.RecoveryPngBytes, _controller.Document.Config, mode, _alphaBrushSize);
+                var targetFrame = EditCurrentAnimationFrameOnly ? CurrentFrameIndex : (int?)null;
+                _animatedAlphaBrush = new AnimationAlphaBrushSession(_controller.Document.PngBytes, _controller.RecoveryPngBytes, _controller.Document.Config, mode, _alphaBrushSize, targetFrame);
                 _animatedAlphaBrush.ApplyPoint(pixel.Value);
                 SetPreview(_animatedAlphaBrush.EncodePreview(CurrentFrameIndex));
             }
