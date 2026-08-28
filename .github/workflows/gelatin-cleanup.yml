@@ -5,6 +5,7 @@ on:
     paths:
       - ".github/workflows/gelatin-cleanup.yml"
       - ".github/scripts/gelatin_post_cleanup.py"
+      - ".github/scripts/gelatin_post_cleanup_fix.py"
 
 permissions:
   contents: write
@@ -29,6 +30,9 @@ jobs:
 
       - name: Apply post-cleanup API polish
         run: python .github/scripts/gelatin_post_cleanup.py
+
+      - name: Apply post-cleanup fallback fix
+        run: python .github/scripts/gelatin_post_cleanup_fix.py
 
       - name: Restore
         working-directory: tools/gelatin
