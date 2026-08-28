@@ -1,0 +1,62 @@
+name: Gelatin
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "tools/gelatin/**"
+      - ".github/workflows/gelatin.yml"
+  pull_request:
+    paths:
+      - "tools/gelatin/**"
+      - ".github/workflows/gelatin.yml"
+
+permissions:
+  contents: read
+
+env:
+  AVALONIA_TELEMETRY_OPTOUT: "1"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+
+jobs:
+  build-test-package:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        working-directory: tools/gelatin
+        run: dotnet restore Gelatin.sln
+
+      - name: Build Release
+        working-directory: tools/gelatin
+        run: dotnet build Gelatin.sln -c Release --no-restore
+
+      - name: Run tests
+        working-directory: tools/gelatin
+        run: dotnet test Gelatin.sln -c Release --no-build
+
+      - name: Publish Windows x64 package
+        shell: pwsh
+        run: tools/gelatin/scripts/publish.ps1
+
+      - name: Verify package
+        shell: pwsh
+        run: |
+          $archive = "tools/gelatin/dist/gelatin-0.1.0-win-x64.zip"
+          $executable = "tools/gelatin/dist/gelatin/Gelatin.exe"
+          if (-not (Test-Path $archive -PathType Leaf)) { throw "Missing $archive" }
+          if (-not (Test-Path $executable -PathType Leaf)) { throw "Missing $executable" }
+
+      - name: Upload Gelatin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gelatin-0.1.0-win-x64
+          path: tools/gelatin/dist/gelatin-0.1.0-win-x64.zip
+          if-no-files-found: error

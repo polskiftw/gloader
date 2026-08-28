@@ -1,0 +1,30 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Gelatin.Core", "src\Gelatin.Core\Gelatin.Core.csproj", "{46C01F81-7BBA-4A34-A3A5-9D0F1EAD0A12}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Gelatin.App", "src\Gelatin.App\Gelatin.App.csproj", "{F12B1F0C-7B8E-4EC1-9D35-2588A55EF476}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Gelatin.Tests", "tests\Gelatin.Tests\Gelatin.Tests.csproj", "{6D449B74-84B5-41E3-9A6C-3B21737B7969}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{46C01F81-7BBA-4A34-A3A5-9D0F1EAD0A12}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{46C01F81-7BBA-4A34-A3A5-9D0F1EAD0A12}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{46C01F81-7BBA-4A34-A3A5-9D0F1EAD0A12}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{46C01F81-7BBA-4A34-A3A5-9D0F1EAD0A12}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F12B1F0C-7B8E-4EC1-9D35-2588A55EF476}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F12B1F0C-7B8E-4EC1-9D35-2588A55EF476}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F12B1F0C-7B8E-4EC1-9D35-2588A55EF476}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F12B1F0C-7B8E-4EC1-9D35-2588A55EF476}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6D449B74-84B5-41E3-9A6C-3B21737B7969}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6D449B74-84B5-41E3-9A6C-3B21737B7969}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6D449B74-84B5-41E3-9A6C-3B21737B7969}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6D449B74-84B5-41E3-9A6C-3B21737B7969}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/gelatin/gel-v1.schema.json",
+  "title": "Gelatin GEL1 configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "assetName", "image", "material", "cores", "rigidityStrokes", "authoring"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "assetName": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height", "alphaThreshold"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1, "maximum": 32768 },
+        "height": { "type": "integer", "minimum": 1, "maximum": 32768 },
+        "alphaThreshold": { "type": "number", "minimum": 0.0, "maximum": 1.0 }
+      }
+    },
+    "material": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["softness", "damping", "areaPreservation", "shapeMemory", "bendResistance", "maxStretch", "selfCollision", "selfCollisionThickness"],
+      "properties": {
+        "softness": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+        "damping": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+        "areaPreservation": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+        "shapeMemory": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+        "bendResistance": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+        "maxStretch": { "type": "number", "minimum": 1.05, "maximum": 3.0 },
+        "selfCollision": { "type": "boolean" },
+        "selfCollisionThickness": { "type": "number", "minimum": 0.0001, "maximum": 0.1 }
+      }
+    },
+    "cores": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "x", "y", "radiusX", "radiusY", "mass", "coupling", "damping", "softnessMultiplier", "falloff"],
+        "properties": {
+          "id": { "type": "integer", "minimum": 1 },
+          "name": { "type": "string", "maxLength": 128 },
+          "x": { "type": "number", "minimum": -1.0, "maximum": 2.0 },
+          "y": { "type": "number", "minimum": -1.0, "maximum": 2.0 },
+          "radiusX": { "type": "number", "exclusiveMinimum": 0.0, "maximum": 2.0 },
+          "radiusY": { "type": "number", "exclusiveMinimum": 0.0, "maximum": 2.0 },
+          "mass": { "type": "number", "minimum": 0.1, "maximum": 20.0 },
+          "coupling": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+          "damping": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+          "softnessMultiplier": { "type": "number", "minimum": 0.1, "maximum": 4.0 },
+          "falloff": { "type": "number", "minimum": 0.0, "maximum": 1.0 }
+        }
+      }
+    },
+    "rigidityStrokes": {
+      "type": "array",
+      "maxItems": 8192,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["radius", "strength", "points"],
+        "properties": {
+          "radius": { "type": "number", "exclusiveMinimum": 0.0, "maximum": 1.0 },
+          "strength": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+          "points": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8192,
+            "items": {
+              "type": "array",
+              "prefixItems": [
+                { "type": "number", "minimum": -1.0, "maximum": 2.0 },
+                { "type": "number", "minimum": -1.0, "maximum": 2.0 }
+              ],
+              "items": false,
+              "minItems": 2,
+              "maxItems": 2
+            }
+          }
+        }
+      }
+    },
+    "authoring": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool", "toolVersion"],
+      "properties": {
+        "tool": { "const": "Gelatin" },
+        "toolVersion": { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    }
+  }
+}
