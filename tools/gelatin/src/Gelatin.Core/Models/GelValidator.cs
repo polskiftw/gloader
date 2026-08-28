@@ -36,7 +36,9 @@ public static class GelValidator
         var ids = new HashSet<int>();
         foreach (var core in cores)
         {
+            if (core is null) Fail("cores may not contain null entries.");
             if (core.Id < 1 || !ids.Add(core.Id)) Fail("Every core id must be a unique positive integer.");
+            if (core.Name is null) Fail($"Core {core.Id} name is required.");
             if (core.Name.Length > 128) Fail($"Core {core.Id} name may not exceed 128 characters.");
             Range(core.X, -1, 2, $"core {core.Id} x");
             Range(core.Y, -1, 2, $"core {core.Id} y");
@@ -52,6 +54,7 @@ public static class GelValidator
         if (strokes.Count > MaxStrokes) Fail($"rigidityStrokes may contain at most {MaxStrokes} entries.");
         foreach (var stroke in strokes)
         {
+            if (stroke is null) Fail("rigidityStrokes may not contain null entries.");
             Range(stroke.Radius, double.Epsilon, 1, "rigidity stroke radius");
             Range(stroke.Strength, 0, 1, "rigidity stroke strength");
             if (stroke.Points is null || stroke.Points.Count is < 1 or > MaxPointsPerStroke)

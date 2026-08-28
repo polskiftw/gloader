@@ -113,13 +113,14 @@ public sealed class ImageAndAuthoringTests
     }
 
     [Fact]
-    public void RigidityIsGradientAndEraseRemovesPoints()
+    public void RigidityIsGradientAndEndpointEraseShortensWithoutInventingABridge()
     {
         var strokes = new List<RigidityStroke> { new() { Radius = 0.2, Strength = 1, Points = [[0.5, 0.5], [0.7, 0.5]] } };
         Assert.True(InfluenceFields.Rigidity(strokes, new Vector2(0.5f, 0.5f)) > InfluenceFields.Rigidity(strokes, new Vector2(0.5f, 0.65f)));
         InfluenceFields.Erase(strokes, new Vector2(0.5f, 0.5f), 0.06, 1);
-        Assert.Single(strokes);
-        Assert.Single(strokes[0].Points);
+        var shortened = Assert.Single(strokes);
+        Assert.True(shortened.Points[0][0] > 0.6);
+        Assert.Equal(0.7, shortened.Points[^1][0], 5);
     }
 
     [Fact]
