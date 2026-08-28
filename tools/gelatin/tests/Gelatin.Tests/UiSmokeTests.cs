@@ -10,6 +10,7 @@ using Avalonia.LogicalTree;
 using Gelatin.App;
 using Gelatin.App.Controls;
 using Gelatin.Core.Physics;
+using Gelatin.Core.Runtime;
 
 [assembly: AvaloniaTestApplication(typeof(Gelatin.Tests.TestAppBuilder))]
 
@@ -29,7 +30,7 @@ public sealed class UiSmokeTests
         var window = new MainWindow();
         window.Show();
 
-        Assert.Contains("Gelatin 0.1.4", window.Title);
+        Assert.Contains("Gelatin 0.1.5", window.Title);
         var buttons = window.GetLogicalDescendants().OfType<Button>().ToArray();
         Assert.Contains(buttons, button => Equals(button.Content, "Open"));
         Assert.Contains(buttons, button => Equals(button.Content, "Save .gel"));
@@ -41,6 +42,37 @@ public sealed class UiSmokeTests
         buttons = window.GetLogicalDescendants().OfType<Button>().ToArray();
         Click(buttons, "Lab");
         Assert.Contains(window.GetLogicalDescendants().OfType<TextBlock>(), text => text.Text == "LAB CONTROLS");
+
+        window.Close();
+    }
+
+    [AvaloniaFact]
+    public void RuntimePropertyControlsAuthorTheDocument()
+    {
+        var window = new MainWindow();
+        window.Show();
+        Click(window.GetLogicalDescendants().OfType<Button>(), "Gel");
+
+        var bounce = LabeledControl<ComboBox>(window, "Bounce color");
+        var tintPanel = LabeledControl<StackPanel>(window, "Tint intensity");
+        var tint = Assert.Single(tintPanel.Children.OfType<Slider>());
+        var opacityPanel = LabeledControl<StackPanel>(window, "Opacity");
+        var opacity = Assert.Single(opacityPanel.Children.OfType<Slider>());
+        var speed = LabeledControl<NumericUpDown>(window, "Movement speed (px/s)");
+
+        Assert.False(tint.IsEnabled);
+        bounce.SelectedIndex = 1;
+        Assert.True(tint.IsEnabled);
+        tint.Value = 0.42;
+        opacity.Value = 0.55;
+        speed.Value = 444;
+
+        var controllerField = typeof(MainWindow).GetField("_controller", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var controller = Assert.IsType<DocumentController>(controllerField.GetValue(window));
+        Assert.Equal(GelRuntimeSemantics.TintRandomNeon, controller.Document.Config.BounceEffect.Tint);
+        Assert.Equal(0.42, controller.Document.Config.BounceEffect.TintIntensity, 6);
+        Assert.Equal(0.55, controller.Document.Config.Appearance.Opacity, 6);
+        Assert.Equal(444, controller.Document.Config.Motion.SpeedPixelsPerSecond);
 
         window.Close();
     }
@@ -123,6 +155,13 @@ public sealed class UiSmokeTests
             width = link.WidthForHeight(height);
         }
         Assert.InRange(width, 730, 732);
+    }
+
+    private static T LabeledControl<T>(MainWindow window, string label) where T : Control
+    {
+        var panel = Assert.Single(window.GetLogicalDescendants().OfType<StackPanel>(), candidate =>
+            candidate.Children.Count >= 2 && candidate.Children[0] is TextBlock text && text.Text == label);
+        return Assert.IsType<T>(panel.Children[1]);
     }
 
     private static async Task<FixedStepSimulation> WaitForSimulationAsync(LabControl lab)

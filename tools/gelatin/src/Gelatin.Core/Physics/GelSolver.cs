@@ -22,6 +22,8 @@ public sealed class GelSolver
     public Chamber Chamber { get; private set; }
     public bool GravityEnabled { get; set; }
     public Vector2 Gravity { get; set; } = new(0, 2.8f);
+    public bool BouncedThisStep { get; private set; }
+    public bool HasWallContactThisStep { get; private set; }
     public IReadOnlyList<Vector2> ContactPoints => _contactPoints;
     private readonly List<Vector2> _contactPoints = [];
 
@@ -122,6 +124,8 @@ public sealed class GelSolver
     {
         if (!(dt > 0) || !float.IsFinite(dt)) return;
         _substep++;
+        BouncedThisStep = false;
+        HasWallContactThisStep = false;
         Array.Clear(_contacts);
         Array.Clear(_contactNormals);
         _contactPoints.Clear();
@@ -168,9 +172,14 @@ public sealed class GelSolver
             vertex.Velocity = (vertex.Position - vertex.Previous) * inverseDt;
             if (_contacts[i])
             {
+                HasWallContactThisStep = true;
                 var normal = _contactNormals[i].LengthSquared() > 1e-12f ? Vector2.Normalize(_contactNormals[i]) : Vector2.Zero;
                 var normalSpeed = Vector2.Dot(vertex.Velocity, normal);
-                if (normalSpeed < 0) vertex.Velocity -= normal * normalSpeed * (1 + Chamber.Restitution);
+                if (normalSpeed < -1e-5f)
+                {
+                    vertex.Velocity -= normal * normalSpeed * (1 + Chamber.Restitution);
+                    BouncedThisStep = true;
+                }
                 vertex.Velocity -= (vertex.Velocity - normal * Vector2.Dot(vertex.Velocity, normal)) * Chamber.Friction;
                 vertex.Previous = vertex.Position - vertex.Velocity * dt;
             }
@@ -261,6 +270,20 @@ public sealed class GelSolver
         var sum = Vector2.Zero;
         foreach (var vertex in _mesh.Vertices) sum += vertex.Position;
         return sum / Math.Max(1, _mesh.Vertices.Count);
+    }
+
+    public Vector2 AverageVelocity()
+    {
+        var sum = Vector2.Zero;
+        foreach (var vertex in _mesh.Vertices) sum += vertex.Velocity;
+        return sum / Math.Max(1, _mesh.Vertices.Count);
+    }
+
+    public void AddUniformVelocity(Vector2 delta)
+    {
+        if (!Finite(delta)) return;
+        foreach (var vertex in _mesh.Vertices) vertex.Velocity += delta;
+        foreach (var core in _mesh.Cores) core.Velocity += delta;
     }
 
     public float CurrentArea()

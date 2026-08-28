@@ -10,6 +10,7 @@ using Gelatin.App.Controls;
 using Gelatin.Core.Imaging;
 using Gelatin.Core.Models;
 using Gelatin.Core.Physics;
+using Gelatin.Core.Runtime;
 using SkiaSharp;
 using ImagePixelRect = Gelatin.Core.Imaging.PixelRect;
 
@@ -38,7 +39,7 @@ public sealed class MainWindow : Window
 
     public MainWindow()
     {
-        Title = "Gelatin 0.1.4";
+        Title = "Gelatin 0.1.5";
         Width = 1360;
         Height = 880;
         MinWidth = 980;
@@ -109,7 +110,7 @@ public sealed class MainWindow : Window
         panel.Children.Add(ActionButton("Gel", () => ShowWorkspace(Workspace.Gel), accent: true));
         panel.Children.Add(ActionButton("Lab", () => ShowWorkspace(Workspace.Lab), accent: true));
         panel.Children.Add(Separator());
-        panel.Children.Add(ActionButton("About", () => Dialogs.ShowInfoAsync(this, "About Gelatin", "Gelatin 0.1.4\nStandalone gel asset authoring and physics lab.")));
+        panel.Children.Add(ActionButton("About", () => Dialogs.ShowInfoAsync(this, "About Gelatin", "Gelatin 0.1.5\nStandalone gel asset authoring and physics lab.")));
         return new Border { Background = new SolidColorBrush(Color.Parse("#222229")), BorderBrush = new SolidColorBrush(Color.Parse("#33333C")), BorderThickness = new Thickness(0, 0, 0, 1), Child = panel };
     }
 
@@ -338,6 +339,62 @@ public sealed class MainWindow : Window
             if (!string.IsNullOrEmpty(value)) _controller.Mutate(config => config.AssetName = value[..Math.Min(256, value.Length)]);
         };
         right.Children.Add(Labeled("Asset name", assetName));
+        right.Children.Add(Header("Runtime preview"));
+        right.Children.Add(new TextBlock
+        {
+            Text = "These values are stored in GEL1 and drive the clean Lab preview.",
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = MutedBrush(),
+            FontSize = 11
+        });
+
+        var bounceTint = new ComboBox
+        {
+            ItemsSource = new[] { "Off", "Random Neon" },
+            SelectedIndex = _controller.Document.Config.BounceEffect.Tint == GelRuntimeSemantics.TintRandomNeon ? 1 : 0,
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        var tintIntensity = Slider(_controller.Document.Config.BounceEffect.TintIntensity, 0, 1);
+        tintIntensity.IsEnabled = bounceTint.SelectedIndex == 1;
+        var tintPercent = new TextBlock { Text = $"{tintIntensity.Value * 100:0}%", Foreground = MutedBrush(), FontSize = 11 };
+        tintIntensity.ValueChanged += (_, _) =>
+        {
+            tintPercent.Text = $"{tintIntensity.Value * 100:0}%";
+            _controller.Mutate(config => config.BounceEffect.TintIntensity = tintIntensity.Value);
+        };
+        bounceTint.SelectionChanged += (_, _) =>
+        {
+            var mode = bounceTint.SelectedIndex == 1 ? GelRuntimeSemantics.TintRandomNeon : GelRuntimeSemantics.TintOff;
+            tintIntensity.IsEnabled = mode == GelRuntimeSemantics.TintRandomNeon;
+            _controller.Mutate(config => config.BounceEffect.Tint = mode);
+        };
+        right.Children.Add(Labeled("Bounce color", bounceTint));
+        var tintPanel = new StackPanel { Spacing = 3 };
+        tintPanel.Children.Add(tintIntensity);
+        tintPanel.Children.Add(tintPercent);
+        right.Children.Add(Labeled("Tint intensity", tintPanel));
+
+        var opacity = Slider(_controller.Document.Config.Appearance.Opacity, 0, 1);
+        var opacityPercent = new TextBlock { Text = $"{opacity.Value * 100:0}%", Foreground = MutedBrush(), FontSize = 11 };
+        opacity.ValueChanged += (_, _) =>
+        {
+            opacityPercent.Text = $"{opacity.Value * 100:0}%";
+            _controller.Mutate(config => config.Appearance.Opacity = opacity.Value);
+        };
+        var opacityPanel = new StackPanel { Spacing = 3 };
+        opacityPanel.Children.Add(opacity);
+        opacityPanel.Children.Add(opacityPercent);
+        right.Children.Add(Labeled("Opacity", opacityPanel));
+
+        var movementSpeed = Number(
+            _controller.Document.Config.Motion.SpeedPixelsPerSecond,
+            GelRuntimeSemantics.MinSpeedPixelsPerSecond,
+            GelRuntimeSemantics.MaxSpeedPixelsPerSecond,
+            10,
+            "0");
+        movementSpeed.ValueChanged += (_, _) => _controller.Mutate(config => config.Motion.SpeedPixelsPerSecond = (double)(movementSpeed.Value ?? 320m));
+        right.Children.Add(Labeled("Movement speed (px/s)", movementSpeed));
+
         right.Children.Add(Header("Material"));
         AddMaterialSlider(right, "Softness", 0, 1, () => _controller.Document.Config.Material.Softness, value => _controller.Mutate(config => config.Material.Softness = value));
         AddMaterialSlider(right, "Damping", 0, 1, () => _controller.Document.Config.Material.Damping, value => _controller.Mutate(config => config.Material.Damping = value));
@@ -855,7 +912,7 @@ public sealed class MainWindow : Window
     private void RefreshChrome()
     {
         var dirty = _controller.IsDirty ? " *" : string.Empty;
-        Title = $"Gelatin 0.1.4 — {_controller.Document.Config.AssetName}{dirty}";
+        Title = $"Gelatin 0.1.5 — {_controller.Document.Config.AssetName}{dirty}";
         var config = _controller.Document.Config;
         var animation = config.Animation is { } animated ? $"   |   {animated.Frames.Count} animated frame(s)" : string.Empty;
         _status.Text = $"{config.Image.Width} × {config.Image.Height} px{animation}   |   {config.Cores.Count} core(s)   |   {config.RigidityStrokes.Count} rigidity stroke(s)   |   {(_controller.IsDirty ? "Unsaved changes" : Path.GetFileName(_controller.CurrentPath))}";

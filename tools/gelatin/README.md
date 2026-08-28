@@ -1,4 +1,4 @@
-# Gelatin 0.1.4
+# Gelatin 0.1.5
 
 Gelatin is a standalone Windows 11 x64 editor for preparing images as deformable `.gel` assets. It does not need Terraria or GLoader, and it never launches or modifies either program.
 
@@ -10,8 +10,8 @@ prepare image -> place jello cores / paint rigidity -> abuse it in the Lab -> sa
 
 ## Run the packaged app
 
-1. Download the `gelatin-0.1.4-win-x64` Actions artifact.
-2. Extract `gelatin-0.1.4-win-x64.zip` to any normal folder.
+1. Download the `gelatin-0.1.5-win-x64` Actions artifact.
+2. Extract `gelatin-0.1.5-win-x64.zip` to any normal folder.
 3. Run `Gelatin.exe`.
 
 The package is self-contained. A separate .NET installation is not required.
@@ -54,6 +54,7 @@ Restore is intentionally an editor-session facility, not a new `.gel` format fea
 - Paint or erase gradient rigidity strokes with adjustable radius and strength. Full-strength erasing clips/splits stroke geometry, so erased gaps are not silently reconnected.
 - Toggle core, combined influence heatmap, and rigidity overlays.
 - Tune Softness, Damping, Area preservation, Shape memory, Bend resistance, Max stretch, and optional self-collision.
+- Author the small runtime surface stored in GEL1: Bounce color (`Off` or `Random Neon`), tint intensity, visible-pixel opacity, and movement speed in pixels per second.
 
 Core coordinates, radii, and rigidity stroke points are normalized, so resizing the image does not invalidate the programming.
 
@@ -64,7 +65,8 @@ The Lab runs the same UI-independent XPBD solver used to interpret the saved mat
 - Drag a local point and release to throw the gel.
 - Use directional **SMACK** controls for large impulses.
 - Enable **Hammer** and click a side of the gel for a localized inward hit.
-- Toggle gravity, pause, reset, and run at 0.1x, 0.25x, 0.5x, or 1x.
+- Toggle gravity, pause, reset, and run the diagnostic solver at 0.1x, 0.25x, 0.5x, or 1x. This time-scale control is not the authored movement speed and does not alter GIF timing.
+- Clean/game view applies the saved opacity and bounce tint to the currently displayed still/GIF frame at render time; source pixels and the stored atlas are never rewritten.
 - Reset returns to the exact rest pose and clears transient motion/backlog.
 - Inspect mesh, core, heatmap, rigidity, alpha contour/contact, and velocity diagnostics independently.
 - Use Clean/game view to hide every diagnostic.
@@ -129,9 +131,31 @@ Offset  Size  Meaning
 12+N    M     exact PNG bytes
 ```
 
-Gelatin 0.1.4 keeps the `GEL1` binary container unchanged. Static assets remain `schemaVersion: 1`; animated assets use `schemaVersion: 2`, where the embedded PNG is a texture atlas and JSON stores each logical frame rectangle, exact source delay in milliseconds, and repetition count (`-1` means infinite). Gelatin continues to read 0.1.0/0.1.1/0.1.2/0.1.3 static GEL1 files without migration. Gello therefore only needs PNG-atlas sampling and timing logic; it never needs a GIF decoder. The recovery source is never serialized. The loader rejects incorrect magic, unsafe or impossible lengths, truncation, trailing bytes, invalid UTF-8/JSON, unsupported schema versions, invalid PNG data, invalid animation metadata, atlas rectangles outside the PNG, and dimension mismatches. Saves are atomic. The complete JSON schema is in `gel.schema.json`.
+Gelatin 0.1.5 keeps the `GEL1` binary container unchanged. Static assets remain `schemaVersion: 1`; animated assets use `schemaVersion: 2`, where the embedded PNG is a texture atlas and JSON stores each logical frame rectangle, exact source delay in milliseconds, and repetition count (`-1` means infinite). Gelatin continues to read 0.1.0/0.1.1/0.1.2/0.1.3 static GEL1 files without migration. Gello therefore only needs PNG-atlas sampling and timing logic; it never needs a GIF decoder. The recovery source is never serialized. The loader rejects incorrect magic, unsafe or impossible lengths, truncation, trailing bytes, invalid UTF-8/JSON, unsupported schema versions, invalid PNG data, invalid animation metadata, atlas rectangles outside the PNG, and dimension mismatches. Saves are atomic. The complete JSON schema is in `gel.schema.json`.
 
-Lab-only state—gravity, chamber size, simulation quality/speed, pause state, velocity, deformation, and editor pan/zoom—is not serialized.
+Runtime properties are declarative JSON blocks in both static schema 1 and animated schema 2 assets. They are optional when reading older GEL1 files, but Gelatin writes them explicitly on the next save:
+
+```json
+"appearance": { "opacity": 1.0 },
+"motion": { "speedPixelsPerSecond": 320.0 },
+"physics": { "restitution": 0.82, "friction": 0.015 },
+"bounceEffect": { "tint": "off", "tintIntensity": 1.0 }
+```
+
+The compatibility defaults exactly preserve the prior preview intent: tint is `off`, tint intensity is `1.0`, opacity is `1.0`, movement speed is `320 px/s` (the old `(0.34, 0.21)` launch vector at the Lab's roughly 800-pixel preview scale), restitution is `0.82`, and wall friction is `0.015`. Unknown tint strings are rejected rather than interpreted as commands. GEL1 does not contain scripts, effect graphs, expressions, or arbitrary executable behavior.
+
+The canonical runtime rules are implemented in `GelRuntimeSemantics` and consumed by the Lab preview:
+
+- Initial motion uses normalized direction `(0.34, 0.21)` and the authored pixel speed. Integration uses elapsed time through the existing fixed-step solver; render cadence does not define distance traveled.
+- While the body is moving, its center translation is normalized back to the authored pixel speed after each fixed physics step. Deformation and relative vertex motion remain solver-controlled.
+- A bounce event is emitted only when a wall contact has inward normal velocity and the solver actually performs a reflection. A continuing contact does not repeatedly retrigger the bounce color.
+- Collision reflection uses the saved restitution and friction. The Lab's visible chamber inset is only a viewport representation; a future player should apply the same reflection rules at its actual play bounds.
+- `bounceEffect.tint: "random_neon"` chooses from the fixed palette `#FF2DAA`, `#00F5FF`, `#A8FF00`, `#BF40FF`, `#FF5A00`, `#247BFF`, `#FFEB00`, `#FF00E5`. Immediate repeats are avoided. The exact random sequence is not part of file compatibility.
+- Tint intensity is an 8-bit sRGB-channel lerp performed independently for R, G, and B: `out = round(source * (1 - intensity) + tint * intensity)`. Tint never changes source alpha.
+- Opacity is applied after source-frame selection as `outAlpha = round(sourceAlpha * opacity)`. At `1` alpha is unchanged; at `0` all visible pixels render transparent. Source PNG/atlas bytes stay unchanged.
+- GIF frame selection uses preserved frame delays and repetition metadata. Movement speed and the Lab diagnostic time-scale do not multiply animation time. Tint and opacity apply identically to whichever GIF frame is currently selected.
+
+Lab-only state--gravity, visible chamber size, simulation quality/time-scale, pause state, transient velocity/deformation, current random neon choice, and editor pan/zoom--is not serialized.
 
 ## Source layout
 
@@ -171,7 +195,7 @@ Outputs:
 
 ```text
 tools/gelatin/dist/gelatin/Gelatin.exe
-tools/gelatin/dist/gelatin-0.1.4-win-x64.zip
+tools/gelatin/dist/gelatin-0.1.5-win-x64.zip
 ```
 
 The publish script prints the package SHA-256. The dedicated Gelatin workflow performs restore, Release build, tests, self-contained Windows x64 publish, package/hash verification, and artifact upload without changing the GLoader package.

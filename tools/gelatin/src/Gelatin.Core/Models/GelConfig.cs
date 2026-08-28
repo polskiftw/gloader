@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Text.Json.Serialization;
+using Gelatin.Core.Runtime;
 
 namespace Gelatin.Core.Models;
 
@@ -15,6 +16,10 @@ public sealed class GelConfig
     public AnimationConfig? Animation { get; set; }
     [JsonRequired]
     public MaterialConfig Material { get; set; } = new();
+    public AppearanceConfig Appearance { get; set; } = new();
+    public MotionConfig Motion { get; set; } = new();
+    public RuntimePhysicsConfig Physics { get; set; } = new();
+    public BounceEffectConfig BounceEffect { get; set; } = new();
     [JsonRequired]
     public List<CoreConfig> Cores { get; set; } = [];
     [JsonRequired]
@@ -96,6 +101,28 @@ public sealed class MaterialConfig
     public double SelfCollisionThickness { get; set; } = 0.008;
 }
 
+public sealed class AppearanceConfig
+{
+    public double Opacity { get; set; } = GelRuntimeSemantics.DefaultOpacity;
+}
+
+public sealed class MotionConfig
+{
+    public double SpeedPixelsPerSecond { get; set; } = GelRuntimeSemantics.DefaultSpeedPixelsPerSecond;
+}
+
+public sealed class RuntimePhysicsConfig
+{
+    public double Restitution { get; set; } = GelRuntimeSemantics.DefaultRestitution;
+    public double Friction { get; set; } = GelRuntimeSemantics.DefaultFriction;
+}
+
+public sealed class BounceEffectConfig
+{
+    public string Tint { get; set; } = GelRuntimeSemantics.TintOff;
+    public double TintIntensity { get; set; } = GelRuntimeSemantics.DefaultTintIntensity;
+}
+
 public sealed class CoreConfig
 {
     [JsonRequired]
@@ -140,7 +167,7 @@ public sealed class AuthoringConfig
     [JsonRequired]
     public string Tool { get; set; } = "Gelatin";
     [JsonRequired]
-    public string ToolVersion { get; set; } = "0.1.3";
+    public string ToolVersion { get; set; } = "0.1.5";
 }
 
 public sealed class GelDocument

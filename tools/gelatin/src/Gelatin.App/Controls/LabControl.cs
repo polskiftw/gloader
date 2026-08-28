@@ -12,6 +12,7 @@ using Gelatin.Core.Authoring;
 using Gelatin.Core.Imaging;
 using Gelatin.Core.Models;
 using Gelatin.Core.Physics;
+using Gelatin.Core.Runtime;
 using SkiaSharp;
 
 namespace Gelatin.App.Controls;
@@ -34,6 +35,9 @@ public sealed class LabControl : Control
     private long _lastPointerTicks;
     private PhysicsQuality _quality = PhysicsQuality.Sane;
     private CancellationTokenSource? _rebuildCancellation;
+    private readonly Random _random = new();
+    private readonly BounceTintState _bounceTint = new();
+    private RuntimeRenderSettings _runtimeRender = new(GelRuntimeSemantics.DefaultOpacity, GelRuntimeSemantics.TintOff, GelRuntimeSemantics.DefaultTintIntensity);
 
     public event Action<string>? SimulationError;
 
@@ -78,6 +82,7 @@ public sealed class LabControl : Control
         _timer.Tick += OnTick;
         _timer.Start();
         _controller.Changed += (_, _) => Rebuild();
+        SizeChanged += (_, _) => { if (IsVisible) Rebuild(); };
         Rebuild();
         PointerPressed += OnPointerPressed;
         PointerMoved += OnPointerMoved;
@@ -91,6 +96,7 @@ public sealed class LabControl : Control
         {
             _simulation?.ResetToRest();
             _animationElapsedMs = 0;
+            _bounceTint.Reset();
             _dragging = false;
         }
         InvalidateVisual();
@@ -122,17 +128,21 @@ public sealed class LabControl : Control
         base.Render(context);
         LabSnapshot? snapshot;
         AnimationFrameConfig? frame = null;
+        RuntimeRenderSettings runtimeRender;
+        RuntimeRgb? runtimeTint;
         lock (_simulationLock)
         {
             snapshot = _simulation is null ? null : LabSnapshot.Capture(_simulation.Solver);
             if (_animation is { Frames.Count: > 0 }) frame = _animation.Frames[AnimatedImageProcessor.FrameIndexAtTime(_animation, _animationElapsedMs)];
+            runtimeRender = _runtimeRender;
+            runtimeTint = _bounceTint.CurrentTint;
         }
         if (snapshot is null || _texture is null)
         {
             context.FillRectangle(new SolidColorBrush(Color.Parse("#101116")), Bounds);
             return;
         }
-        context.Custom(new LabDrawOperation(Bounds, snapshot, _texture, frame, new Diagnostics(ShowMesh, ShowCores, ShowHeatmap, ShowRigidity, ShowContour, ShowVelocity)));
+        context.Custom(new LabDrawOperation(Bounds, snapshot, _texture, frame, runtimeRender, runtimeTint, new Diagnostics(ShowMesh, ShowCores, ShowHeatmap, ShowRigidity, ShowContour, ShowVelocity)));
     }
 
     private async void Rebuild()
@@ -146,17 +156,29 @@ public sealed class LabControl : Control
             await Task.Delay(60, cancellation.Token);
             var document = _controller.Document.DeepClone();
             var quality = QualitySettings.For(_quality);
+            var viewportWidth = Bounds.Width >= 32 ? Bounds.Width : 800d;
+            var viewportHeight = Bounds.Height >= 32 ? Bounds.Height : 800d;
             var result = await Task.Run(() =>
             {
                 cancellation.Token.ThrowIfCancellationRequested();
                 var mesh = GelMeshBuilder.Build(document, quality);
-                var solver = new GelSolver(mesh, document.Config.Material, quality, new Chamber(0.035f, 0.055f, 0.965f, 0.945f));
+                var physics = document.Config.Physics;
+                var chamber = new Chamber(0.035f, 0.055f, 0.965f, 0.945f, (float)physics.Restitution, (float)physics.Friction);
+                var solver = new GelSolver(mesh, document.Config.Material, quality, chamber);
+                solver.Reset(GelRuntimeSemantics.InitialWorldVelocity(document.Config.Motion.SpeedPixelsPerSecond, viewportWidth, viewportHeight));
+                var simulation = new FixedStepSimulation(solver, quality)
+                {
+                    RuntimeSpeedPixelsPerSecond = document.Config.Motion.SpeedPixelsPerSecond,
+                    ViewportWidthPixels = viewportWidth,
+                    ViewportHeightPixels = viewportHeight
+                };
+                var runtimeRender = new RuntimeRenderSettings(document.Config.Appearance.Opacity, document.Config.BounceEffect.Tint, document.Config.BounceEffect.TintIntensity);
                 using var bitmap = ImageProcessor.Decode(document.PngBytes);
                 var texture = SKImage.FromBitmap(bitmap);
                 try
                 {
                     cancellation.Token.ThrowIfCancellationRequested();
-                    return new LabBuildResult(new FixedStepSimulation(solver, quality), texture, document.Config.Animation?.DeepClone());
+                    return new LabBuildResult(simulation, texture, document.Config.Animation?.DeepClone(), runtimeRender);
                 }
                 catch
                 {
@@ -169,11 +191,16 @@ public sealed class LabControl : Control
                 result.Texture.Dispose();
                 return;
             }
-            lock (_simulationLock) _simulation = result.Simulation;
+            lock (_simulationLock)
+            {
+                _simulation = result.Simulation;
+                _animation = result.Animation;
+                _runtimeRender = result.RuntimeRender;
+                _animationElapsedMs = 0;
+                _bounceTint.Reset();
+            }
             var previousTexture = _texture;
             _texture = result.Texture;
-            _animation = result.Animation;
-            _animationElapsedMs = 0;
             previousTexture?.Dispose();
             _lastTicks = _clock.ElapsedTicks;
             InvalidateVisual();
@@ -213,9 +240,10 @@ public sealed class LabControl : Control
                     if (_simulation is not null)
                     {
                         var paused = _simulation.Paused;
-                        var speed = _simulation.Speed;
                         _simulation.Advance(elapsed);
-                        if (!paused) _animationElapsedMs += elapsed * 1000 * Math.Clamp(speed, 0.1, 1);
+                        _animationElapsedMs = GelRuntimeSemantics.AdvanceAnimationElapsedMilliseconds(_animationElapsedMs, elapsed, paused);
+                        if (!paused && _runtimeRender.TintMode == GelRuntimeSemantics.TintRandomNeon)
+                            for (var bounce = 0; bounce < _simulation.LastAdvanceBounceCount; bounce++) _bounceTint.OnBounce(_runtimeRender.TintMode, _random);
                     }
                 }
             });
@@ -296,7 +324,8 @@ public sealed class LabControl : Control
         }
     }
 
-    private sealed record LabBuildResult(FixedStepSimulation Simulation, SKImage Texture, AnimationConfig? Animation);
+    private sealed record LabBuildResult(FixedStepSimulation Simulation, SKImage Texture, AnimationConfig? Animation, RuntimeRenderSettings RuntimeRender);
+    private readonly record struct RuntimeRenderSettings(double Opacity, string TintMode, double TintIntensity);
     private readonly record struct CoreView(Vector2 Center, float Angle, float RadiusX, float RadiusY);
     private readonly record struct Diagnostics(bool Mesh, bool Cores, bool Heatmap, bool Rigidity, bool Contour, bool Velocity);
 
@@ -305,15 +334,19 @@ public sealed class LabControl : Control
         private readonly LabSnapshot _snapshot;
         private readonly SKImage _texture;
         private readonly AnimationFrameConfig? _frame;
+        private readonly RuntimeRenderSettings _runtimeRender;
+        private readonly RuntimeRgb? _runtimeTint;
         private readonly Diagnostics _diagnostics;
         public Rect Bounds { get; }
 
-        public LabDrawOperation(Rect bounds, LabSnapshot snapshot, SKImage texture, AnimationFrameConfig? frame, Diagnostics diagnostics)
+        public LabDrawOperation(Rect bounds, LabSnapshot snapshot, SKImage texture, AnimationFrameConfig? frame, RuntimeRenderSettings runtimeRender, RuntimeRgb? runtimeTint, Diagnostics diagnostics)
         {
             Bounds = bounds;
             _snapshot = snapshot;
             _texture = texture;
             _frame = frame;
+            _runtimeRender = runtimeRender;
+            _runtimeTint = runtimeTint;
             _diagnostics = diagnostics;
         }
 
@@ -336,7 +369,8 @@ public sealed class LabControl : Control
                 : _snapshot.Uvs.Select(uv => new SKPoint(_frame.X + uv.X * _frame.Width, _frame.Y + uv.Y * _frame.Height)).ToArray();
             using (var vertices = SKVertices.CreateCopy(SKVertexMode.Triangles, positions, tex, null, _snapshot.Indices))
             using (var shader = _texture.ToShader(SKShaderTileMode.Clamp, SKShaderTileMode.Clamp))
-            using (var paint = new SKPaint { IsAntialias = true, Shader = shader })
+            using (var colorFilter = SKColorFilter.CreateColorMatrix(GelRuntimeSemantics.CreateColorMatrix(_runtimeTint, _runtimeRender.TintIntensity, _runtimeRender.Opacity)))
+            using (var paint = new SKPaint { IsAntialias = true, Shader = shader, ColorFilter = colorFilter })
                 canvas.DrawVertices(vertices, SKBlendMode.Modulate, paint);
 
             if (_diagnostics.Heatmap) DrawField(canvas, positions, _snapshot.CoreInfluence, new SKColor(255, 118, 30));
