@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace Gelatin.Core.Physics;
 
 public sealed class FixedStepSimulation
@@ -27,6 +29,12 @@ public sealed class FixedStepSimulation
             steps++;
         }
         return steps;
+    }
+
+    public void ResetToRest()
+    {
+        Solver.Reset(Vector2.Zero);
+        ClearBacklog();
     }
 
     public void ClearBacklog() => _accumulator = 0;

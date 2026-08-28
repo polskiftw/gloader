@@ -48,9 +48,15 @@ public sealed class GelSolver
             vertex.Velocity = velocity;
         }
         foreach (var constraint in _mesh.Distances)
+        {
             constraint.RestLength = Vector2.Distance(_mesh.Vertices[constraint.A].Rest, _mesh.Vertices[constraint.B].Rest);
+            constraint.Lambda = 0;
+        }
         foreach (var area in _mesh.Areas)
+        {
             area.RestArea = SignedArea(_mesh.Vertices[area.A].Rest, _mesh.Vertices[area.B].Rest, _mesh.Vertices[area.C].Rest);
+            area.Lambda = 0;
+        }
         foreach (var core in _mesh.Cores)
         {
             var localCenter = new Vector2((float)core.Config.X, (float)core.Config.Y).UvToLocal(_mesh.AspectHeight);
@@ -58,15 +64,28 @@ public sealed class GelSolver
             core.Center = core.RestCenter;
             core.PreviousCenter = core.Center - velocity / _quality.PhysicsHz;
             core.Velocity = velocity;
-            core.Angle = core.PreviousAngle = core.AngularVelocity = 0;
+            core.Angle = 0;
+            core.PreviousAngle = 0;
+            core.AngularVelocity = 0;
             for (var i = 0; i < core.Attachments.Count; i++)
             {
                 var attachment = core.Attachments[i];
-                core.Attachments[i] = attachment with { RestOffset = (_mesh.Vertices[attachment.Vertex].Rest - core.RestCenter) };
+                core.Attachments[i] = attachment with
+                {
+                    RestOffset = _mesh.Vertices[attachment.Vertex].Rest - core.RestCenter,
+                    Lambda = Vector2.Zero
+                };
             }
         }
         _grabbedVertex = null;
+        _grabTarget = Vector2.Zero;
+        _grabVelocity = Vector2.Zero;
+        _lastGrabTarget = Vector2.Zero;
+        _hasGrabSample = false;
         _substep = 0;
+        Array.Clear(_contacts);
+        Array.Clear(_contactNormals);
+        _contactPoints.Clear();
     }
 
     public void ResizeChamber(Chamber chamber)
@@ -89,7 +108,11 @@ public sealed class GelSolver
             core.Center = newCenter + (core.Center - oldCenter) * scale;
             core.PreviousCenter = newCenter + (core.PreviousCenter - oldCenter) * scale;
             core.RestCenter = newCenter + (core.RestCenter - oldCenter) * scale;
-            for (var i = 0; i < core.Attachments.Count; i++) core.Attachments[i] = core.Attachments[i] with { RestOffset = core.Attachments[i].RestOffset * scale };
+            for (var i = 0; i < core.Attachments.Count; i++)
+            {
+                var attachment = core.Attachments[i];
+                core.Attachments[i] = attachment with { RestOffset = attachment.RestOffset * scale, Lambda = Vector2.Zero };
+            }
         }
         Chamber = chamber;
     }
@@ -122,9 +145,7 @@ public sealed class GelSolver
             core.Angle += core.AngularVelocity * dt;
         }
         if (_grabbedVertex is int grabbed)
-        {
             _mesh.Vertices[grabbed].Position = Vector2.Lerp(_mesh.Vertices[grabbed].Position, _grabTarget, 0.92f);
-        }
 
         ResetLambdas();
         for (var iteration = 0; iteration < _quality.SolverIterations; iteration++)
@@ -146,7 +167,7 @@ public sealed class GelSolver
             vertex.Velocity = (vertex.Position - vertex.Previous) * inverseDt;
             if (_contacts[i])
             {
-                var normal = Vector2.Normalize(_contactNormals[i]);
+                var normal = _contactNormals[i].LengthSquared() > 1e-12f ? Vector2.Normalize(_contactNormals[i]) : Vector2.Zero;
                 var normalSpeed = Vector2.Dot(vertex.Velocity, normal);
                 if (normalSpeed < 0) vertex.Velocity -= normal * normalSpeed * (1 + Chamber.Restitution);
                 vertex.Velocity -= (vertex.Velocity - normal * Vector2.Dot(vertex.Velocity, normal)) * Chamber.Friction;
@@ -193,6 +214,8 @@ public sealed class GelSolver
     {
         if (_grabbedVertex is int index) _mesh.Vertices[index].Velocity += _grabVelocity * 0.8f;
         _grabbedVertex = null;
+        _grabVelocity = Vector2.Zero;
+        _hasGrabSample = false;
     }
 
     public void Smack(Vector2 direction, float strength = 1.7f)
@@ -202,7 +225,8 @@ public sealed class GelSolver
         var center = CenterOfMass();
         foreach (var vertex in _mesh.Vertices)
         {
-            var bias = 0.75f + 0.5f * MathF.Max(0, Vector2.Dot(Vector2.Normalize(vertex.Position - center + new Vector2(1e-4f)), -direction));
+            var offset = vertex.Position - center + new Vector2(1e-4f);
+            var bias = 0.75f + 0.5f * MathF.Max(0, Vector2.Dot(Vector2.Normalize(offset), -direction));
             vertex.Velocity += direction * strength * bias;
         }
         foreach (var core in _mesh.Cores) core.Velocity += direction * strength * 0.6f;
@@ -259,13 +283,26 @@ public sealed class GelSolver
     public float KineticEnergy() => _mesh.Vertices.Sum(vertex => 0.5f * vertex.Velocity.LengthSquared()) +
         _mesh.Cores.Sum(core => 0.5f * (float)core.Config.Mass * core.Velocity.LengthSquared());
 
+    public int SelfCollisionPenetrationCount(bool crossLoopOnly = false)
+    {
+        var thickness = (float)_material.SelfCollisionThickness * Math.Max(Chamber.Width, Chamber.Height);
+        return ContourSelfCollision.CountPenetrations(_mesh, thickness, crossLoopOnly);
+    }
+
     public bool IsFinite() => _mesh.Vertices.All(vertex => Finite(vertex.Position) && Finite(vertex.Velocity)) &&
-        _mesh.Cores.All(core => Finite(core.Center) && Finite(core.Velocity) && float.IsFinite(core.Angle));
+        _mesh.Cores.All(core => Finite(core.Center) && Finite(core.Velocity) && float.IsFinite(core.Angle) && float.IsFinite(core.AngularVelocity));
 
     private void ResetLambdas()
     {
         foreach (var constraint in _mesh.Distances) constraint.Lambda = 0;
         foreach (var constraint in _mesh.Areas) constraint.Lambda = 0;
+        foreach (var core in _mesh.Cores)
+        for (var i = 0; i < core.Attachments.Count; i++)
+        {
+            var attachment = core.Attachments[i];
+            attachment.Lambda = Vector2.Zero;
+            core.Attachments[i] = attachment;
+        }
     }
 
     private void SolveDistances(float dt)
@@ -289,9 +326,13 @@ public sealed class GelSolver
             else
             {
                 var localRigidity = (a.Rigidity + b.Rigidity) * 0.5f;
+                var coreInfluence = (a.CoreInfluence + b.CoreInfluence) * 0.5f;
+                var localSoftness = (a.LocalSoftnessMultiplier + b.LocalSoftnessMultiplier) * 0.5f;
                 var familyScale = constraint.Compliance switch { 2 => 1.8f, 3 => 10f / MathF.Max((float)_material.BendResistance * 9 + 1, 1), _ => 1f };
                 var soft = 2e-8f + MathF.Pow((float)_material.Softness, 2.5f) * 3.5e-6f;
-                compliance = soft * familyScale * (1 + (0.018f - 1) * localRigidity);
+                var rigidityScale = 1 + (0.018f - 1) * localRigidity;
+                var coreSupportScale = 1 + (0.35f - 1) * coreInfluence;
+                compliance = soft * familyScale * rigidityScale * coreSupportScale * localSoftness;
             }
             var c = length - target;
             var w = a.InverseMass + b.InverseMass;
@@ -328,14 +369,20 @@ public sealed class GelSolver
 
     private void SolveShapeMemory(float dt)
     {
+        if (_material.ShapeMemory <= 0) return;
         var (center, angle) = BestFitTransform();
         var restCenter = RestCenter();
-        var baseStrength = 1 - MathF.Exp(-(float)_material.ShapeMemory * dt * 36);
+        var baseRate = (float)_material.ShapeMemory * 96f;
+        var iterationCount = Math.Max(1, _quality.SolverIterations);
         foreach (var vertex in _mesh.Vertices)
         {
             var target = center + Rotate(vertex.Rest - restCenter, angle);
-            var strength = Math.Clamp(baseStrength * (1 + vertex.Rigidity * 8), 0, 0.82f);
-            vertex.Position += (target - vertex.Position) * strength;
+            var rigidityRate = 1 + vertex.Rigidity * 8;
+            var coreRate = 1 + vertex.CoreInfluence * 1.5f;
+            var softnessRate = 1 / MathF.Sqrt(MathF.Max(vertex.LocalSoftnessMultiplier, 0.1f));
+            var substepStrength = 1 - MathF.Exp(-baseRate * rigidityRate * coreRate * softnessRate * dt);
+            var iterationStrength = 1 - MathF.Pow(MathF.Max(1 - substepStrength, 1e-7f), 1f / iterationCount);
+            vertex.Position += (target - vertex.Position) * Math.Clamp(iterationStrength, 0, 0.65f);
         }
     }
 
@@ -343,22 +390,27 @@ public sealed class GelSolver
     {
         foreach (var core in _mesh.Cores)
         {
-            foreach (var attachment in core.Attachments)
+            for (var attachmentIndex = 0; attachmentIndex < core.Attachments.Count; attachmentIndex++)
             {
+                var attachment = core.Attachments[attachmentIndex];
                 var vertex = _mesh.Vertices[attachment.Vertex];
                 var offset = Rotate(attachment.RestOffset, core.Angle);
                 var target = core.Center + offset;
                 var difference = vertex.Position - target;
                 var coupling = (float)core.Config.Coupling * attachment.Influence;
                 if (coupling <= 1e-5f) continue;
-                var compliance = (2e-8f + (float)_material.Softness * (float)core.Config.SoftnessMultiplier * 2e-6f) / Math.Max(coupling * coupling, 0.001f);
+
+                var localSoftness = Math.Clamp((float)_material.Softness * (float)core.Config.SoftnessMultiplier, 0.01f, 4f);
+                var compliance = (2e-8f + localSoftness * localSoftness * 1.8e-6f) / Math.Max(coupling * coupling, 0.0001f);
                 var alpha = compliance / (dt * dt);
-                var w = vertex.InverseMass + core.InverseMass + alpha;
-                var correction = difference / Math.Max(w, 1e-8f) * coupling;
-                vertex.Position -= correction * vertex.InverseMass;
-                core.Center += correction * core.InverseMass;
-                var torque = Cross(offset, correction) * core.InverseMass / Math.Max(offset.LengthSquared(), 0.001f);
-                core.Angle += torque * 0.55f;
+                var w = vertex.InverseMass + core.InverseMass;
+                var deltaLambda = (-difference - attachment.Lambda * alpha) / Math.Max(w + alpha, 1e-8f);
+                attachment.Lambda += deltaLambda;
+                vertex.Position += deltaLambda * vertex.InverseMass;
+                var coreCorrection = -deltaLambda * core.InverseMass;
+                core.Center += coreCorrection;
+                core.Angle += Cross(offset, coreCorrection) / Math.Max(offset.LengthSquared(), 0.001f) * 0.35f;
+                core.Attachments[attachmentIndex] = attachment;
             }
         }
     }
@@ -373,18 +425,18 @@ public sealed class GelSolver
     {
         if (_mesh.Contour.Count == 0)
         {
-            for (var i = 0; i < _mesh.Vertices.Count; i++) CorrectPoint(i, _mesh.Vertices[i].Position, [i], [1]);
+            for (var i = 0; i < _mesh.Vertices.Count; i++) CorrectPoint(_mesh.Vertices[i].Position, [i], [1]);
             return;
         }
         foreach (var binding in _mesh.Contour)
         {
             var indices = new[] { binding.A, binding.B, binding.C, binding.D };
             var weights = new[] { binding.Weights.X, binding.Weights.Y, binding.Weights.Z, binding.Weights.W };
-            CorrectPoint(-1, binding.Position(_mesh.Vertices), indices, weights);
+            CorrectPoint(binding.Position(_mesh.Vertices), indices, weights);
         }
     }
 
-    private void CorrectPoint(int directIndex, Vector2 point, IReadOnlyList<int> indices, IReadOnlyList<float> weights)
+    private void CorrectPoint(Vector2 point, IReadOnlyList<int> indices, IReadOnlyList<float> weights)
     {
         var correction = Vector2.Zero;
         var normal = Vector2.Zero;
@@ -410,39 +462,7 @@ public sealed class GelSolver
     private void SolveSelfCollision()
     {
         var thickness = (float)_material.SelfCollisionThickness * Math.Max(Chamber.Width, Chamber.Height);
-        if (thickness <= 0) return;
-        var grouped = _mesh.Contour.GroupBy(binding => binding.Loop);
-        foreach (var loop in grouped)
-        {
-            var points = loop.OrderBy(binding => binding.Order).ToArray();
-            for (var i = 0; i < points.Length; i++)
-            {
-                var point = points[i].Position(_mesh.Vertices);
-                for (var j = i + 3; j < points.Length - (i == 0 ? 1 : 0); j++)
-                {
-                    var a = points[j].Position(_mesh.Vertices);
-                    var b = points[(j + 1) % points.Length].Position(_mesh.Vertices);
-                    var ab = b - a;
-                    var t = ab.LengthSquared() < 1e-10f ? 0 : Math.Clamp(Vector2.Dot(point - a, ab) / ab.LengthSquared(), 0, 1);
-                    var nearest = a + ab * t;
-                    var delta = point - nearest;
-                    var distance = delta.Length();
-                    if (distance >= thickness || distance < 1e-6f) continue;
-                    var correction = delta / distance * (thickness - distance) * 0.35f;
-                    Distribute(points[i], correction);
-                    Distribute(points[j], -correction * (1 - t) * 0.5f);
-                    Distribute(points[(j + 1) % points.Length], -correction * t * 0.5f);
-                }
-            }
-        }
-    }
-
-    private void Distribute(ContourBinding binding, Vector2 correction)
-    {
-        _mesh.Vertices[binding.A].Position += correction * binding.Weights.X;
-        _mesh.Vertices[binding.B].Position += correction * binding.Weights.Y;
-        _mesh.Vertices[binding.C].Position += correction * binding.Weights.Z;
-        _mesh.Vertices[binding.D].Position += correction * binding.Weights.W;
+        ContourSelfCollision.Solve(_mesh, thickness);
     }
 
     private (Vector2 Center, float Angle) BestFitTransform()

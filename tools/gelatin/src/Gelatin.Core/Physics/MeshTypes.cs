@@ -10,6 +10,8 @@ public sealed class MeshVertex
     public Vector2 Velocity;
     public float InverseMass = 1;
     public float Rigidity;
+    public float CoreInfluence;
+    public float LocalSoftnessMultiplier = 1;
     public Vector2 Uv;
 }
 
@@ -53,7 +55,10 @@ public sealed class CoreBody
     public List<CoreAttachment> Attachments { get; } = [];
 }
 
-public readonly record struct CoreAttachment(int Vertex, Vector2 RestOffset, float Influence);
+public record struct CoreAttachment(int Vertex, Vector2 RestOffset, float Influence)
+{
+    public Vector2 Lambda { get; set; }
+}
 
 public readonly record struct Chamber(float Left, float Top, float Right, float Bottom, float Restitution = 0.82f, float Friction = 0.015f)
 {

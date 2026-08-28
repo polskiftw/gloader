@@ -17,13 +17,16 @@ public static class GelMeshBuilder
         {
             var uv = new Vector2(x / (float)(columns - 1), y / (float)(rows - 1));
             var rest = new Vector2(uv.X - 0.5f, (uv.Y - 0.5f) * aspectHeight);
+            var (coreInfluence, localSoftness) = CoreField(document.Config.Cores, uv);
             vertices.Add(new MeshVertex
             {
                 Rest = rest,
                 Previous = rest,
                 Position = rest,
                 Uv = uv,
-                Rigidity = (float)InfluenceFields.Rigidity(document.Config.RigidityStrokes, uv)
+                Rigidity = (float)InfluenceFields.Rigidity(document.Config.RigidityStrokes, uv),
+                CoreInfluence = coreInfluence,
+                LocalSoftnessMultiplier = localSoftness
             });
         }
 
@@ -108,6 +111,27 @@ public static class GelMeshBuilder
             Contour = bindings,
             Cores = cores
         };
+    }
+
+    private static (float Influence, float LocalSoftness) CoreField(IReadOnlyList<CoreConfig> cores, Vector2 uv)
+    {
+        if (cores.Count == 0) return (0, 1);
+        double remaining = 1;
+        double weightedSoftness = 0;
+        double totalWeight = 0;
+        foreach (var core in cores)
+        {
+            var influence = InfluenceFields.CoreInfluence(core, uv);
+            remaining *= 1 - influence;
+            weightedSoftness += influence * core.SoftnessMultiplier;
+            totalWeight += influence;
+        }
+
+        var combined = Math.Clamp(1 - remaining, 0, 1);
+        if (combined <= 1e-9 || totalWeight <= 1e-9) return ((float)combined, 1);
+        var averageMultiplier = weightedSoftness / totalWeight;
+        var blendedMultiplier = 1 + (averageMultiplier - 1) * combined;
+        return ((float)combined, (float)Math.Clamp(blendedMultiplier, 0.1, 4));
     }
 
     private static AreaConstraint CreateArea(IReadOnlyList<MeshVertex> vertices, int a, int b, int c)
