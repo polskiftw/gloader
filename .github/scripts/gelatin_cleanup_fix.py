@@ -19,6 +19,36 @@ def replace_once(rel, old, new):
     write(rel, text.replace(old, new, 1))
 
 
+def indent_generated_block(rel, start, end):
+    """Restore normal class-member indentation after the temporary patch splices a dedented block."""
+    text = read(rel)
+    start_index = text.find(start)
+    if start_index < 0:
+        raise RuntimeError(f"{rel}: generated block start not found: {start!r}")
+    end_index = text.find(end, start_index)
+    if end_index < 0:
+        raise RuntimeError(f"{rel}: generated block end not found: {end!r}")
+    block = text[start_index:end_index]
+    indented = "".join(("    " + line if line.strip() else line) for line in block.splitlines(keepends=True))
+    write(rel, text[:start_index] + indented + text[end_index:])
+
+
+# The primary patch intentionally writes replacement blocks independently of the
+# surrounding file. Normalize their indentation before applying smaller follow-up edits.
+indent_generated_block(
+    "tools/gelatin/src/Gelatin.Core/Imaging/AnimatedImageProcessor.cs",
+    "public static ImageStorageResult PackFrames(",
+    "    public static long FrameStartTimeMilliseconds(")
+indent_generated_block(
+    "tools/gelatin/src/Gelatin.App/Controls/EditorCanvas.cs",
+    "private async void Reload()",
+    "    private void OnPointerPressed")
+indent_generated_block(
+    "tools/gelatin/src/Gelatin.App/Controls/LabControl.cs",
+    "private void OnDocumentChanged(",
+    "    private async void Rebuild()")
+
+
 # Keep the public convenience signatures cancellation-token-free so xUnit callers
 # do not acquire cancellation analyzer warnings merely because cancellable overloads exist.
 rel = "tools/gelatin/src/Gelatin.Core/Imaging/RawRgbaTransforms.cs"
