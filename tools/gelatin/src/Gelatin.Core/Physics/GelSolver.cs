@@ -5,6 +5,7 @@ namespace Gelatin.Core.Physics;
 
 public sealed class GelSolver
 {
+    private const float CoreReferenceVertexCount = 576f;
     private readonly GelMesh _mesh;
     private readonly MaterialConfig _material;
     private readonly QualitySettings _quality;
@@ -388,6 +389,7 @@ public sealed class GelSolver
 
     private void SolveCores(float dt)
     {
+        var resolutionWeight = _mesh.Vertices.Count / CoreReferenceVertexCount;
         foreach (var core in _mesh.Cores)
         {
             for (var attachmentIndex = 0; attachmentIndex < core.Attachments.Count; attachmentIndex++)
@@ -397,17 +399,20 @@ public sealed class GelSolver
                 var offset = Rotate(attachment.RestOffset, core.Angle);
                 var target = core.Center + offset;
                 var difference = vertex.Position - target;
-                var coupling = (float)core.Config.Coupling * attachment.Influence;
+                var coupling = MathF.Pow((float)core.Config.Coupling, 2) * attachment.Influence;
                 if (coupling <= 1e-5f) continue;
 
                 var localSoftness = Math.Clamp((float)_material.Softness * (float)core.Config.SoftnessMultiplier, 0.01f, 4f);
-                var compliance = (2e-8f + localSoftness * localSoftness * 1.8e-6f) / Math.Max(coupling * coupling, 0.0001f);
+                var compliance = 2e-8f + localSoftness * localSoftness * 1.8e-6f;
                 var alpha = compliance / (dt * dt);
-                var w = vertex.InverseMass + core.InverseMass;
-                var deltaLambda = (-difference - attachment.Lambda * alpha) / Math.Max(w + alpha, 1e-8f);
+                var vertexWeight = vertex.InverseMass * resolutionWeight;
+                var coreWeight = core.InverseMass;
+                var gradientSquared = coupling * coupling;
+                var w = gradientSquared * (vertexWeight + coreWeight);
+                var deltaLambda = (-difference * coupling - attachment.Lambda * alpha) / Math.Max(w + alpha, 1e-8f);
                 attachment.Lambda += deltaLambda;
-                vertex.Position += deltaLambda * vertex.InverseMass;
-                var coreCorrection = -deltaLambda * core.InverseMass;
+                vertex.Position += deltaLambda * coupling * vertexWeight;
+                var coreCorrection = -deltaLambda * coupling * coreWeight;
                 core.Center += coreCorrection;
                 core.Angle += Cross(offset, coreCorrection) / Math.Max(offset.LengthSquared(), 0.001f) * 0.35f;
                 core.Attachments[attachmentIndex] = attachment;
