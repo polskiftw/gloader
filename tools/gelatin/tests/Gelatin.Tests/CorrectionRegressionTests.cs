@@ -119,7 +119,7 @@ public sealed class CorrectionRegressionTests
         var path = Path.Combine(Path.GetTempPath(), $"gelatin-invalid-{Guid.NewGuid():N}.gel");
         try
         {
-            await File.WriteAllBytesAsync(path, "GEL1"u8.ToArray());
+            await File.WriteAllBytesAsync(path, "GEL1"u8.ToArray(), TestContext.Current.CancellationToken);
             var error = await Assert.ThrowsAsync<GelFormatException>(() => controller.OpenAsync(path));
             Assert.Contains("header", error.Message, StringComparison.OrdinalIgnoreCase);
             Assert.Same(before, controller.Document);
