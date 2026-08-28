@@ -5,10 +5,14 @@ on:
   push:
     paths:
       - "tools/gelatin/**"
+      - "LICENSE.md"
+      - "THIRD-PARTY-NOTICES.txt"
       - ".github/workflows/gelatin.yml"
   pull_request:
     paths:
       - "tools/gelatin/**"
+      - "LICENSE.md"
+      - "THIRD-PARTY-NOTICES.txt"
       - ".github/workflows/gelatin.yml"
 
 permissions:
@@ -53,6 +57,17 @@ jobs:
           $executable = "tools/gelatin/dist/gelatin/Gelatin.exe"
           if (-not (Test-Path $archive -PathType Leaf)) { throw "Missing $archive" }
           if (-not (Test-Path $executable -PathType Leaf)) { throw "Missing $executable" }
+
+          $legalFiles = @(
+            "tools/gelatin/dist/gelatin/LICENSE.md",
+            "tools/gelatin/dist/gelatin/THIRD-PARTY-NOTICES.txt",
+            "tools/gelatin/dist/gelatin/SKIASHARP-THIRD-PARTY-NOTICES.txt",
+            "tools/gelatin/dist/gelatin/DOTNET-RUNTIME-THIRD-PARTY-NOTICES.txt"
+          )
+          foreach ($legalFile in $legalFiles) {
+            if (-not (Test-Path $legalFile -PathType Leaf)) { throw "Missing $legalFile" }
+          }
+
           $hash = (Get-FileHash -Path $archive -Algorithm SHA256).Hash
           Write-Host "Gelatin package SHA256: $hash"
 
