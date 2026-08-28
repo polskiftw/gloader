@@ -34,6 +34,15 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
+      - name: Resolve Gelatin version
+        id: version
+        shell: pwsh
+        run: |
+          [xml]$props = Get-Content "tools/gelatin/Directory.Build.props"
+          $version = [string]$props.Project.PropertyGroup.Version
+          if ([string]::IsNullOrWhiteSpace($version)) { throw "Missing Gelatin version." }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
       - name: Restore
         working-directory: tools/gelatin
         run: dotnet restore Gelatin.sln
@@ -53,7 +62,7 @@ jobs:
       - name: Verify clean single-file package
         shell: pwsh
         run: |
-          $archive = "tools/gelatin/dist/gelatin-0.1.5-win-x64.zip"
+          $archive = "tools/gelatin/dist/gelatin-${{ steps.version.outputs.version }}-win-x64.zip"
           $publish = "tools/gelatin/dist/gelatin"
           $executable = Join-Path $publish "Gelatin.exe"
           $licenses = Join-Path $publish "licenses"
@@ -114,6 +123,6 @@ jobs:
       - name: Upload Gelatin artifact
         uses: actions/upload-artifact@v6
         with:
-          name: gelatin-0.1.5-win-x64
-          path: tools/gelatin/dist/gelatin-0.1.5-win-x64.zip
+          name: gelatin-${{ steps.version.outputs.version }}-win-x64
+          path: tools/gelatin/dist/gelatin-${{ steps.version.outputs.version }}-win-x64.zip
           if-no-files-found: error
