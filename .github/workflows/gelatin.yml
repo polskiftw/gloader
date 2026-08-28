@@ -92,6 +92,25 @@ jobs:
           Write-Host "Gelatin package SHA256: $hash"
           Write-Host "Extracted layout: Gelatin.exe + licenses/ (4 files)"
 
+      - name: Smoke test packaged executable
+        shell: pwsh
+        run: |
+          $executable = (Resolve-Path "tools/gelatin/dist/gelatin/Gelatin.exe").Path
+          $process = Start-Process -FilePath $executable -PassThru
+          try {
+            Start-Sleep -Seconds 8
+            if ($process.HasExited) {
+              throw "Packaged Gelatin.exe exited during startup smoke test with code $($process.ExitCode)."
+            }
+            Write-Host "Packaged Gelatin.exe remained running through the startup smoke test."
+          }
+          finally {
+            if (-not $process.HasExited) {
+              Stop-Process -Id $process.Id -Force
+              Wait-Process -Id $process.Id -ErrorAction SilentlyContinue
+            }
+          }
+
       - name: Upload Gelatin artifact
         uses: actions/upload-artifact@v6
         with:
