@@ -1,0 +1,58 @@
+name: Gelatin Runtime Properties Diagnostics
+
+on:
+  push:
+    branches:
+      - gelatin-runtime-properties-015
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  AVALONIA_TELEMETRY_OPTOUT: "1"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+
+jobs:
+  diagnose-tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Apply current implementation patch
+        shell: pwsh
+        run: |
+          $line = Get-Content .github/workflows/gelatin-runtime-properties-impl.yml | Where-Object { $_ -match '^\s*PATCH_B64:\s*' } | Select-Object -First 1
+          if (-not $line) { throw 'PATCH_B64 not found in implementation workflow.' }
+          $b64 = ($line -replace '^\s*PATCH_B64:\s*', '').Trim()
+          [IO.File]::WriteAllBytes('.github/runtime-properties-patch.py.gz', [Convert]::FromBase64String($b64))
+          python -c "import gzip,pathlib; pathlib.Path('.github/runtime-properties-patch.py').write_bytes(gzip.decompress(pathlib.Path('.github/runtime-properties-patch.py.gz').read_bytes()))"
+          python .github/runtime-properties-patch.py
+
+      - name: Restore
+        working-directory: tools/gelatin
+        run: dotnet restore Gelatin.sln
+
+      - name: Build Release
+        working-directory: tools/gelatin
+        run: dotnet build Gelatin.sln -c Release --no-restore
+
+      - name: Run tests with captured output
+        shell: pwsh
+        working-directory: tools/gelatin
+        run: |
+          dotnet test Gelatin.sln -c Release --no-build --logger "console;verbosity=normal" *>&1 | Tee-Object -FilePath test-output.txt
+          exit $LASTEXITCODE
+
+      - name: Upload test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: gelatin-runtime-test-diagnostics
+          path: tools/gelatin/test-output.txt
+          if-no-files-found: warn
