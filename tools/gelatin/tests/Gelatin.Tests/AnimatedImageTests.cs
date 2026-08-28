@@ -7,6 +7,7 @@ namespace Gelatin.Tests;
 public sealed class AnimatedImageTests
 {
     private const string TwoFrameGifBase64 = "R0lGODlhAgACAIEAAP8AAAAAAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQIBQAAACwAAAAAAgACAAAIBgABCAQQEAAh+QQIDAAAACwAAAAAAgACAIEA/wAAAAAAAAAAAAAIBgABCAQQEAA7";
+    private const string DependentFrameGifBase64 = "R0lGODlhBAAEAIEAAP8AAAAAAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQEBAAAACwAAAAABAAEAAAICQABCBxIsCCAgAAh+QQFBwACACwAAAAAAgACAIH/AAAAAP8AAAAAAAAIBgADCAwQEAAh+QQFCQADACwCAAIAAgACAIH/AAAAAP8A/wAAAAAIBgAFCBQQEAA7";
 
     [Fact]
     public void GifImportPreservesFrameTimingAndInfiniteRepeat()
@@ -26,7 +27,6 @@ public sealed class AnimatedImageTests
         });
     }
 
-
     [Fact]
     public void GifImportDecodesDistinctCompositedFrames()
     {
@@ -45,6 +45,31 @@ public sealed class AnimatedImageTests
         Assert.Equal(0, first.Pixels[1]);
         Assert.Equal(0, second.Pixels[0]);
         Assert.Equal(255, second.Pixels[1]);
+    }
+
+    [Fact]
+    public void GifImportCompositesDependentPartialFrames()
+    {
+        var result = AnimatedImageProcessor.ImportGif(Convert.FromBase64String(DependentFrameGifBase64));
+        var config = new GelConfig
+        {
+            SchemaVersion = 2,
+            Image = new ImageConfig { Width = 4, Height = 4 },
+            Animation = result.Animation,
+            Cores = []
+        };
+        var third = RawRgbaCodec.Decode(AnimatedImageProcessor.GetFramePng(result.PngBytes, config, 2));
+
+        // Frame 3 only encodes a 2x2 patch at the bottom-right. Correct GIF compositing
+        // must retain the blue 2x2 patch introduced by frame 2 at the top-left.
+        Assert.Equal(0, third.Pixels[0]);
+        Assert.Equal(0, third.Pixels[1]);
+        Assert.Equal(255, third.Pixels[2]);
+        var bottomRight = ((3 * 4) + 3) * 4;
+        Assert.Equal(0, third.Pixels[bottomRight]);
+        Assert.Equal(255, third.Pixels[bottomRight + 1]);
+        Assert.Equal(0, third.Pixels[bottomRight + 2]);
+        Assert.Equal([40, 70, 90], result.Animation!.Frames.Select(frame => frame.DurationMs).ToArray());
     }
 
     [Fact]
