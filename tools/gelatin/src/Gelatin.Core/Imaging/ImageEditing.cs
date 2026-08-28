@@ -28,15 +28,8 @@ public static class PolygonGeometry
         }
         if (distinct.Count < 3) return PolygonValidation.Invalid("A polygon needs at least 3 distinct vertices.");
 
-        var twiceArea = 0d;
-        for (var i = 0; i < points.Count; i++)
-        {
-            var next = points[(i + 1) % points.Count];
-            twiceArea += points[i].X * next.Y - next.X * points[i].Y;
-        }
-        if (Math.Abs(twiceArea) <= Epsilon)
-            return PolygonValidation.Invalid("The polygon has effectively zero area.");
-
+        // Prefer the actionable self-intersection diagnostic for bow-tie polygons. Their signed
+        // shoelace area can cancel to zero even though the shape is not merely degenerate.
         for (var i = 0; i < points.Count; i++)
         {
             var a1 = points[i];
@@ -50,6 +43,15 @@ public static class PolygonGeometry
                     return PolygonValidation.Invalid("The polygon crosses itself. Move the vertices so edges do not intersect.");
             }
         }
+
+        var twiceArea = 0d;
+        for (var i = 0; i < points.Count; i++)
+        {
+            var next = points[(i + 1) % points.Count];
+            twiceArea += points[i].X * next.Y - next.X * points[i].Y;
+        }
+        if (Math.Abs(twiceArea) <= Epsilon)
+            return PolygonValidation.Invalid("The polygon has effectively zero area.");
 
         return PolygonValidation.Valid;
     }
