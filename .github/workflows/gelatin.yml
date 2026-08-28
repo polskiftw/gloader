@@ -50,26 +50,47 @@ jobs:
         shell: pwsh
         run: tools/gelatin/scripts/publish.ps1
 
-      - name: Verify package
+      - name: Verify clean single-file package
         shell: pwsh
         run: |
           $archive = "tools/gelatin/dist/gelatin-0.1.2-win-x64.zip"
-          $executable = "tools/gelatin/dist/gelatin/Gelatin.exe"
+          $publish = "tools/gelatin/dist/gelatin"
+          $executable = Join-Path $publish "Gelatin.exe"
+          $licenses = Join-Path $publish "licenses"
+
           if (-not (Test-Path $archive -PathType Leaf)) { throw "Missing $archive" }
           if (-not (Test-Path $executable -PathType Leaf)) { throw "Missing $executable" }
+          if (-not (Test-Path $licenses -PathType Container)) { throw "Missing $licenses" }
 
-          $legalFiles = @(
-            "tools/gelatin/dist/gelatin/LICENSE.md",
-            "tools/gelatin/dist/gelatin/THIRD-PARTY-NOTICES.txt",
-            "tools/gelatin/dist/gelatin/SKIASHARP-THIRD-PARTY-NOTICES.txt",
-            "tools/gelatin/dist/gelatin/DOTNET-RUNTIME-THIRD-PARTY-NOTICES.txt"
-          )
-          foreach ($legalFile in $legalFiles) {
-            if (-not (Test-Path $legalFile -PathType Leaf)) { throw "Missing $legalFile" }
+          $rootFiles = @(Get-ChildItem $publish -File | Select-Object -ExpandProperty Name | Sort-Object)
+          if (($rootFiles -join ',') -ne "Gelatin.exe") {
+            throw "Gelatin package root must contain only Gelatin.exe. Found: $($rootFiles -join ', ')"
+          }
+
+          $rootDirectories = @(Get-ChildItem $publish -Directory | Select-Object -ExpandProperty Name | Sort-Object)
+          if (($rootDirectories -join ',') -ne "licenses") {
+            throw "Gelatin package root must contain only the licenses folder. Found: $($rootDirectories -join ', ')"
+          }
+
+          $expectedLegalFiles = @(
+            "DOTNET-RUNTIME-THIRD-PARTY-NOTICES.txt",
+            "LICENSE.md",
+            "SKIASHARP-THIRD-PARTY-NOTICES.txt",
+            "THIRD-PARTY-NOTICES.txt"
+          ) | Sort-Object
+          $actualLegalFiles = @(Get-ChildItem $licenses -File | Select-Object -ExpandProperty Name | Sort-Object)
+          if (($actualLegalFiles -join ',') -ne ($expectedLegalFiles -join ',')) {
+            throw "Unexpected licenses folder contents. Found: $($actualLegalFiles -join ', ')"
+          }
+
+          $legalDirectories = @(Get-ChildItem $licenses -Directory)
+          if ($legalDirectories.Count -ne 0) {
+            throw "licenses must not contain subdirectories."
           }
 
           $hash = (Get-FileHash -Path $archive -Algorithm SHA256).Hash
           Write-Host "Gelatin package SHA256: $hash"
+          Write-Host "Extracted layout: Gelatin.exe + licenses/ (4 files)"
 
       - name: Upload Gelatin artifact
         uses: actions/upload-artifact@v6

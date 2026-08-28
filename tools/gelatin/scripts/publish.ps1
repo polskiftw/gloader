@@ -4,8 +4,10 @@ Set-StrictMode -Version Latest
 $ToolRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $RepoRoot = Split-Path -Parent (Split-Path -Parent $ToolRoot)
 $Project = Join-Path $ToolRoot "src\Gelatin.App\Gelatin.App.csproj"
+$ProjectDirectory = Split-Path -Parent $Project
 $DistRoot = Join-Path $ToolRoot "dist"
 $PublishDirectory = Join-Path $DistRoot "gelatin"
+$LegalDirectory = Join-Path $PublishDirectory "licenses"
 $Archive = Join-Path $DistRoot "gelatin-0.1.2-win-x64.zip"
 $License = Join-Path $RepoRoot "LICENSE.md"
 $ThirdPartyNotices = Join-Path $RepoRoot "THIRD-PARTY-NOTICES.txt"
@@ -52,7 +54,9 @@ dotnet publish $Project `
     -r win-x64 `
     --self-contained true `
     -o $PublishDirectory `
-    -p:PublishSingleFile=false `
+    -p:PublishSingleFile=true `
+    -p:IncludeNativeLibrariesForSelfExtract=true `
+    -p:IncludeAllContentForSelfExtract=true `
     -p:DebugType=None `
     -p:DebugSymbols=false
 
@@ -65,9 +69,13 @@ if (-not (Test-Path $Executable -PathType Leaf)) {
     throw "Publish completed without the required Gelatin.exe."
 }
 
-$DepsJsonPath = Join-Path $PublishDirectory "Gelatin.deps.json"
-if (-not (Test-Path $DepsJsonPath -PathType Leaf)) {
-    throw "Publish completed without Gelatin.deps.json; cannot resolve upstream notices."
+# Single-file publish bundles Gelatin.deps.json into Gelatin.exe, so resolve the
+# freshly generated intermediate copy to identify the exact shipped dependency versions.
+$DepsJsonPath = Get-ChildItem (Join-Path $ProjectDirectory "obj") -Recurse -File -Filter "Gelatin.deps.json" -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTimeUtc -Descending |
+    Select-Object -First 1 -ExpandProperty FullName
+if ([string]::IsNullOrWhiteSpace($DepsJsonPath)) {
+    throw "Could not locate the generated Gelatin.deps.json; cannot resolve upstream notices."
 }
 
 $DepsJson = Get-Content $DepsJsonPath -Raw | ConvertFrom-Json
@@ -111,10 +119,13 @@ if ([string]::IsNullOrWhiteSpace($DotnetUpstreamNotices)) {
     throw "Could not locate the upstream .NET Runtime third-party notices for version $RuntimeVersion."
 }
 
-Copy-Item $License (Join-Path $PublishDirectory "LICENSE.md") -Force
-Copy-Item $ThirdPartyNotices (Join-Path $PublishDirectory "THIRD-PARTY-NOTICES.txt") -Force
-Copy-Item $SkiaUpstreamNotices (Join-Path $PublishDirectory "SKIASHARP-THIRD-PARTY-NOTICES.txt") -Force
-Copy-Item $DotnetUpstreamNotices (Join-Path $PublishDirectory "DOTNET-RUNTIME-THIRD-PARTY-NOTICES.txt") -Force
+# Keep the extracted package human-sized: one executable at the root, legal
+# paperwork in one obvious folder, and no loose framework/runtime files.
+New-Item $LegalDirectory -ItemType Directory -Force | Out-Null
+Copy-Item $License (Join-Path $LegalDirectory "LICENSE.md") -Force
+Copy-Item $ThirdPartyNotices (Join-Path $LegalDirectory "THIRD-PARTY-NOTICES.txt") -Force
+Copy-Item $SkiaUpstreamNotices (Join-Path $LegalDirectory "SKIASHARP-THIRD-PARTY-NOTICES.txt") -Force
+Copy-Item $DotnetUpstreamNotices (Join-Path $LegalDirectory "DOTNET-RUNTIME-THIRD-PARTY-NOTICES.txt") -Force
 
 Compress-Archive -Path (Join-Path $PublishDirectory "*") -DestinationPath $Archive -CompressionLevel Optimal -Force
 
