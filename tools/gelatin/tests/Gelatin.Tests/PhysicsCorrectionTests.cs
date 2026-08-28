@@ -49,7 +49,7 @@ public sealed class PhysicsCorrectionTests
     }
 
     [Fact]
-    public void CoreInfluenceChangesStructuralComplianceAndLocalSoftnessIsMonotonic()
+    public void CoreInfluenceChangesStructuralAndShearComplianceAndLocalSoftnessIsMonotonic()
     {
         var material = new MaterialConfig { Softness = 1, Damping = 0.2, AreaPreservation = 0, ShapeMemory = 0, BendResistance = 0, MaxStretch = 3 };
         var core = new CoreConfig { Id = 1, Name = "Support", X = 0.25, Y = 0.5, RadiusX = 0.28, RadiusY = 0.48, Mass = 3, Coupling = 0, Damping = 0.05, SoftnessMultiplier = 0.35, Falloff = 0.2 };
@@ -58,9 +58,14 @@ public sealed class PhysicsCorrectionTests
         StretchVertically(solver, 1.4f);
         solver.Step(1f / SmallQuality.PhysicsHz);
 
-        var influenced = StructuralError(solver, 0.12f, 0.38f);
-        var uninfluenced = StructuralError(solver, 0.68f, 0.94f);
-        Assert.True(influenced < uninfluenced * 0.9f, $"influenced={influenced}, uninfluenced={uninfluenced}");
+        var influencedStructural = ConstraintError(solver, 0.12f, 0.38f, 1);
+        var uninfluencedStructural = ConstraintError(solver, 0.68f, 0.94f, 1);
+        var influencedShear = ConstraintError(solver, 0.12f, 0.38f, 2);
+        var uninfluencedShear = ConstraintError(solver, 0.68f, 0.94f, 2);
+        Assert.True(influencedStructural < uninfluencedStructural * 0.9f,
+            $"structural influenced={influencedStructural}, uninfluenced={uninfluencedStructural}");
+        Assert.True(influencedShear < uninfluencedShear * 0.9f,
+            $"shear influenced={influencedShear}, uninfluenced={uninfluencedShear}");
         Assert.Contains(solver.Mesh.Vertices, vertex => vertex.CoreInfluence > 0.8f && vertex.LocalSoftnessMultiplier < 0.6f);
 
         var firm = LocalSoftnessError(0.2);
@@ -201,7 +206,7 @@ public sealed class PhysicsCorrectionTests
         solver.Reset(Vector2.Zero);
         StretchVertically(solver, 1.4f);
         solver.Step(1f / SmallQuality.PhysicsHz);
-        return StructuralError(solver, 0.38f, 0.62f);
+        return ConstraintError(solver, 0.38f, 0.62f, 1);
     }
 
     private static void StretchVertically(GelSolver solver, float scale)
@@ -215,11 +220,11 @@ public sealed class PhysicsCorrectionTests
         }
     }
 
-    private static float StructuralError(GelSolver solver, float minX, float maxX)
+    private static float ConstraintError(GelSolver solver, float minX, float maxX, float family)
     {
         var constraints = solver.Mesh.Distances.Where(item =>
         {
-            if (item.MaxStretchOnly || item.Compliance != 1) return false;
+            if (item.MaxStretchOnly || item.Compliance != family) return false;
             var midpoint = (solver.Mesh.Vertices[item.A].Uv.X + solver.Mesh.Vertices[item.B].Uv.X) * 0.5f;
             return midpoint >= minX && midpoint <= maxX;
         }).ToArray();

@@ -77,6 +77,14 @@ public sealed class CorrectionRegressionTests
         => AssertMalformed(root => root["cores"]!.AsArray()[0]!.AsObject()["name"] = null, "name");
 
     [Fact]
+    public void NullRequiredStringsAreFriendlyDomainErrors()
+    {
+        AssertMalformed(root => root["assetName"] = null, "assetName");
+        AssertMalformed(root => root["authoring"]!.AsObject()["tool"] = null, "authoring.tool");
+        AssertMalformed(root => root["authoring"]!.AsObject()["toolVersion"] = null, "authoring.toolVersion");
+    }
+
+    [Fact]
     public void NullRequiredArraysAreFriendlyDomainErrors()
     {
         AssertMalformed(root => root["cores"] = null, "cores");
@@ -102,6 +110,26 @@ public sealed class CorrectionRegressionTests
     [Fact]
     public void UnknownPropertiesRemainRejectedAsDomainErrors()
         => AssertMalformed(root => root["futureMysteryProperty"] = 42, "not valid JSON");
+
+    [Fact]
+    public async Task FailedGelOpenLeavesCurrentSessionUntouched()
+    {
+        var controller = new DocumentController();
+        var before = controller.Document;
+        var path = Path.Combine(Path.GetTempPath(), $"gelatin-invalid-{Guid.NewGuid():N}.gel");
+        try
+        {
+            await File.WriteAllBytesAsync(path, "GEL1"u8.ToArray());
+            var error = await Assert.ThrowsAsync<GelFormatException>(() => controller.OpenAsync(path));
+            Assert.Contains("header", error.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Same(before, controller.Document);
+            Assert.Null(controller.CurrentPath);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
 
     [Fact]
     public void Gelatin011ReadsGelatin010CompatibleGel1WithoutMigration()

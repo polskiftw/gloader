@@ -97,7 +97,7 @@ public sealed class AuthoringConfig
     [JsonRequired]
     public string Tool { get; set; } = "Gelatin";
     [JsonRequired]
-    public string ToolVersion { get; set; } = "0.1.0";
+    public string ToolVersion { get; set; } = "0.1.1";
 }
 
 public sealed class GelDocument

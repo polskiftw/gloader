@@ -5,7 +5,7 @@ $ToolRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $Project = Join-Path $ToolRoot "src\Gelatin.App\Gelatin.App.csproj"
 $DistRoot = Join-Path $ToolRoot "dist"
 $PublishDirectory = Join-Path $DistRoot "gelatin"
-$Archive = Join-Path $DistRoot "gelatin-0.1.0-win-x64.zip"
+$Archive = Join-Path $DistRoot "gelatin-0.1.1-win-x64.zip"
 
 $env:AVALONIA_TELEMETRY_OPTOUT = "1"
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = "1"

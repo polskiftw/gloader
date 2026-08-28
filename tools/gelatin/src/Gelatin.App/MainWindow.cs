@@ -34,7 +34,7 @@ public sealed class MainWindow : Window
 
     public MainWindow()
     {
-        Title = "Gelatin 0.1.0";
+        Title = "Gelatin 0.1.1";
         Width = 1360;
         Height = 880;
         MinWidth = 980;
@@ -81,7 +81,7 @@ public sealed class MainWindow : Window
             _editor.Shutdown();
             _lab.Shutdown();
         };
-        KeyDown += OnWindowKeyDown;
+        AddHandler(InputElement.KeyDownEvent, OnWindowKeyDown, RoutingStrategies.Tunnel);
         DragDrop.SetAllowDrop(this, true);
         AddHandler(DragDrop.DropEvent, OnDrop);
         ShowWorkspace(Workspace.Asset);
@@ -102,7 +102,7 @@ public sealed class MainWindow : Window
         panel.Children.Add(ActionButton("Gel", () => ShowWorkspace(Workspace.Gel), accent: true));
         panel.Children.Add(ActionButton("Lab", () => ShowWorkspace(Workspace.Lab), accent: true));
         panel.Children.Add(Separator());
-        panel.Children.Add(ActionButton("About", () => Dialogs.ShowInfoAsync(this, "About Gelatin", "Gelatin 0.1.0\nStandalone gel asset authoring and physics lab.")));
+        panel.Children.Add(ActionButton("About", () => Dialogs.ShowInfoAsync(this, "About Gelatin", "Gelatin 0.1.1\nStandalone gel asset authoring and physics lab.")));
         return new Border { Background = new SolidColorBrush(Color.Parse("#222229")), BorderBrush = new SolidColorBrush(Color.Parse("#33333C")), BorderThickness = new Thickness(0, 0, 0, 1), Child = panel };
     }
 
@@ -131,10 +131,27 @@ public sealed class MainWindow : Window
         var width = Number(_controller.Document.Config.Image.Width, 1, GelValidator.MaxDimension, 1);
         var height = Number(_controller.Document.Config.Image.Height, 1, GelValidator.MaxDimension, 1);
         var aspect = new CheckBox { Content = "Lock aspect ratio", IsChecked = true };
-        var originalAspect = _controller.Document.Config.Image.Width / (double)_controller.Document.Config.Image.Height;
+        var aspectLink = new ResizeAspectLink((double)(width.Value ?? 1), (double)(height.Value ?? 1));
         var syncing = false;
-        width.ValueChanged += (_, _) => { if (aspect.IsChecked == true && !syncing) { syncing = true; height.Value = (decimal)Math.Max(1, Math.Round((double)(width.Value ?? 1) / originalAspect)); syncing = false; } };
-        height.ValueChanged += (_, _) => { if (aspect.IsChecked == true && !syncing) { syncing = true; width.Value = (decimal)Math.Max(1, Math.Round((double)(height.Value ?? 1) * originalAspect)); syncing = false; } };
+        aspect.IsCheckedChanged += (_, _) =>
+        {
+            if (aspect.IsChecked == true && !syncing)
+                aspectLink.Capture((double)(width.Value ?? 1), (double)(height.Value ?? 1));
+        };
+        width.ValueChanged += (_, _) =>
+        {
+            if (aspect.IsChecked != true || syncing) return;
+            syncing = true;
+            height.Value = aspectLink.HeightForWidth((double)(width.Value ?? 1));
+            syncing = false;
+        };
+        height.ValueChanged += (_, _) =>
+        {
+            if (aspect.IsChecked != true || syncing) return;
+            syncing = true;
+            width.Value = aspectLink.WidthForHeight((double)(height.Value ?? 1));
+            syncing = false;
+        };
         left.Children.Add(Labeled("Width", width));
         left.Children.Add(Labeled("Height", height));
         left.Children.Add(aspect);
@@ -551,12 +568,19 @@ public sealed class MainWindow : Window
         else if (control && e.Key == Key.S) { e.Handled = true; await SaveAsync(false); }
         else if (control && e.Key == Key.Z) { e.Handled = true; _controller.Undo(); }
         else if (control && e.Key == Key.Y) { e.Handled = true; _controller.Redo(); }
+        else if (_workspace == Workspace.Lab && e.KeyModifiers == KeyModifiers.None)
+        {
+            if (e.Key == Key.Space) { _lab.Paused = !_lab.Paused; e.Handled = true; }
+            else if (e.Key == Key.R) { _lab.Reset(); e.Handled = true; }
+            else if (e.Key == Key.H) { _lab.HammerMode = !_lab.HammerMode; e.Handled = true; }
+            else if (e.Key == Key.M) { _lab.ShowMesh = !_lab.ShowMesh; _lab.InvalidateVisual(); e.Handled = true; }
+        }
     }
 
     private void RefreshChrome()
     {
         var dirty = _controller.IsDirty ? " *" : string.Empty;
-        Title = $"Gelatin 0.1.0 — {_controller.Document.Config.AssetName}{dirty}";
+        Title = $"Gelatin 0.1.1 — {_controller.Document.Config.AssetName}{dirty}";
         var config = _controller.Document.Config;
         _status.Text = $"{config.Image.Width} × {config.Image.Height} px   |   {config.Cores.Count} core(s)   |   {config.RigidityStrokes.Count} rigidity stroke(s)   |   {(_controller.IsDirty ? "Unsaved changes" : Path.GetFileName(_controller.CurrentPath))}";
     }

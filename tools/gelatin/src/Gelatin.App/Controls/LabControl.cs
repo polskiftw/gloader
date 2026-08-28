@@ -84,7 +84,11 @@ public sealed class LabControl : Control
 
     public void Reset()
     {
-        lock (_simulationLock) _simulation?.Solver.Reset(new Vector2(0.34f, 0.21f));
+        lock (_simulationLock)
+        {
+            _simulation?.ResetToRest();
+            _dragging = false;
+        }
         InvalidateVisual();
     }
 

@@ -1,4 +1,4 @@
-# Gelatin 0.1.0
+# Gelatin 0.1.1
 
 Gelatin is a standalone Windows 11 x64 editor for preparing images as deformable `.gel` assets. It does not need Terraria or GLoader, and it never launches or modifies either program.
 
@@ -10,8 +10,8 @@ prepare image -> place jello cores / paint rigidity -> abuse it in the Lab -> sa
 
 ## Run the packaged app
 
-1. Download the `gelatin-0.1.0-win-x64` Actions artifact.
-2. Extract `gelatin-0.1.0-win-x64.zip` to any normal folder.
+1. Download the `gelatin-0.1.1-win-x64` Actions artifact.
+2. Extract `gelatin-0.1.1-win-x64.zip` to any normal folder.
 3. Run `Gelatin.exe`.
 
 The package is self-contained. A separate .NET installation is not required.
@@ -22,7 +22,7 @@ The package is self-contained. A separate .NET installation is not required.
 
 - Open or drag/drop PNG, JPEG, WebP, and `.gel` files.
 - Draw and apply a crop rectangle. Existing normalized cores and rigidity strokes are remapped; elements wholly outside the crop are removed.
-- Resize with high-quality sampling and an optional aspect-ratio lock.
+- Resize with high-quality sampling and an optional aspect-ratio lock. Re-enabling the lock captures the current width/height ratio.
 - Trim transparent edges using the editable alpha threshold.
 - Pick a background color with the eyedropper, preview tolerance and feather changes live, then apply or cancel.
 - Export the current processed PNG or pretty-printed JSON for inspection.
@@ -34,7 +34,7 @@ The canvas has a transparency checkerboard. Use the mouse wheel to zoom and midd
 - Create axis-aligned elliptical jello cores by dragging.
 - Select, move, resize, duplicate, delete, name, and numerically edit cores.
 - Edit per-core mass, coupling, damping, local softness, and influence falloff.
-- Paint or erase gradient rigidity strokes with adjustable radius and strength.
+- Paint or erase gradient rigidity strokes with adjustable radius and strength. Full-strength erasing clips/splits stroke geometry, so erased gaps are not silently reconnected.
 - Toggle core, combined influence heatmap, and rigidity overlays.
 - Tune Softness, Damping, Area preservation, Shape memory, Bend resistance, Max stretch, and optional self-collision.
 
@@ -48,6 +48,7 @@ The Lab runs the same UI-independent XPBD solver used to interpret the saved mat
 - Use directional **SMACK** controls for large impulses.
 - Enable **Hammer** and click a side of the gel for a localized inward hit.
 - Toggle gravity, pause, reset, and run at 0.1x, 0.25x, 0.5x, or 1x.
+- Reset returns to the exact rest pose and clears transient motion/backlog.
 - Inspect mesh, core, heatmap, rigidity, alpha contour/contact, and velocity diagnostics independently.
 - Use Clean/game view to hide every diagnostic.
 
@@ -60,7 +61,7 @@ Quality presets:
 | Overkill | ~48x48 | 720 Hz | 16 | every substep |
 | Claire | ~64x64 | 960 Hz | 24 | every substep with denser contour |
 
-Extreme aspect ratios keep roughly equivalent vertex counts while avoiding degenerate cells.
+Extreme aspect ratios keep roughly equivalent vertex counts while avoiding degenerate cells. Material behavior is calibrated to remain broadly consistent across the published presets; higher presets increase numerical and mesh fidelity rather than intentionally changing the saved material.
 
 ## Shortcuts
 
@@ -74,7 +75,7 @@ Global:
 | `Ctrl+Z` | Undo |
 | `Ctrl+Y` | Redo |
 
-Lab (when a text or numeric field is not active):
+Lab (workspace-wide when a text or numeric field is not active):
 
 | Shortcut | Action |
 |---|---|
@@ -98,7 +99,7 @@ Offset  Size  Meaning
 12+N    M     exact PNG bytes
 ```
 
-The loader rejects incorrect magic, unsafe or impossible lengths, truncation, trailing bytes, invalid UTF-8/JSON, unsupported schema versions, invalid PNG data, and dimension mismatches. Saves are atomic. The complete JSON schema is in `gel.schema.json`.
+Gelatin 0.1.1 keeps the `GEL1` container and `schemaVersion: 1` unchanged and reads 0.1.0-compatible GEL1 files without migration. The loader rejects incorrect magic, unsafe or impossible lengths, truncation, trailing bytes, invalid UTF-8/JSON, unsupported schema versions, invalid PNG data, and dimension mismatches. Saves are atomic. The complete JSON schema is in `gel.schema.json`.
 
 Lab-only state—gravity, chamber size, simulation quality/speed, pause state, velocity, deformation, and editor pan/zoom—is not serialized.
 
@@ -138,7 +139,7 @@ Outputs:
 
 ```text
 tools/gelatin/dist/gelatin/Gelatin.exe
-tools/gelatin/dist/gelatin-0.1.0-win-x64.zip
+tools/gelatin/dist/gelatin-0.1.1-win-x64.zip
 ```
 
 The dedicated `.github/workflows/gelatin.yml` workflow performs restore, Release build, tests, self-contained Windows x64 publish, verification, and artifact upload without changing the GLoader package.

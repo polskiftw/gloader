@@ -8,6 +8,7 @@ namespace Gelatin.App;
 
 public sealed class DocumentController
 {
+    private const string ToolVersion = "0.1.1";
     private GelDocument _document;
     private readonly DocumentHistory _history = new();
 
@@ -48,7 +49,7 @@ public sealed class DocumentController
     {
         _history.Record(_document);
         mutation(_document.Config);
-        _document.Config.Authoring.ToolVersion = "0.1.0";
+        StampVersion();
         IsDirty = true;
         Notify();
     }
@@ -60,6 +61,7 @@ public sealed class DocumentController
         remap?.Invoke(_document.Config);
         _document.Config.Image.Width = dimensions.Width;
         _document.Config.Image.Height = dimensions.Height;
+        StampVersion();
         _document = new GelDocument { Config = _document.Config, PngBytes = png };
         IsDirty = true;
         Notify();
@@ -70,6 +72,7 @@ public sealed class DocumentController
     public void CompoundMutate(Action<GelConfig> mutation)
     {
         mutation(_document.Config);
+        StampVersion();
         IsDirty = true;
         Notify();
     }
@@ -90,6 +93,7 @@ public sealed class DocumentController
         Notify();
     }
 
+    private void StampVersion() => _document.Config.Authoring.ToolVersion = ToolVersion;
     private void Notify() => Changed?.Invoke(this, EventArgs.Empty);
 
     private static GelDocument CreateFromImage(byte[] bytes, string name)

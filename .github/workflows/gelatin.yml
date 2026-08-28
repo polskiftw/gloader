@@ -49,7 +49,7 @@ jobs:
       - name: Verify package
         shell: pwsh
         run: |
-          $archive = "tools/gelatin/dist/gelatin-0.1.0-win-x64.zip"
+          $archive = "tools/gelatin/dist/gelatin-0.1.1-win-x64.zip"
           $executable = "tools/gelatin/dist/gelatin/Gelatin.exe"
           if (-not (Test-Path $archive -PathType Leaf)) { throw "Missing $archive" }
           if (-not (Test-Path $executable -PathType Leaf)) { throw "Missing $executable" }
@@ -57,6 +57,6 @@ jobs:
       - name: Upload Gelatin artifact
         uses: actions/upload-artifact@v4
         with:
-          name: gelatin-0.1.0-win-x64
-          path: tools/gelatin/dist/gelatin-0.1.0-win-x64.zip
+          name: gelatin-0.1.1-win-x64
+          path: tools/gelatin/dist/gelatin-0.1.1-win-x64.zip
           if-no-files-found: error
