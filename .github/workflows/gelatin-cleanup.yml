@@ -1,0 +1,53 @@
+name: Gelatin Cleanup
+
+on:
+  push:
+    paths:
+      - ".github/workflows/gelatin-cleanup.yml"
+      - ".github/scripts/gelatin_cleanup.py"
+
+permissions:
+  contents: write
+
+env:
+  AVALONIA_TELEMETRY_OPTOUT: "1"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+
+jobs:
+  cleanup:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Apply cleanup patch
+        run: python .github/scripts/gelatin_cleanup.py
+
+      - name: Restore
+        working-directory: tools/gelatin
+        run: dotnet restore Gelatin.sln
+
+      - name: Build Release
+        working-directory: tools/gelatin
+        run: dotnet build Gelatin.sln -c Release --no-restore
+
+      - name: Run tests
+        working-directory: tools/gelatin
+        run: dotnet test Gelatin.sln -c Release --no-build
+
+      - name: Commit cleanup
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tools/gelatin .github/workflows/gelatin.yml
+          if (-not (git status --porcelain)) { throw "Cleanup produced no repository changes." }
+          git commit -m "Gelatin 0.1.6: clean up editor internals"
+          git push origin HEAD:main
