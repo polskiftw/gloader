@@ -39,30 +39,30 @@ jobs:
           $testPath = 'tools/gelatin/tests/Gelatin.Tests/RuntimePropertiesTests.cs'
           $text = Get-Content $testPath -Raw
           $pattern = '(?s)    \[Fact\]\r?\n    public void SolverReportsBounceWhenWallReflectionActuallyOccurs\(\)\r?\n    \{.*?\r?\n    \}(?=\r?\n\r?\n    \[(?:Fact|Theory)\])'
-          $replacement = @'
-    [Fact]
-    public void SolverReportsBounceWhenWallReflectionActuallyOccurs()
-    {
-        var quality = new QualitySettings(10, 240, 8, 1, 48);
-        var document = TestAssets.Document(20, 14);
-        document.Config.Material = new MaterialConfig { Damping = 0 };
-        var mesh = GelMeshBuilder.Build(document, quality);
-        var solver = new GelSolver(mesh, document.Config.Material, quality, new Chamber(-0.35f, -0.35f, 0.35f, 0.35f, 1f, 0f));
-        solver.Reset(new Vector2(8f, 0f));
-
-        Assert.True(solver.AverageVelocity().X > 0f);
-        var reflected = false;
-        for (var step = 0; step < 120; step++)
-        {
-            solver.Step(1f / quality.PhysicsHz);
-            if (!solver.BouncedThisStep) continue;
-            reflected = true;
-            break;
-        }
-
-        Assert.True(reflected, "The test body must reach the wall and execute a real inward wall reflection.");
-    }
-'@
+          $replacement = @(
+            '    [Fact]',
+            '    public void SolverReportsBounceWhenWallReflectionActuallyOccurs()',
+            '    {',
+            '        var quality = new QualitySettings(10, 240, 8, 1, 48);',
+            '        var document = TestAssets.Document(20, 14);',
+            '        document.Config.Material = new MaterialConfig { Damping = 0 };',
+            '        var mesh = GelMeshBuilder.Build(document, quality);',
+            '        var solver = new GelSolver(mesh, document.Config.Material, quality, new Chamber(-0.35f, -0.35f, 0.35f, 0.35f, 1f, 0f));',
+            '        solver.Reset(new Vector2(8f, 0f));',
+            '',
+            '        Assert.True(solver.AverageVelocity().X > 0f);',
+            '        var reflected = false;',
+            '        for (var step = 0; step < 120; step++)',
+            '        {',
+            '            solver.Step(1f / quality.PhysicsHz);',
+            '            if (!solver.BouncedThisStep) continue;',
+            '            reflected = true;',
+            '            break;',
+            '        }',
+            '',
+            '        Assert.True(reflected, "The test body must reach the wall and execute a real inward wall reflection.");',
+            '    }'
+          ) -join "`n"
           $updated = [regex]::Replace($text, $pattern, $replacement, 1)
           if ($updated -eq $text) { throw 'Bounce regression method was not replaced.' }
           [IO.File]::WriteAllText($testPath, $updated, [Text.UTF8Encoding]::new($false))
