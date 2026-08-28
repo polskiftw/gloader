@@ -25,6 +25,9 @@ public static class RawRgbaCodec
     private static readonly byte[] PngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
     private static readonly uint[] CrcTable = BuildCrcTable();
 
+    public static bool IsPng(ReadOnlySpan<byte> encoded)
+        => encoded.Length >= PngSignature.Length && encoded[..PngSignature.Length].SequenceEqual(PngSignature);
+
     public static RgbaBuffer Decode(ReadOnlySpan<byte> encoded)
     {
         try

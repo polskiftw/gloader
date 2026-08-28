@@ -8,7 +8,11 @@ namespace Gelatin.Core.Physics;
 public static class GelMeshBuilder
 {
     public static GelMesh Build(GelDocument document, QualitySettings quality)
+        => Build(document, quality, CancellationToken.None);
+
+    public static GelMesh Build(GelDocument document, QualitySettings quality, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var aspect = document.Config.Image.Width / (double)document.Config.Image.Height;
         var (columns, rows) = quality.GridForAspect(aspect);
         var aspectHeight = (float)(document.Config.Image.Height / (double)document.Config.Image.Width);
@@ -31,6 +35,7 @@ public static class GelMeshBuilder
             });
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         var triangles = new List<int>((columns - 1) * (rows - 1) * 6);
         var distances = new List<DistanceConstraint>();
         var areas = new List<AreaConstraint>();
@@ -74,16 +79,19 @@ public static class GelMeshBuilder
 
         foreach (var pair in structural.ToArray()) AddDistance(pair.Item1, pair.Item2, 0, true);
 
-        var contourSource = AnimatedImageProcessor.BuildUnionAlphaPng(document.PngBytes, document.Config);
+        cancellationToken.ThrowIfCancellationRequested();
+        var contourSource = AnimatedImageProcessor.BuildUnionAlphaPng(document.PngBytes, document.Config, cancellationToken);
         var contours = AlphaContourExtractor.Extract(contourSource, document.Config.Image.AlphaThreshold, quality.ContourSamples);
         var bindings = new List<ContourBinding>();
         for (var loop = 0; loop < contours.Count; loop++)
         for (var order = 0; order < contours[loop].Points.Count; order++)
             bindings.Add(Bind(contours[loop].Points[order], columns, rows, loop, order));
 
+        cancellationToken.ThrowIfCancellationRequested();
         var cores = new List<CoreBody>();
         foreach (var definition in document.Config.Cores)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var center = UvToLocal(new Vector2((float)definition.X, (float)definition.Y), aspectHeight);
             var body = new CoreBody
             {

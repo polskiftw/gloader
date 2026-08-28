@@ -9,6 +9,7 @@ using Avalonia.Interactivity;
 using Avalonia.LogicalTree;
 using Gelatin.App;
 using Gelatin.App.Controls;
+using Gelatin.Core;
 using Gelatin.Core.Physics;
 using Gelatin.Core.Runtime;
 
@@ -30,7 +31,7 @@ public sealed class UiSmokeTests
         var window = new MainWindow();
         window.Show();
 
-        Assert.Contains("Gelatin 0.1.5", window.Title);
+        Assert.Contains($"Gelatin {GelatinProduct.Version}", window.Title);
         var buttons = window.GetLogicalDescendants().OfType<Button>().ToArray();
         Assert.Contains(buttons, button => Equals(button.Content, "Open"));
         Assert.Contains(buttons, button => Equals(button.Content, "Save .gel"));

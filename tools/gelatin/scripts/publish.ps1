@@ -8,7 +8,10 @@ $ProjectDirectory = Split-Path -Parent $Project
 $DistRoot = Join-Path $ToolRoot "dist"
 $PublishDirectory = Join-Path $DistRoot "gelatin"
 $LegalDirectory = Join-Path $PublishDirectory "licenses"
-$Archive = Join-Path $DistRoot "gelatin-0.1.5-win-x64.zip"
+[xml]$VersionDocument = Get-Content (Join-Path $ToolRoot "Directory.Build.props")
+$Version = [string]$VersionDocument.Project.PropertyGroup.Version
+if ([string]::IsNullOrWhiteSpace($Version)) { throw "Could not resolve Gelatin version from Directory.Build.props." }
+$Archive = Join-Path $DistRoot ("gelatin-" + $Version + "-win-x64.zip")
 $License = Join-Path $RepoRoot "LICENSE.md"
 $ThirdPartyNotices = Join-Path $RepoRoot "THIRD-PARTY-NOTICES.txt"
 

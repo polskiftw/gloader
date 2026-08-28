@@ -11,7 +11,9 @@ public static class RawRgbaTransforms
         return RawRgbaCodec.Encode(image.Width, image.Height, image.Pixels);
     }
 
-    public static byte[] Crop(ReadOnlySpan<byte> png, PixelRect rect)
+    public static byte[] Crop(ReadOnlySpan<byte> png, PixelRect rect) => Crop(png, rect, CancellationToken.None);
+
+    public static byte[] Crop(ReadOnlySpan<byte> png, PixelRect rect, CancellationToken cancellationToken)
     {
         var source = RawRgbaCodec.Decode(png);
         if (rect.Width < 1 || rect.Height < 1 || rect.X < 0 || rect.Y < 0 || rect.Right > source.Width || rect.Bottom > source.Height)
@@ -20,11 +22,17 @@ public static class RawRgbaTransforms
         var sourceStride = checked(source.Width * 4);
         var resultStride = checked(rect.Width * 4);
         for (var y = 0; y < rect.Height; y++)
-            source.Pixels.AsSpan(checked((rect.Y + y) * sourceStride + rect.X * 4), resultStride).CopyTo(result.AsSpan(checked(y * resultStride), resultStride));
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            source.Pixels.AsSpan(checked((rect.Y + y) * sourceStride + rect.X * 4), resultStride)
+                .CopyTo(result.AsSpan(checked(y * resultStride), resultStride));
+        }
         return RawRgbaCodec.Encode(rect.Width, rect.Height, result);
     }
 
-    public static byte[] Resize(ReadOnlySpan<byte> png, int width, int height)
+    public static byte[] Resize(ReadOnlySpan<byte> png, int width, int height) => Resize(png, width, height, CancellationToken.None);
+
+    public static byte[] Resize(ReadOnlySpan<byte> png, int width, int height, CancellationToken cancellationToken)
     {
         if (width is < 1 or > GelValidator.MaxDimension || height is < 1 or > GelValidator.MaxDimension)
             throw new GelFormatException($"Resize dimensions must be between 1 and {GelValidator.MaxDimension} pixels.");
@@ -32,6 +40,7 @@ public static class RawRgbaTransforms
         var result = new byte[checked(width * height * 4)];
         for (var y = 0; y < height; y++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var sy = (y + 0.5) * source.Height / height - 0.5;
             var y0 = Math.Clamp((int)Math.Floor(sy), 0, source.Height - 1);
             var y1 = Math.Min(source.Height - 1, y0 + 1);
@@ -58,35 +67,55 @@ public static class RawRgbaTransforms
         return RawRgbaCodec.Encode(width, height, result);
     }
 
-    public static PixelRect? FindTrimBounds(ReadOnlySpan<byte> png, double alphaThreshold)
+    public static PixelRect? FindTrimBounds(ReadOnlySpan<byte> png, double alphaThreshold) => FindTrimBounds(png, alphaThreshold, CancellationToken.None);
+
+    public static PixelRect? FindTrimBounds(ReadOnlySpan<byte> png, double alphaThreshold, CancellationToken cancellationToken)
     {
         var image = RawRgbaCodec.Decode(png);
         var threshold = (byte)Math.Clamp(Math.Round(alphaThreshold * 255), 0, 255);
-        var minX = image.Width; var minY = image.Height; var maxX = -1; var maxY = -1;
+        var minX = image.Width;
+        var minY = image.Height;
+        var maxX = -1;
+        var maxY = -1;
         for (var y = 0; y < image.Height; y++)
-        for (var x = 0; x < image.Width; x++)
         {
-            if (image.Pixels[(y * image.Width + x) * 4 + 3] <= threshold) continue;
-            minX = Math.Min(minX, x); minY = Math.Min(minY, y); maxX = Math.Max(maxX, x); maxY = Math.Max(maxY, y);
+            cancellationToken.ThrowIfCancellationRequested();
+            for (var x = 0; x < image.Width; x++)
+            {
+                if (image.Pixels[(y * image.Width + x) * 4 + 3] <= threshold) continue;
+                minX = Math.Min(minX, x);
+                minY = Math.Min(minY, y);
+                maxX = Math.Max(maxX, x);
+                maxY = Math.Max(maxY, y);
+            }
         }
         return maxX < minX ? null : new PixelRect(minX, minY, maxX - minX + 1, maxY - minY + 1);
     }
 
     public static byte[] RemoveBackground(ReadOnlySpan<byte> png, SKColor background, double tolerance, double feather)
+        => RemoveBackground(png, background, tolerance, feather, CancellationToken.None);
+
+    public static byte[] RemoveBackground(ReadOnlySpan<byte> png, SKColor background, double tolerance, double feather, CancellationToken cancellationToken)
     {
-        tolerance = Math.Clamp(tolerance, 0, 1); feather = Math.Clamp(feather, 0, 1);
+        tolerance = Math.Clamp(tolerance, 0, 1);
+        feather = Math.Clamp(feather, 0, 1);
         var image = RawRgbaCodec.Decode(png);
         var hard = tolerance * Math.Sqrt(3 * 255d * 255d);
         var soft = feather * Math.Sqrt(3 * 255d * 255d) * 0.35;
-        for (var offset = 0; offset < image.Pixels.Length; offset += 4)
+        for (var y = 0; y < image.Height; y++)
         {
-            var dr = image.Pixels[offset] - background.Red;
-            var dg = image.Pixels[offset + 1] - background.Green;
-            var db = image.Pixels[offset + 2] - background.Blue;
-            var distance = Math.Sqrt(dr * dr + dg * dg + db * db);
-            var keep = soft <= 0.00001 ? (distance <= hard ? 0d : 1d) : SmoothStep(hard - soft, hard + soft, distance);
-            var originalAlpha = image.Pixels[offset + 3];
-            image.Pixels[offset + 3] = (byte)Math.Clamp(Math.Round(originalAlpha * keep), 0, originalAlpha);
+            cancellationToken.ThrowIfCancellationRequested();
+            for (var x = 0; x < image.Width; x++)
+            {
+                var offset = (y * image.Width + x) * 4;
+                var dr = image.Pixels[offset] - background.Red;
+                var dg = image.Pixels[offset + 1] - background.Green;
+                var db = image.Pixels[offset + 2] - background.Blue;
+                var distance = Math.Sqrt(dr * dr + dg * dg + db * db);
+                var keep = soft <= 0.00001 ? (distance <= hard ? 0d : 1d) : SmoothStep(hard - soft, hard + soft, distance);
+                var originalAlpha = image.Pixels[offset + 3];
+                image.Pixels[offset + 3] = (byte)Math.Clamp(Math.Round(originalAlpha * keep), 0, originalAlpha);
+            }
         }
         return RawRgbaCodec.Encode(image.Width, image.Height, image.Pixels);
     }
@@ -94,7 +123,8 @@ public static class RawRgbaTransforms
     public static SKColor Sample(ReadOnlySpan<byte> png, int x, int y)
     {
         var image = RawRgbaCodec.Decode(png);
-        x = Math.Clamp(x, 0, image.Width - 1); y = Math.Clamp(y, 0, image.Height - 1);
+        x = Math.Clamp(x, 0, image.Width - 1);
+        y = Math.Clamp(y, 0, image.Height - 1);
         var offset = (y * image.Width + x) * 4;
         return new SKColor(image.Pixels[offset], image.Pixels[offset + 1], image.Pixels[offset + 2], image.Pixels[offset + 3]);
     }

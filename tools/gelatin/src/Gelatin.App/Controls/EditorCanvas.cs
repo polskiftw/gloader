@@ -393,7 +393,16 @@ public sealed class EditorCanvas : Control
         var imageRect = ImageRect();
         DrawCheckerboard(context, imageRect);
         var image = _preview ?? _bitmap;
-        if (image is not null) context.DrawImage(image, imageRect);
+        if (image is not null)
+        {
+            if (_preview is null && AnimatedImageProcessor.IsAnimated(_controller.Document.Config) &&
+                _controller.Document.Config.Animation is { Frames.Count: > 0 } animation)
+            {
+                var frame = animation.Frames[Math.Clamp(_loadedFrameIndex, 0, animation.Frames.Count - 1)];
+                context.DrawImage(image, new Rect(frame.X, frame.Y, frame.Width, frame.Height), imageRect);
+            }
+            else context.DrawImage(image, imageRect);
+        }
         if (ShowOverlays)
         {
             if (ShowHeatmap) DrawHeatmap(context, imageRect);
@@ -433,15 +442,19 @@ public sealed class EditorCanvas : Control
                 _animationClock.Reset();
             }
         }
+
         var frameIndex = CurrentFrameIndex;
-        if (!changedDocument && frameIndex == _loadedFrameIndex)
+        if (!changedDocument)
         {
+            if (frameIndex != _loadedFrameIndex)
+            {
+                _loadedFrameIndex = frameIndex;
+                AnimationFrameChanged?.Invoke(frameIndex);
+            }
             InvalidateVisual();
             return;
         }
-        var png = AnimatedImageProcessor.IsAnimated(document.Config)
-            ? AnimatedImageProcessor.GetFramePng(document, frameIndex)
-            : document.PngBytes;
+
         _loadedFrameIndex = frameIndex;
         AnimationFrameChanged?.Invoke(frameIndex);
         _bitmapCancellation?.Cancel();
@@ -453,7 +466,7 @@ public sealed class EditorCanvas : Control
         _preview = null;
         try
         {
-            var bitmap = await Task.Run(() => DecodeBitmap(png, cancellation.Token), cancellation.Token);
+            var bitmap = await Task.Run(() => DecodeBitmap(document.PngBytes, cancellation.Token), cancellation.Token);
             if (!ReferenceEquals(_bitmapCancellation, cancellation) || _shutdown)
             {
                 bitmap.Dispose();
@@ -478,7 +491,9 @@ public sealed class EditorCanvas : Control
 
     private Rect ImageRect()
     {
-        var size = _bitmap?.Size ?? new Size(Math.Max(1, _controller.Document.Config.Image.Width), Math.Max(1, _controller.Document.Config.Image.Height));
+        var size = new Size(
+            Math.Max(1, _controller.Document.Config.Image.Width),
+            Math.Max(1, _controller.Document.Config.Image.Height));
         var scale = Math.Min(Math.Max(1, Bounds.Width - 40) / size.Width, Math.Max(1, Bounds.Height - 40) / size.Height) * _zoom;
         var width = size.Width * scale;
         var height = size.Height * scale;

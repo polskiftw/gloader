@@ -83,6 +83,9 @@ public static class AnimatedImageProcessor
     }
 
     public static ImageStorageResult PackFrames(IReadOnlyList<byte[]> framePngs, IReadOnlyList<int> durationsMs, int repetitionCount)
+        => PackFrames(framePngs, durationsMs, repetitionCount, CancellationToken.None);
+
+    public static ImageStorageResult PackFrames(IReadOnlyList<byte[]> framePngs, IReadOnlyList<int> durationsMs, int repetitionCount, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(framePngs);
         ArgumentNullException.ThrowIfNull(durationsMs);
@@ -92,65 +95,67 @@ public static class AnimatedImageProcessor
         if (repetitionCount < -1 || repetitionCount > 1_000_000) throw new GelFormatException("Animation repetition count is invalid.");
 
         var decoded = new List<RgbaBuffer>(framePngs.Count);
-        try
+        foreach (var png in framePngs)
         {
-            foreach (var png in framePngs) decoded.Add(RawRgbaCodec.Decode(png));
-            var width = decoded[0].Width;
-            var height = decoded[0].Height;
-            ValidateLogicalDimensions(width, height, decoded.Count);
-            if (decoded.Any(frame => frame.Width != width || frame.Height != height))
-                throw new GelFormatException("Every animation frame must have identical dimensions.");
+            cancellationToken.ThrowIfCancellationRequested();
+            decoded.Add(RawRgbaCodec.Decode(png));
+        }
+        return PackDecodedFrames(decoded, durationsMs, repetitionCount, cancellationToken);
+    }
 
-            for (var i = 0; i < durationsMs.Count; i++)
-                if (durationsMs[i] < 0 || durationsMs[i] > GelValidator.MaxAnimationFrameDurationMs)
-                    throw new GelFormatException($"Animation frame {i + 1} has an invalid duration.");
+    private static ImageStorageResult PackDecodedFrames(IReadOnlyList<RgbaBuffer> decoded, IReadOnlyList<int> durationsMs, int repetitionCount, CancellationToken cancellationToken)
+    {
+        var width = decoded[0].Width;
+        var height = decoded[0].Height;
+        ValidateLogicalDimensions(width, height, decoded.Count);
+        if (decoded.Any(frame => frame.Width != width || frame.Height != height))
+            throw new GelFormatException("Every animation frame must have identical dimensions.");
 
-            var columns = Math.Min(decoded.Count, Math.Max(1, GelValidator.MaxDimension / width));
-            var rows = (decoded.Count + columns - 1) / columns;
-            var atlasWidth = checked(columns * width);
-            var atlasHeight = checked(rows * height);
-            if (atlasWidth > GelValidator.MaxDimension || atlasHeight > GelValidator.MaxDimension)
-                throw new GelFormatException("The animation frames cannot fit inside the GEL atlas dimension limit.");
-            var atlasPixels = checked((long)atlasWidth * atlasHeight);
-            if (atlasPixels > MaxDecodedAnimationPixels)
-                throw new GelFormatException("The animation atlas is too large to author safely.");
+        for (var i = 0; i < durationsMs.Count; i++)
+            if (durationsMs[i] < 0 || durationsMs[i] > GelValidator.MaxAnimationFrameDurationMs)
+                throw new GelFormatException($"Animation frame {i + 1} has an invalid duration.");
 
-            var atlas = new byte[checked(atlasWidth * atlasHeight * 4)];
-            var frameConfigs = new List<AnimationFrameConfig>(decoded.Count);
-            for (var index = 0; index < decoded.Count; index++)
+        var columns = Math.Min(decoded.Count, Math.Max(1, GelValidator.MaxDimension / width));
+        var rows = (decoded.Count + columns - 1) / columns;
+        var atlasWidth = checked(columns * width);
+        var atlasHeight = checked(rows * height);
+        if (atlasWidth > GelValidator.MaxDimension || atlasHeight > GelValidator.MaxDimension)
+            throw new GelFormatException("The animation frames cannot fit inside the GEL atlas dimension limit.");
+        var atlasPixels = checked((long)atlasWidth * atlasHeight);
+        if (atlasPixels > MaxDecodedAnimationPixels)
+            throw new GelFormatException("The animation atlas is too large to author safely.");
+
+        var atlas = new byte[checked(atlasWidth * atlasHeight * 4)];
+        var frameConfigs = new List<AnimationFrameConfig>(decoded.Count);
+        for (var index = 0; index < decoded.Count; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var column = index % columns;
+            var row = index / columns;
+            var x = column * width;
+            var y = row * height;
+            var frame = decoded[index];
+            for (var sourceY = 0; sourceY < height; sourceY++)
             {
-                var column = index % columns;
-                var row = index / columns;
-                var x = column * width;
-                var y = row * height;
-                var frame = decoded[index];
-                for (var sourceY = 0; sourceY < height; sourceY++)
-                {
-                    var sourceOffset = checked(sourceY * width * 4);
-                    var destinationOffset = checked(((y + sourceY) * atlasWidth + x) * 4);
-                    frame.Pixels.AsSpan(sourceOffset, width * 4).CopyTo(atlas.AsSpan(destinationOffset, width * 4));
-                }
-                frameConfigs.Add(new AnimationFrameConfig
-                {
-                    X = x,
-                    Y = y,
-                    Width = width,
-                    Height = height,
-                    DurationMs = durationsMs[index]
-                });
+                var sourceOffset = checked(sourceY * width * 4);
+                var destinationOffset = checked(((y + sourceY) * atlasWidth + x) * 4);
+                frame.Pixels.AsSpan(sourceOffset, width * 4).CopyTo(atlas.AsSpan(destinationOffset, width * 4));
             }
+            frameConfigs.Add(new AnimationFrameConfig
+            {
+                X = x,
+                Y = y,
+                Width = width,
+                Height = height,
+                DurationMs = durationsMs[index]
+            });
+        }
 
-            return new ImageStorageResult(
-                RawRgbaCodec.Encode(atlasWidth, atlasHeight, atlas),
-                width,
-                height,
-                new AnimationConfig { RepetitionCount = repetitionCount, Frames = frameConfigs });
-        }
-        finally
-        {
-            // RgbaBuffer owns managed arrays only; keeping this finally makes the ownership
-            // explicit if it later becomes disposable.
-        }
+        return new ImageStorageResult(
+            RawRgbaCodec.Encode(atlasWidth, atlasHeight, atlas),
+            width,
+            height,
+            new AnimationConfig { RepetitionCount = repetitionCount, Frames = frameConfigs });
     }
 
     public static byte[] GetFramePng(GelDocument document, int frameIndex)
@@ -159,80 +164,156 @@ public static class AnimatedImageProcessor
     public static byte[] GetFramePng(ReadOnlySpan<byte> atlasPng, GelConfig config, int frameIndex)
     {
         if (!IsAnimated(config)) return atlasPng.ToArray();
+        var atlas = RawRgbaCodec.Decode(atlasPng);
+        ValidateAtlas(config, atlas.Width, atlas.Height);
         var animation = config.Animation!;
         frameIndex = Math.Clamp(frameIndex, 0, animation.Frames.Count - 1);
         var frame = animation.Frames[frameIndex];
-        return RawRgbaTransforms.Crop(atlasPng, new PixelRect(frame.X, frame.Y, frame.Width, frame.Height));
+        return RawRgbaCodec.Encode(frame.Width, frame.Height, ExtractFramePixels(atlas, frame));
     }
 
     public static List<byte[]> ExtractFrames(ReadOnlySpan<byte> atlasPng, GelConfig config)
+        => ExtractFrames(atlasPng, config, CancellationToken.None);
+
+    public static List<byte[]> ExtractFrames(ReadOnlySpan<byte> atlasPng, GelConfig config, CancellationToken cancellationToken)
     {
         if (!IsAnimated(config)) return [atlasPng.ToArray()];
+        var atlas = RawRgbaCodec.Decode(atlasPng);
+        ValidateAtlas(config, atlas.Width, atlas.Height);
         var result = new List<byte[]>(config.Animation!.Frames.Count);
-        for (var index = 0; index < config.Animation.Frames.Count; index++) result.Add(GetFramePng(atlasPng, config, index));
+        foreach (var frame in config.Animation.Frames)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            result.Add(RawRgbaCodec.Encode(frame.Width, frame.Height, ExtractFramePixels(atlas, frame)));
+        }
         return result;
     }
 
     public static ImageStorageResult TransformAnimated(ReadOnlySpan<byte> atlasPng, GelConfig config, Func<byte[], byte[]> transform)
+        => TransformAnimated(atlasPng, config, transform, CancellationToken.None);
+
+    public static ImageStorageResult TransformAnimated(ReadOnlySpan<byte> atlasPng, GelConfig config, Func<byte[], byte[]> transform, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(transform);
         if (!IsAnimated(config)) throw new GelFormatException("The requested operation requires an animated GEL asset.");
         var animation = config.Animation!;
-        var frames = ExtractFrames(atlasPng, config);
-        var transformed = frames.Select(frame => transform(frame)).ToList();
-        return PackFrames(transformed, animation.Frames.Select(frame => frame.DurationMs).ToArray(), animation.RepetitionCount);
+        var frames = ExtractFrames(atlasPng, config, cancellationToken);
+        var transformed = new List<byte[]>(frames.Count);
+        foreach (var frame in frames)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            transformed.Add(transform(frame));
+        }
+        return PackFrames(transformed, animation.Frames.Select(frame => frame.DurationMs).ToArray(), animation.RepetitionCount, cancellationToken);
     }
 
     public static ImageStorageResult TransformFrame(ReadOnlySpan<byte> atlasPng, GelConfig config, int frameIndex, Func<byte[], byte[]> transform)
+        => TransformFrame(atlasPng, config, frameIndex, transform, CancellationToken.None);
+
+    public static ImageStorageResult TransformFrame(ReadOnlySpan<byte> atlasPng, GelConfig config, int frameIndex, Func<byte[], byte[]> transform, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(transform);
         if (!IsAnimated(config)) throw new GelFormatException("The requested operation requires an animated GEL asset.");
         var animation = config.Animation!;
         if (frameIndex < 0 || frameIndex >= animation.Frames.Count) throw new ArgumentOutOfRangeException(nameof(frameIndex));
-        var frames = ExtractFrames(atlasPng, config);
-        frames[frameIndex] = transform(frames[frameIndex]);
-        return PackFrames(frames, animation.Frames.Select(frame => frame.DurationMs).ToArray(), animation.RepetitionCount);
+
+        var atlas = RawRgbaCodec.Decode(atlasPng);
+        ValidateAtlas(config, atlas.Width, atlas.Height);
+        var frame = animation.Frames[frameIndex];
+        cancellationToken.ThrowIfCancellationRequested();
+        var transformedPng = transform(RawRgbaCodec.Encode(frame.Width, frame.Height, ExtractFramePixels(atlas, frame)));
+        cancellationToken.ThrowIfCancellationRequested();
+        var transformed = RawRgbaCodec.Decode(transformedPng);
+        if (transformed.Width != frame.Width || transformed.Height != frame.Height)
+            throw new GelFormatException("A current-frame edit may not change the shared animation canvas dimensions.");
+        CopyFramePixels(atlas, frame, transformed.Pixels);
+        return new ImageStorageResult(
+            RawRgbaCodec.Encode(atlas.Width, atlas.Height, atlas.Pixels),
+            config.Image.Width,
+            config.Image.Height,
+            animation.DeepClone());
     }
 
     public static PixelRect? FindUnionTrimBounds(ReadOnlySpan<byte> atlasPng, GelConfig config, double alphaThreshold)
+        => FindUnionTrimBounds(atlasPng, config, alphaThreshold, CancellationToken.None);
+
+    public static PixelRect? FindUnionTrimBounds(ReadOnlySpan<byte> atlasPng, GelConfig config, double alphaThreshold, CancellationToken cancellationToken)
     {
-        if (!IsAnimated(config)) return RawRgbaTransforms.FindTrimBounds(atlasPng, alphaThreshold);
+        if (!IsAnimated(config)) return RawRgbaTransforms.FindTrimBounds(atlasPng, alphaThreshold, cancellationToken);
+        var atlas = RawRgbaCodec.Decode(atlasPng);
+        ValidateAtlas(config, atlas.Width, atlas.Height);
+        var threshold = (byte)Math.Clamp(Math.Round(alphaThreshold * 255), 0, 255);
         var minX = config.Image.Width;
         var minY = config.Image.Height;
         var maxX = -1;
         var maxY = -1;
-        foreach (var framePng in ExtractFrames(atlasPng, config))
+        foreach (var frame in config.Animation!.Frames)
         {
-            var bounds = RawRgbaTransforms.FindTrimBounds(framePng, alphaThreshold);
-            if (bounds is null) continue;
-            minX = Math.Min(minX, bounds.Value.X);
-            minY = Math.Min(minY, bounds.Value.Y);
-            maxX = Math.Max(maxX, bounds.Value.Right - 1);
-            maxY = Math.Max(maxY, bounds.Value.Bottom - 1);
+            cancellationToken.ThrowIfCancellationRequested();
+            for (var y = 0; y < frame.Height; y++)
+            for (var x = 0; x < frame.Width; x++)
+            {
+                var offset = (((frame.Y + y) * atlas.Width) + frame.X + x) * 4 + 3;
+                if (atlas.Pixels[offset] <= threshold) continue;
+                minX = Math.Min(minX, x);
+                minY = Math.Min(minY, y);
+                maxX = Math.Max(maxX, x);
+                maxY = Math.Max(maxY, y);
+            }
         }
         return maxX < minX ? null : new PixelRect(minX, minY, maxX - minX + 1, maxY - minY + 1);
     }
 
     public static byte[] BuildUnionAlphaPng(ReadOnlySpan<byte> atlasPng, GelConfig config)
+        => BuildUnionAlphaPng(atlasPng, config, CancellationToken.None);
+
+    public static byte[] BuildUnionAlphaPng(ReadOnlySpan<byte> atlasPng, GelConfig config, CancellationToken cancellationToken)
     {
         if (!IsAnimated(config)) return atlasPng.ToArray();
-        var frames = ExtractFrames(atlasPng, config).Select(frame => RawRgbaCodec.Decode(frame)).ToList();
+        var atlas = RawRgbaCodec.Decode(atlasPng);
+        ValidateAtlas(config, atlas.Width, atlas.Height);
         var width = config.Image.Width;
         var height = config.Image.Height;
-        var union = (byte[])frames[0].Pixels.Clone();
+        var frames = config.Animation!.Frames;
+        var union = ExtractFramePixels(atlas, frames[0]);
         for (var frameIndex = 1; frameIndex < frames.Count; frameIndex++)
         {
-            var pixels = frames[frameIndex].Pixels;
-            for (var offset = 0; offset < union.Length; offset += 4)
+            cancellationToken.ThrowIfCancellationRequested();
+            var frame = frames[frameIndex];
+            for (var y = 0; y < height; y++)
+            for (var x = 0; x < width; x++)
             {
-                if (pixels[offset + 3] <= union[offset + 3]) continue;
-                union[offset] = pixels[offset];
-                union[offset + 1] = pixels[offset + 1];
-                union[offset + 2] = pixels[offset + 2];
-                union[offset + 3] = pixels[offset + 3];
+                var unionOffset = (y * width + x) * 4;
+                var atlasOffset = (((frame.Y + y) * atlas.Width) + frame.X + x) * 4;
+                if (atlas.Pixels[atlasOffset + 3] <= union[unionOffset + 3]) continue;
+                atlas.Pixels.AsSpan(atlasOffset, 4).CopyTo(union.AsSpan(unionOffset, 4));
             }
         }
         return RawRgbaCodec.Encode(width, height, union);
+    }
+
+    private static byte[] ExtractFramePixels(RgbaBuffer atlas, AnimationFrameConfig frame)
+    {
+        var pixels = new byte[checked(frame.Width * frame.Height * 4)];
+        var rowBytes = checked(frame.Width * 4);
+        for (var y = 0; y < frame.Height; y++)
+        {
+            var sourceOffset = checked(((frame.Y + y) * atlas.Width + frame.X) * 4);
+            atlas.Pixels.AsSpan(sourceOffset, rowBytes).CopyTo(pixels.AsSpan(y * rowBytes, rowBytes));
+        }
+        return pixels;
+    }
+
+    private static void CopyFramePixels(RgbaBuffer atlas, AnimationFrameConfig frame, ReadOnlySpan<byte> pixels)
+    {
+        var rowBytes = checked(frame.Width * 4);
+        if (pixels.Length != checked(rowBytes * frame.Height))
+            throw new GelFormatException("The edited animation frame has an invalid RGBA buffer length.");
+        for (var y = 0; y < frame.Height; y++)
+        {
+            var destinationOffset = checked(((frame.Y + y) * atlas.Width + frame.X) * 4);
+            pixels.Slice(y * rowBytes, rowBytes).CopyTo(atlas.Pixels.AsSpan(destinationOffset, rowBytes));
+        }
     }
 
     public static long FrameStartTimeMilliseconds(AnimationConfig? animation, int frameIndex)

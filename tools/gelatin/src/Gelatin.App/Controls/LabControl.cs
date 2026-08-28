@@ -81,7 +81,7 @@ public sealed class LabControl : Control
         _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _timer.Tick += OnTick;
         _timer.Start();
-        _controller.Changed += (_, _) => Rebuild();
+        _controller.DetailedChanged += OnDocumentChanged;
         SizeChanged += (_, _) => { if (IsVisible) Rebuild(); };
         Rebuild();
         PointerPressed += OnPointerPressed;
@@ -145,6 +145,24 @@ public sealed class LabControl : Control
         context.Custom(new LabDrawOperation(Bounds, snapshot, _texture, frame, runtimeRender, runtimeTint, new Diagnostics(ShowMesh, ShowCores, ShowHeatmap, ShowRigidity, ShowContour, ShowVelocity)));
     }
 
+
+    private void OnDocumentChanged(DocumentChangeKind kind)
+    {
+        if (kind == DocumentChangeKind.Metadata) return;
+        if (kind == DocumentChangeKind.RenderOnly)
+        {
+            lock (_simulationLock)
+            {
+                var config = _controller.Document.Config;
+                _runtimeRender = new RuntimeRenderSettings(config.Appearance.Opacity, config.BounceEffect.Tint, config.BounceEffect.TintIntensity);
+                if (_runtimeRender.TintMode != GelRuntimeSemantics.TintRandomNeon) _bounceTint.Reset();
+            }
+            InvalidateVisual();
+            return;
+        }
+        Rebuild();
+    }
+
     private async void Rebuild()
     {
         if (_shutdown) return;
@@ -154,14 +172,14 @@ public sealed class LabControl : Control
         try
         {
             await Task.Delay(60, cancellation.Token);
-            var document = _controller.Document.DeepClone();
+            var document = _controller.Document.DeepCloneWithoutRecovery();
             var quality = QualitySettings.For(_quality);
             var viewportWidth = Bounds.Width >= 32 ? Bounds.Width : 800d;
             var viewportHeight = Bounds.Height >= 32 ? Bounds.Height : 800d;
             var result = await Task.Run(() =>
             {
                 cancellation.Token.ThrowIfCancellationRequested();
-                var mesh = GelMeshBuilder.Build(document, quality);
+                var mesh = GelMeshBuilder.Build(document, quality, cancellation.Token);
                 var physics = document.Config.Physics;
                 var chamber = new Chamber(0.035f, 0.055f, 0.965f, 0.945f, (float)physics.Restitution, (float)physics.Friction);
                 var solver = new GelSolver(mesh, document.Config.Material, quality, chamber);

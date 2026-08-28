@@ -1,3 +1,4 @@
+using Gelatin.Core;
 using Gelatin.Core.Authoring;
 using Gelatin.Core.Format;
 using Gelatin.Core.Imaging;
@@ -6,19 +7,31 @@ using SkiaSharp;
 
 namespace Gelatin.App;
 
+public enum DocumentChangeKind
+{
+    Metadata,
+    RenderOnly,
+    Simulation,
+    Full
+}
+
 public sealed class DocumentController
 {
-    private const string ToolVersion = "0.1.5";
     private GelDocument _document;
     private readonly DocumentHistory _history = new();
+    private readonly SemaphoreSlim _saveGate = new(1, 1);
+    private long _nextStateId = 1;
+    private long _stateId;
+    private long _savedStateId;
 
     public GelDocument Document => _document;
     public byte[] RecoveryPngBytes => EnsureRecoverySource();
     public string? CurrentPath { get; private set; }
-    public bool IsDirty { get; private set; }
+    public bool IsDirty => _stateId != _savedStateId;
     public bool CanUndo => _history.CanUndo;
     public bool CanRedo => _history.CanRedo;
     public event EventHandler? Changed;
+    public event Action<DocumentChangeKind>? DetailedChanged;
 
     public bool IsAnimated => AnimatedImageProcessor.IsAnimated(_document.Config);
     public int AnimationFrameCount => _document.Config.Animation?.Frames.Count ?? 1;
@@ -29,39 +42,63 @@ public sealed class DocumentController
         _document.Config.Image.Height,
         _document.Config.Animation?.DeepClone());
 
-    public DocumentController() => _document = EstablishRecoveryBaseline(CreateWelcomeDocument());
+    public DocumentController()
+    {
+        _document = EstablishRecoveryBaseline(CreateWelcomeDocument());
+        _stateId = NextStateId();
+        _savedStateId = _stateId;
+    }
 
     public async Task OpenAsync(string path)
     {
-        var document = await Task.Run(() => Path.GetExtension(path).Equals(".gel", StringComparison.OrdinalIgnoreCase)
+        var isGel = Path.GetExtension(path).Equals(".gel", StringComparison.OrdinalIgnoreCase);
+        var document = await Task.Run(() => isGel
             ? GelFile.Read(path)
             : CreateFromImage(File.ReadAllBytes(path), Path.GetFileNameWithoutExtension(path)));
         _document = EstablishRecoveryBaseline(document);
-        CurrentPath = Path.GetExtension(path).Equals(".gel", StringComparison.OrdinalIgnoreCase) ? path : null;
-        IsDirty = CurrentPath is null;
+        CurrentPath = isGel ? path : null;
+        _stateId = NextStateId();
+        _savedStateId = isGel ? _stateId : -1;
         _history.Clear();
-        Notify();
+        Notify(DocumentChangeKind.Full);
     }
 
     public async Task SaveAsync(string path)
     {
-        var snapshot = _document.DeepClone();
-        await Task.Run(() => GelFile.WriteAtomic(path, snapshot));
+        if (!string.Equals(_document.Config.Authoring.ToolVersion, GelatinProduct.Version, StringComparison.Ordinal))
+        {
+            _history.Record(_document, _stateId);
+            StampVersion();
+            _stateId = NextStateId();
+        }
+
+        var snapshot = _document.DeepCloneWithoutRecovery();
+        var snapshotStateId = _stateId;
+        await _saveGate.WaitAsync();
+        try
+        {
+            await Task.Run(() => GelFile.WriteAtomic(path, snapshot));
+        }
+        finally
+        {
+            _saveGate.Release();
+        }
+
         CurrentPath = path;
-        IsDirty = false;
-        Notify();
+        _savedStateId = snapshotStateId;
+        Notify(DocumentChangeKind.Metadata);
     }
 
     public void ExportPng(string path) => File.WriteAllBytes(path, _document.PngBytes);
     public void ExportJson(string path) => File.WriteAllBytes(path, GelJson.Serialize(_document.Config, true));
 
-    public void Mutate(Action<GelConfig> mutation)
+    public void Mutate(Action<GelConfig> mutation, DocumentChangeKind kind = DocumentChangeKind.Simulation)
     {
-        _history.Record(_document);
+        _history.Record(_document, _stateId);
         mutation(_document.Config);
         StampVersion();
-        IsDirty = true;
-        Notify();
+        _stateId = NextStateId();
+        Notify(kind);
     }
 
     public void CommitImage(byte[] png, Action<GelConfig>? remap = null, Func<byte[], byte[]>? recoveryTransform = null)
@@ -84,12 +121,12 @@ public sealed class DocumentController
         remap?.Invoke(nextConfig);
         nextConfig.Image.Width = dimensions.Width;
         nextConfig.Image.Height = dimensions.Height;
-        nextConfig.Authoring.ToolVersion = ToolVersion;
+        nextConfig.Authoring.ToolVersion = GelatinProduct.Version;
 
-        _history.Record(_document);
+        _history.Record(_document, _stateId);
         _document = new GelDocument { Config = nextConfig, PngBytes = png, RecoveryPngBytes = nextRecovery };
-        IsDirty = true;
-        Notify();
+        _stateId = NextStateId();
+        Notify(DocumentChangeKind.Full);
     }
 
     public void CommitStorage(ImageStorageResult storage, Action<GelConfig>? remap = null, ImageStorageResult? recoveryStorage = null)
@@ -101,7 +138,7 @@ public sealed class DocumentController
         nextConfig.Animation = storage.Animation?.DeepClone();
         nextConfig.Image.Width = storage.Width;
         nextConfig.Image.Height = storage.Height;
-        nextConfig.Authoring.ToolVersion = ToolVersion;
+        nextConfig.Authoring.ToolVersion = GelatinProduct.Version;
         GelValidator.Validate(nextConfig);
 
         var storageDimensions = ImageProcessor.GetDimensions(storage.PngBytes);
@@ -114,42 +151,50 @@ public sealed class DocumentController
         if (storage.IsAnimated) AnimatedImageProcessor.ValidateAtlas(nextConfig, recoveryDimensions.Width, recoveryDimensions.Height);
         else if (recoveryDimensions != (storage.Width, storage.Height)) recovery = (byte[])storage.PngBytes.Clone();
 
-        _history.Record(_document);
+        _history.Record(_document, _stateId);
         _document = new GelDocument { Config = nextConfig, PngBytes = storage.PngBytes, RecoveryPngBytes = recovery };
-        IsDirty = true;
-        Notify();
+        _stateId = NextStateId();
+        Notify(DocumentChangeKind.Full);
     }
 
-    public void BeginCompoundEdit() => _history.Record(_document);
+    public void BeginCompoundEdit() => _history.Record(_document, _stateId);
 
-    public void CompoundMutate(Action<GelConfig> mutation)
+    public void CompoundMutate(Action<GelConfig> mutation, DocumentChangeKind kind = DocumentChangeKind.Simulation)
     {
         mutation(_document.Config);
         StampVersion();
-        IsDirty = true;
-        Notify();
+        _stateId = NextStateId();
+        Notify(kind);
     }
 
     public void Undo()
     {
         if (!CanUndo) return;
-        _document = _history.Undo(_document);
+        var result = _history.Undo(_document, _stateId);
+        _document = result.Document;
+        _stateId = result.StateId;
         EnsureRecoverySource();
-        IsDirty = true;
-        Notify();
+        Notify(DocumentChangeKind.Full);
     }
 
     public void Redo()
     {
         if (!CanRedo) return;
-        _document = _history.Redo(_document);
+        var result = _history.Redo(_document, _stateId);
+        _document = result.Document;
+        _stateId = result.StateId;
         EnsureRecoverySource();
-        IsDirty = true;
-        Notify();
+        Notify(DocumentChangeKind.Full);
     }
 
-    private void StampVersion() => _document.Config.Authoring.ToolVersion = ToolVersion;
-    private void Notify() => Changed?.Invoke(this, EventArgs.Empty);
+    private long NextStateId() => _nextStateId++;
+    private void StampVersion() => _document.Config.Authoring.ToolVersion = GelatinProduct.Version;
+
+    private void Notify(DocumentChangeKind kind)
+    {
+        Changed?.Invoke(this, EventArgs.Empty);
+        DetailedChanged?.Invoke(kind);
+    }
 
     private byte[] EnsureRecoverySource()
     {

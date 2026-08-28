@@ -1,5 +1,3 @@
-using System.Buffers.Binary;
-using System.IO.Compression;
 using Gelatin.Core.Models;
 using SkiaSharp;
 
@@ -13,30 +11,16 @@ public readonly record struct PixelRect(int X, int Y, int Width, int Height)
 
 public static class ImageProcessor
 {
-    private static readonly byte[] PngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
-    private static readonly uint[] PngCrcTable = BuildPngCrcTable();
-
     public static (int Width, int Height) GetDimensions(ReadOnlySpan<byte> encoded)
     {
-        if (encoded.Length < PngSignature.Length || !encoded[..8].SequenceEqual(PngSignature))
+        if (!RawRgbaCodec.IsPng(encoded))
             throw new GelFormatException("The embedded image is not a valid PNG payload.");
-        try
-        {
-            using var bitmap = Decode(encoded);
-            return (bitmap.Width, bitmap.Height);
-        }
-        catch (GelFormatException) { throw; }
-        catch (Exception ex) when (ex is ArgumentException or OverflowException)
-        {
-            throw new GelFormatException("The embedded PNG could not be decoded.", ex);
-        }
+        var decoded = RawRgbaCodec.Decode(encoded);
+        return (decoded.Width, decoded.Height);
     }
 
     public static byte[] NormalizeToPng(ReadOnlySpan<byte> encoded)
-    {
-        using var bitmap = Decode(encoded);
-        return EncodePng(bitmap);
-    }
+        => RawRgbaTransforms.NormalizeToPng(encoded);
 
     public static SKBitmap Decode(ReadOnlySpan<byte> encoded)
     {
@@ -62,82 +46,31 @@ public static class ImageProcessor
     }
 
     public static byte[] Crop(ReadOnlySpan<byte> png, PixelRect rect)
-    {
-        using var source = Decode(png);
-        ValidateRect(rect, source.Width, source.Height);
-        using var result = new SKBitmap(new SKImageInfo(rect.Width, rect.Height, SKColorType.Rgba8888, SKAlphaType.Unpremul));
-        for (var y = 0; y < rect.Height; y++)
-        for (var x = 0; x < rect.Width; x++)
-            result.SetPixel(x, y, source.GetPixel(rect.X + x, rect.Y + y));
-        return EncodePng(result);
-    }
+        => RawRgbaTransforms.Crop(png, rect);
+
+    public static byte[] Crop(ReadOnlySpan<byte> png, PixelRect rect, CancellationToken cancellationToken)
+        => RawRgbaTransforms.Crop(png, rect, cancellationToken);
 
     public static byte[] Resize(ReadOnlySpan<byte> png, int width, int height)
-    {
-        if (width is < 1 or > GelValidator.MaxDimension || height is < 1 or > GelValidator.MaxDimension)
-            throw new GelFormatException($"Resize dimensions must be between 1 and {GelValidator.MaxDimension} pixels.");
-        using var source = Decode(png);
-        using var result = new SKBitmap(new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Unpremul));
-        using var canvas = new SKCanvas(result);
-        canvas.Clear(SKColors.Transparent);
-#pragma warning disable CS0618 // SkiaSharp 3.119.4 keeps this overload for bitmap destination scaling.
-        using var paint = new SKPaint { IsAntialias = true, FilterQuality = SKFilterQuality.High };
-#pragma warning restore CS0618
-        canvas.DrawBitmap(source, new SKRect(0, 0, width, height), paint);
-        return EncodePng(result);
-    }
+        => RawRgbaTransforms.Resize(png, width, height);
+
+    public static byte[] Resize(ReadOnlySpan<byte> png, int width, int height, CancellationToken cancellationToken)
+        => RawRgbaTransforms.Resize(png, width, height, cancellationToken);
 
     public static PixelRect? FindTrimBounds(ReadOnlySpan<byte> png, double alphaThreshold)
-    {
-        using var bitmap = Decode(png);
-        var threshold = (byte)Math.Clamp(Math.Round(alphaThreshold * 255), 0, 255);
-        var minX = bitmap.Width;
-        var minY = bitmap.Height;
-        var maxX = -1;
-        var maxY = -1;
-        for (var y = 0; y < bitmap.Height; y++)
-        for (var x = 0; x < bitmap.Width; x++)
-        {
-            if (bitmap.GetPixel(x, y).Alpha <= threshold) continue;
-            minX = Math.Min(minX, x);
-            minY = Math.Min(minY, y);
-            maxX = Math.Max(maxX, x);
-            maxY = Math.Max(maxY, y);
-        }
-        return maxX < minX ? null : new PixelRect(minX, minY, maxX - minX + 1, maxY - minY + 1);
-    }
+        => RawRgbaTransforms.FindTrimBounds(png, alphaThreshold);
+
+    public static PixelRect? FindTrimBounds(ReadOnlySpan<byte> png, double alphaThreshold, CancellationToken cancellationToken)
+        => RawRgbaTransforms.FindTrimBounds(png, alphaThreshold, cancellationToken);
 
     public static byte[] RemoveBackground(ReadOnlySpan<byte> png, SKColor background, double tolerance, double feather)
-    {
-        tolerance = Math.Clamp(tolerance, 0, 1);
-        feather = Math.Clamp(feather, 0, 1);
-        using var bitmap = Decode(png);
-        var hard = tolerance * Math.Sqrt(3 * 255d * 255d);
-        var soft = feather * Math.Sqrt(3 * 255d * 255d) * 0.35;
-        for (var y = 0; y < bitmap.Height; y++)
-        for (var x = 0; x < bitmap.Width; x++)
-        {
-            var color = bitmap.GetPixel(x, y);
-            var dr = color.Red - background.Red;
-            var dg = color.Green - background.Green;
-            var db = color.Blue - background.Blue;
-            var distance = Math.Sqrt(dr * dr + dg * dg + db * db);
-            double keep;
-            if (soft <= 0.00001) keep = distance <= hard ? 0 : 1;
-            else keep = SmoothStep(hard - soft, hard + soft, distance);
-            var alpha = (byte)Math.Clamp(Math.Round(color.Alpha * keep), 0, color.Alpha);
-            bitmap.SetPixel(x, y, new SKColor(color.Red, color.Green, color.Blue, alpha));
-        }
-        return EncodePng(bitmap);
-    }
+        => RawRgbaTransforms.RemoveBackground(png, background, tolerance, feather);
+
+    public static byte[] RemoveBackground(ReadOnlySpan<byte> png, SKColor background, double tolerance, double feather, CancellationToken cancellationToken)
+        => RawRgbaTransforms.RemoveBackground(png, background, tolerance, feather, cancellationToken);
 
     public static SKColor Sample(ReadOnlySpan<byte> png, int x, int y)
-    {
-        using var bitmap = Decode(png);
-        x = Math.Clamp(x, 0, bitmap.Width - 1);
-        y = Math.Clamp(y, 0, bitmap.Height - 1);
-        return bitmap.GetPixel(x, y);
-    }
+        => RawRgbaTransforms.Sample(png, x, y);
 
     public static void RemapAuthoringForCrop(GelConfig config, PixelRect crop, int oldWidth, int oldHeight)
     {
@@ -184,97 +117,7 @@ public static class ImageProcessor
         config.Image.Height = crop.Height;
     }
 
-    // Skia's normal PNG encode path may canonicalize fully transparent pixels to transparent black.
-    // Gelatin's alpha-repair workflow requires hidden RGB to survive, so emit lossless RGBA PNG scanlines directly.
-    public static byte[] EncodePng(SKBitmap bitmap)
-    {
-        ArgumentNullException.ThrowIfNull(bitmap);
-        if (bitmap.Width < 1 || bitmap.Height < 1) throw new GelFormatException("The processed image has invalid dimensions.");
-        try
-        {
-            using var output = new MemoryStream();
-            output.Write(PngSignature);
-
-            Span<byte> ihdr = stackalloc byte[13];
-            BinaryPrimitives.WriteUInt32BigEndian(ihdr[..4], (uint)bitmap.Width);
-            BinaryPrimitives.WriteUInt32BigEndian(ihdr[4..8], (uint)bitmap.Height);
-            ihdr[8] = 8;
-            ihdr[9] = 6;
-            ihdr[10] = 0;
-            ihdr[11] = 0;
-            ihdr[12] = 0;
-            WritePngChunk(output, "IHDR"u8, ihdr);
-
-            using var compressed = new MemoryStream();
-            using (var zlib = new ZLibStream(compressed, CompressionLevel.Optimal, leaveOpen: true))
-            {
-                var row = new byte[checked(bitmap.Width * 4 + 1)];
-                row[0] = 0;
-                for (var y = 0; y < bitmap.Height; y++)
-                {
-                    var offset = 1;
-                    for (var x = 0; x < bitmap.Width; x++)
-                    {
-                        var color = bitmap.GetPixel(x, y);
-                        row[offset++] = color.Red;
-                        row[offset++] = color.Green;
-                        row[offset++] = color.Blue;
-                        row[offset++] = color.Alpha;
-                    }
-                    zlib.Write(row);
-                }
-            }
-            WritePngChunk(output, "IDAT"u8, compressed.ToArray());
-            WritePngChunk(output, "IEND"u8, ReadOnlySpan<byte>.Empty);
-            return output.ToArray();
-        }
-        catch (GelFormatException) { throw; }
-        catch (Exception ex) when (ex is IOException or OverflowException or ArgumentException)
-        {
-            throw new GelFormatException("The processed image could not be encoded as PNG.", ex);
-        }
-    }
-
-    private static void WritePngChunk(Stream output, ReadOnlySpan<byte> type, ReadOnlySpan<byte> data)
-    {
-        Span<byte> length = stackalloc byte[4];
-        BinaryPrimitives.WriteUInt32BigEndian(length, checked((uint)data.Length));
-        output.Write(length);
-        output.Write(type);
-        output.Write(data);
-
-        var crc = 0xffffffffu;
-        foreach (var value in type) crc = PngCrcTable[(crc ^ value) & 0xff] ^ (crc >> 8);
-        foreach (var value in data) crc = PngCrcTable[(crc ^ value) & 0xff] ^ (crc >> 8);
-        crc ^= 0xffffffffu;
-        Span<byte> encodedCrc = stackalloc byte[4];
-        BinaryPrimitives.WriteUInt32BigEndian(encodedCrc, crc);
-        output.Write(encodedCrc);
-    }
-
-    private static uint[] BuildPngCrcTable()
-    {
-        var table = new uint[256];
-        for (uint n = 0; n < table.Length; n++)
-        {
-            var c = n;
-            for (var k = 0; k < 8; k++) c = (c & 1) != 0 ? 0xedb88320u ^ (c >> 1) : c >> 1;
-            table[n] = c;
-        }
-        return table;
-    }
-
-    private static double SmoothStep(double edge0, double edge1, double value)
-    {
-        var t = Math.Clamp((value - edge0) / Math.Max(edge1 - edge0, 1e-9), 0, 1);
-        return t * t * (3 - 2 * t);
-    }
-
-    private static void ValidateRect(PixelRect rect, int width, int height)
-    {
-        if (rect.Width < 1 || rect.Height < 1 || rect.X < 0 || rect.Y < 0 || rect.Right > width || rect.Bottom > height)
-            throw new GelFormatException("The crop rectangle must be inside the current image.");
-    }
+    public static byte[] EncodePng(SKBitmap bitmap) => RawRgbaCodec.Encode(bitmap);
 
     private static List<List<double[]>> ClipStroke(IReadOnlyList<double[]> points, double left, double top, double right, double bottom)
     {

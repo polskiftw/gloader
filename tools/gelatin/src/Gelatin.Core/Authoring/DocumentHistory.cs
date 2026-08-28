@@ -2,13 +2,16 @@ using Gelatin.Core.Models;
 
 namespace Gelatin.Core.Authoring;
 
+public readonly record struct DocumentHistoryEntry(GelDocument Document, long StateId);
+
 public sealed class DocumentHistory
 {
-    private readonly LinkedList<GelDocument> _undo = [];
-    private readonly LinkedList<GelDocument> _redo = [];
+    private readonly LinkedList<DocumentHistoryEntry> _undo = [];
+    private readonly LinkedList<DocumentHistoryEntry> _redo = [];
     private readonly int _maximumEntries;
     private readonly long _maximumBytes;
     private long _undoBytes;
+    private long _redoBytes;
 
     public DocumentHistory(int maximumEntries = 30, long maximumBytes = 512L * 1024 * 1024)
     {
@@ -19,32 +22,36 @@ public sealed class DocumentHistory
     public bool CanUndo => _undo.Count > 0;
     public bool CanRedo => _redo.Count > 0;
 
-    public void Record(GelDocument current)
+    public void Record(GelDocument current) => Record(current, 0);
+
+    public void Record(GelDocument current, long stateId)
     {
-        var snapshot = current.DeepClone();
-        _undo.AddLast(snapshot);
-        _undoBytes += Estimate(snapshot);
-        _redo.Clear();
-        TrimUndo();
+        AddUndo(CloneEntry(current, stateId));
+        ClearRedo();
     }
 
-    public GelDocument Undo(GelDocument current)
+    public GelDocument Undo(GelDocument current) => Undo(current, 0).Document;
+
+    public DocumentHistoryEntry Undo(GelDocument current, long stateId)
     {
-        if (_undo.Last is null) return current;
-        _redo.AddLast(current.DeepClone());
+        if (_undo.Last is null) return CloneEntry(current, stateId);
+        AddRedo(CloneEntry(current, stateId));
         var result = _undo.Last.Value;
-        _undoBytes -= Estimate(result);
+        _undoBytes -= Estimate(result.Document);
         _undo.RemoveLast();
-        return result.DeepClone();
+        return CloneEntry(result.Document, result.StateId);
     }
 
-    public GelDocument Redo(GelDocument current)
+    public GelDocument Redo(GelDocument current) => Redo(current, 0).Document;
+
+    public DocumentHistoryEntry Redo(GelDocument current, long stateId)
     {
-        if (_redo.Last is null) return current;
-        RecordWithoutClearingRedo(current.DeepClone());
+        if (_redo.Last is null) return CloneEntry(current, stateId);
+        AddUndo(CloneEntry(current, stateId));
         var result = _redo.Last.Value;
+        _redoBytes -= Estimate(result.Document);
         _redo.RemoveLast();
-        return result.DeepClone();
+        return CloneEntry(result.Document, result.StateId);
     }
 
     public void Clear()
@@ -52,24 +59,41 @@ public sealed class DocumentHistory
         _undo.Clear();
         _redo.Clear();
         _undoBytes = 0;
+        _redoBytes = 0;
     }
 
-    private void RecordWithoutClearingRedo(GelDocument document)
+    private void AddUndo(DocumentHistoryEntry entry)
     {
-        _undo.AddLast(document);
-        _undoBytes += Estimate(document);
-        TrimUndo();
+        _undo.AddLast(entry);
+        _undoBytes += Estimate(entry.Document);
+        Trim(_undo, ref _undoBytes);
     }
 
-    private void TrimUndo()
+    private void AddRedo(DocumentHistoryEntry entry)
     {
-        while (_undo.Count > _maximumEntries || (_undoBytes > _maximumBytes && _undo.Count > 1))
+        _redo.AddLast(entry);
+        _redoBytes += Estimate(entry.Document);
+        Trim(_redo, ref _redoBytes);
+    }
+
+    private void ClearRedo()
+    {
+        _redo.Clear();
+        _redoBytes = 0;
+    }
+
+    private void Trim(LinkedList<DocumentHistoryEntry> list, ref long bytes)
+    {
+        while (list.Count > _maximumEntries || (bytes > _maximumBytes && list.Count > 1))
         {
-            var first = _undo.First!.Value;
-            _undoBytes -= Estimate(first);
-            _undo.RemoveFirst();
+            var first = list.First!.Value;
+            bytes -= Estimate(first.Document);
+            list.RemoveFirst();
         }
     }
+
+    private static DocumentHistoryEntry CloneEntry(GelDocument document, long stateId)
+        => new(document.DeepClone(), stateId);
 
     private static long Estimate(GelDocument document)
         => document.PngBytes.LongLength + (document.RecoveryPngBytes?.LongLength ?? 0) +

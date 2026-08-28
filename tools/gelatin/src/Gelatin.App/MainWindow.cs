@@ -7,6 +7,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Gelatin.App.Controls;
+using Gelatin.Core;
 using Gelatin.Core.Imaging;
 using Gelatin.Core.Models;
 using Gelatin.Core.Physics;
@@ -39,7 +40,7 @@ public sealed class MainWindow : Window
 
     public MainWindow()
     {
-        Title = "Gelatin 0.1.5";
+        Title = $"Gelatin {GelatinProduct.Version}";
         Width = 1360;
         Height = 880;
         MinWidth = 980;
@@ -110,7 +111,7 @@ public sealed class MainWindow : Window
         panel.Children.Add(ActionButton("Gel", () => ShowWorkspace(Workspace.Gel), accent: true));
         panel.Children.Add(ActionButton("Lab", () => ShowWorkspace(Workspace.Lab), accent: true));
         panel.Children.Add(Separator());
-        panel.Children.Add(ActionButton("About", () => Dialogs.ShowInfoAsync(this, "About Gelatin", "Gelatin 0.1.5\nStandalone gel asset authoring and physics lab.")));
+        panel.Children.Add(ActionButton("About", () => Dialogs.ShowInfoAsync(this, "About Gelatin", $"Gelatin {GelatinProduct.Version}\nStandalone gel asset authoring and physics lab.")));
         return new Border { Background = new SolidColorBrush(Color.Parse("#222229")), BorderBrush = new SolidColorBrush(Color.Parse("#33333C")), BorderThickness = new Thickness(0, 0, 0, 1), Child = panel };
     }
 
@@ -198,7 +199,7 @@ public sealed class MainWindow : Window
 
         left.Children.Add(Header("Transparency"));
         var alpha = Number(_controller.Document.Config.Image.AlphaThreshold, 0, 1, 0.005, "0.000");
-        alpha.ValueChanged += (_, _) => _controller.Mutate(config => config.Image.AlphaThreshold = (double)(alpha.Value ?? 0.0625m));
+        alpha.ValueChanged += (_, _) => _controller.Mutate(config => config.Image.AlphaThreshold = (double)(alpha.Value ?? 0.0625m), DocumentChangeKind.Simulation);
         left.Children.Add(Labeled("Alpha threshold", alpha));
         left.Children.Add(ActionButton("Trim transparent edges", TrimTransparencyAsync, wide: true));
 
@@ -336,7 +337,7 @@ public sealed class MainWindow : Window
         assetName.LostFocus += (_, _) =>
         {
             var value = assetName.Text?.Trim();
-            if (!string.IsNullOrEmpty(value)) _controller.Mutate(config => config.AssetName = value[..Math.Min(256, value.Length)]);
+            if (!string.IsNullOrEmpty(value)) _controller.Mutate(config => config.AssetName = value[..Math.Min(256, value.Length)], DocumentChangeKind.Metadata);
         };
         right.Children.Add(Labeled("Asset name", assetName));
         right.Children.Add(Header("Runtime preview"));
@@ -357,16 +358,15 @@ public sealed class MainWindow : Window
         var tintIntensity = Slider(_controller.Document.Config.BounceEffect.TintIntensity, 0, 1);
         tintIntensity.IsEnabled = bounceTint.SelectedIndex == 1;
         var tintPercent = new TextBlock { Text = $"{tintIntensity.Value * 100:0}%", Foreground = MutedBrush(), FontSize = 11 };
-        tintIntensity.ValueChanged += (_, _) =>
-        {
-            tintPercent.Text = $"{tintIntensity.Value * 100:0}%";
-            _controller.Mutate(config => config.BounceEffect.TintIntensity = tintIntensity.Value);
-        };
+        BindDocumentSlider(tintIntensity,
+            (config, value) => config.BounceEffect.TintIntensity = value,
+            DocumentChangeKind.RenderOnly,
+            value => tintPercent.Text = $"{value * 100:0}%");
         bounceTint.SelectionChanged += (_, _) =>
         {
             var mode = bounceTint.SelectedIndex == 1 ? GelRuntimeSemantics.TintRandomNeon : GelRuntimeSemantics.TintOff;
             tintIntensity.IsEnabled = mode == GelRuntimeSemantics.TintRandomNeon;
-            _controller.Mutate(config => config.BounceEffect.Tint = mode);
+            _controller.Mutate(config => config.BounceEffect.Tint = mode, DocumentChangeKind.RenderOnly);
         };
         right.Children.Add(Labeled("Bounce color", bounceTint));
         var tintPanel = new StackPanel { Spacing = 3 };
@@ -376,11 +376,10 @@ public sealed class MainWindow : Window
 
         var opacity = Slider(_controller.Document.Config.Appearance.Opacity, 0, 1);
         var opacityPercent = new TextBlock { Text = $"{opacity.Value * 100:0}%", Foreground = MutedBrush(), FontSize = 11 };
-        opacity.ValueChanged += (_, _) =>
-        {
-            opacityPercent.Text = $"{opacity.Value * 100:0}%";
-            _controller.Mutate(config => config.Appearance.Opacity = opacity.Value);
-        };
+        BindDocumentSlider(opacity,
+            (config, value) => config.Appearance.Opacity = value,
+            DocumentChangeKind.RenderOnly,
+            value => opacityPercent.Text = $"{value * 100:0}%");
         var opacityPanel = new StackPanel { Spacing = 3 };
         opacityPanel.Children.Add(opacity);
         opacityPanel.Children.Add(opacityPercent);
@@ -392,16 +391,16 @@ public sealed class MainWindow : Window
             GelRuntimeSemantics.MaxSpeedPixelsPerSecond,
             10,
             "0");
-        movementSpeed.ValueChanged += (_, _) => _controller.Mutate(config => config.Motion.SpeedPixelsPerSecond = (double)(movementSpeed.Value ?? 320m));
+        movementSpeed.ValueChanged += (_, _) => _controller.Mutate(config => config.Motion.SpeedPixelsPerSecond = (double)(movementSpeed.Value ?? 320m), DocumentChangeKind.Simulation);
         right.Children.Add(Labeled("Movement speed (px/s)", movementSpeed));
 
         right.Children.Add(Header("Material"));
-        AddMaterialSlider(right, "Softness", 0, 1, () => _controller.Document.Config.Material.Softness, value => _controller.Mutate(config => config.Material.Softness = value));
-        AddMaterialSlider(right, "Damping", 0, 1, () => _controller.Document.Config.Material.Damping, value => _controller.Mutate(config => config.Material.Damping = value));
-        AddMaterialSlider(right, "Area preservation", 0, 1, () => _controller.Document.Config.Material.AreaPreservation, value => _controller.Mutate(config => config.Material.AreaPreservation = value));
-        AddMaterialSlider(right, "Shape memory", 0, 1, () => _controller.Document.Config.Material.ShapeMemory, value => _controller.Mutate(config => config.Material.ShapeMemory = value));
-        AddMaterialSlider(right, "Bend resistance", 0, 1, () => _controller.Document.Config.Material.BendResistance, value => _controller.Mutate(config => config.Material.BendResistance = value));
-        AddMaterialSlider(right, "Max stretch", 1.05, 3, () => _controller.Document.Config.Material.MaxStretch, value => _controller.Mutate(config => config.Material.MaxStretch = value));
+        AddMaterialSlider(right, "Softness", 0, 1, () => _controller.Document.Config.Material.Softness, (config, value) => config.Material.Softness = value);
+        AddMaterialSlider(right, "Damping", 0, 1, () => _controller.Document.Config.Material.Damping, (config, value) => config.Material.Damping = value);
+        AddMaterialSlider(right, "Area preservation", 0, 1, () => _controller.Document.Config.Material.AreaPreservation, (config, value) => config.Material.AreaPreservation = value);
+        AddMaterialSlider(right, "Shape memory", 0, 1, () => _controller.Document.Config.Material.ShapeMemory, (config, value) => config.Material.ShapeMemory = value);
+        AddMaterialSlider(right, "Bend resistance", 0, 1, () => _controller.Document.Config.Material.BendResistance, (config, value) => config.Material.BendResistance = value);
+        AddMaterialSlider(right, "Max stretch", 1.05, 3, () => _controller.Document.Config.Material.MaxStretch, (config, value) => config.Material.MaxStretch = value);
         right.Children.Add(Check("Self collision", _controller.Document.Config.Material.SelfCollision, value => _controller.Mutate(config => config.Material.SelfCollision = value)));
         var thickness = Number(_controller.Document.Config.Material.SelfCollisionThickness, 0.0001, 0.1, 0.001, "0.0000");
         thickness.ValueChanged += (_, _) => _controller.Mutate(config => config.Material.SelfCollisionThickness = (double)(thickness.Value ?? 0.008m));
@@ -433,9 +432,21 @@ public sealed class MainWindow : Window
 
         var right = SectionStack("QUALITY & DIAGNOSTICS");
         var quality = new ComboBox { ItemsSource = Enum.GetValues<PhysicsQuality>(), SelectedItem = _lab.Quality, HorizontalAlignment = HorizontalAlignment.Stretch };
-        quality.SelectionChanged += (_, _) => { if (quality.SelectedItem is PhysicsQuality value) _lab.Quality = value; };
+        var qualityDescription = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = MutedBrush() };
+        void RefreshQualityDescription(PhysicsQuality value)
+        {
+            var settings = QualitySettings.For(value);
+            qualityDescription.Text = $"{value}: ~{settings.MeshTarget}×{settings.MeshTarget} target mesh, {settings.PhysicsHz} Hz, {settings.SolverIterations} solver iterations, {settings.ContourSamples} contour samples.";
+        }
+        RefreshQualityDescription(_lab.Quality);
+        quality.SelectionChanged += (_, _) =>
+        {
+            if (quality.SelectedItem is not PhysicsQuality value) return;
+            _lab.Quality = value;
+            RefreshQualityDescription(value);
+        };
         right.Children.Add(Labeled("Physics preset", quality));
-        right.Children.Add(new TextBlock { Text = "Claire: ~64×64 mesh, 960 Hz, 24 solver iterations, dense contour.", TextWrapping = TextWrapping.Wrap, Foreground = MutedBrush() });
+        right.Children.Add(qualityDescription);
         right.Children.Add(Header("Diagnostics"));
         right.Children.Add(Check("Deformation mesh (M)", _lab.ShowMesh, value => { _lab.ShowMesh = value; _lab.InvalidateVisual(); }));
         right.Children.Add(Check("Core ellipses", _lab.ShowCores, value => { _lab.ShowCores = value; _lab.InvalidateVisual(); }));
@@ -471,11 +482,29 @@ public sealed class MainWindow : Window
         panel.Children.Add(Labeled(label, number));
     }
 
-    private void AddMaterialSlider(StackPanel panel, string label, double min, double max, Func<double> getter, Action<double> setter)
+    private void AddMaterialSlider(StackPanel panel, string label, double min, double max, Func<double> getter, Action<GelConfig, double> setter)
     {
         var slider = Slider(getter(), min, max);
-        slider.ValueChanged += (_, _) => setter(slider.Value);
+        BindDocumentSlider(slider, setter, DocumentChangeKind.Simulation);
         panel.Children.Add(Labeled(label, slider));
+    }
+
+    private void BindDocumentSlider(Slider slider, Action<GelConfig, double> mutation, DocumentChangeKind kind, Action<double>? uiChanged = null)
+    {
+        var compound = false;
+        slider.PointerPressed += (_, e) =>
+        {
+            if (compound || !e.GetCurrentPoint(slider).Properties.IsLeftButtonPressed) return;
+            _controller.BeginCompoundEdit();
+            compound = true;
+        };
+        slider.PointerReleased += (_, _) => compound = false;
+        slider.ValueChanged += (_, _) =>
+        {
+            uiChanged?.Invoke(slider.Value);
+            if (compound) _controller.CompoundMutate(config => mutation(config, slider.Value), kind);
+            else _controller.Mutate(config => mutation(config, slider.Value), kind);
+        };
     }
 
     private async Task ApplyCropAsync()
@@ -714,11 +743,11 @@ public sealed class MainWindow : Window
                 if (_editor.EditCurrentAnimationFrameOnly)
                 {
                     var frameIndex = _editor.CurrentFrameIndex;
-                    visible = await Task.Run(() => AnimatedImageProcessor.TransformFrame(document.PngBytes, document.Config, frameIndex, frame => RawRgbaTransforms.RemoveBackground(frame, color, tolerance, feather)), cancellation.Token);
+                    visible = await Task.Run(() => AnimatedImageProcessor.TransformFrame(document.PngBytes, document.Config, frameIndex, frame => RawRgbaTransforms.RemoveBackground(frame, color, tolerance, feather, cancellation.Token), cancellation.Token), cancellation.Token);
                 }
                 else
                 {
-                    visible = await Task.Run(() => AnimatedImageProcessor.TransformAnimated(document.PngBytes, document.Config, frame => RawRgbaTransforms.RemoveBackground(frame, color, tolerance, feather)), cancellation.Token);
+                    visible = await Task.Run(() => AnimatedImageProcessor.TransformAnimated(document.PngBytes, document.Config, frame => RawRgbaTransforms.RemoveBackground(frame, color, tolerance, feather, cancellation.Token), cancellation.Token), cancellation.Token);
                 }
                 if (!ReferenceEquals(document, _controller.Document)) return;
                 _controller.CommitStorage(visible, recoveryStorage: _controller.GetRecoveryStorage());
@@ -751,7 +780,7 @@ public sealed class MainWindow : Window
         return Task.Run(() =>
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var result = RawRgbaTransforms.RemoveBackground(png, color, tolerance, feather);
+            var result = RawRgbaTransforms.RemoveBackground(png, color, tolerance, feather, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             return result;
         }, cancellationToken);
@@ -912,7 +941,7 @@ public sealed class MainWindow : Window
     private void RefreshChrome()
     {
         var dirty = _controller.IsDirty ? " *" : string.Empty;
-        Title = $"Gelatin 0.1.5 — {_controller.Document.Config.AssetName}{dirty}";
+        Title = $"Gelatin {GelatinProduct.Version} — {_controller.Document.Config.AssetName}{dirty}";
         var config = _controller.Document.Config;
         var animation = config.Animation is { } animated ? $"   |   {animated.Frames.Count} animated frame(s)" : string.Empty;
         _status.Text = $"{config.Image.Width} × {config.Image.Height} px{animation}   |   {config.Cores.Count} core(s)   |   {config.RigidityStrokes.Count} rigidity stroke(s)   |   {(_controller.IsDirty ? "Unsaved changes" : Path.GetFileName(_controller.CurrentPath))}";

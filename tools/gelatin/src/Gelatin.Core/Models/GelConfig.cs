@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Text.Json.Serialization;
+using Gelatin.Core;
 using Gelatin.Core.Runtime;
 
 namespace Gelatin.Core.Models;
@@ -167,13 +168,13 @@ public sealed class AuthoringConfig
     [JsonRequired]
     public string Tool { get; set; } = "Gelatin";
     [JsonRequired]
-    public string ToolVersion { get; set; } = "0.1.5";
+    public string ToolVersion { get; set; } = GelatinProduct.Version;
 }
 
 public sealed class GelDocument
 {
     public required GelConfig Config { get; init; }
-    // Schema 1: a single processed PNG. Schema 2: the animation atlas PNG.
+    // schemaVersion selects image storage representation: 1 = one PNG, 2 = an animation atlas.
     public required byte[] PngBytes { get; init; }
 
     // Session-only recovery pixels for alpha Restore. For animated assets this is
@@ -185,6 +186,12 @@ public sealed class GelDocument
         Config = Config.DeepClone(),
         PngBytes = (byte[])PngBytes.Clone(),
         RecoveryPngBytes = RecoveryPngBytes is null ? null : (byte[])RecoveryPngBytes.Clone()
+    };
+
+    public GelDocument DeepCloneWithoutRecovery() => new()
+    {
+        Config = Config.DeepClone(),
+        PngBytes = (byte[])PngBytes.Clone()
     };
 }
 
