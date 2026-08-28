@@ -5,6 +5,7 @@ on:
     paths:
       - ".github/workflows/gelatin-cleanup.yml"
       - ".github/scripts/gelatin_cleanup.py"
+      - ".github/scripts/gelatin_cleanup_fix.py"
 
 permissions:
   contents: write
@@ -30,6 +31,9 @@ jobs:
       - name: Apply cleanup patch
         run: python .github/scripts/gelatin_cleanup.py
 
+      - name: Apply validation fixes
+        run: python .github/scripts/gelatin_cleanup_fix.py
+
       - name: Restore
         working-directory: tools/gelatin
         run: dotnet restore Gelatin.sln
@@ -41,6 +45,28 @@ jobs:
       - name: Run tests
         working-directory: tools/gelatin
         run: dotnet test Gelatin.sln -c Release --no-build
+
+      - name: Publish Windows x64 package
+        shell: pwsh
+        run: tools/gelatin/scripts/publish.ps1
+
+      - name: Smoke test packaged executable
+        shell: pwsh
+        run: |
+          $executable = (Resolve-Path "tools/gelatin/dist/gelatin/Gelatin.exe").Path
+          $process = Start-Process -FilePath $executable -PassThru
+          try {
+            Start-Sleep -Seconds 8
+            if ($process.HasExited) {
+              throw "Packaged Gelatin.exe exited during startup smoke test with code $($process.ExitCode)."
+            }
+          }
+          finally {
+            if (-not $process.HasExited) {
+              Stop-Process -Id $process.Id -Force
+              Wait-Process -Id $process.Id -ErrorAction SilentlyContinue
+            }
+          }
 
       - name: Commit cleanup
         shell: pwsh
