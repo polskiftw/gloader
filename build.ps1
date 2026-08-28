@@ -22,6 +22,8 @@ dotnet publish $Project -c Release -o $Publish
 Move-Item (Join-Path $Publish "gloader.exe") (Join-Path $Dist "gloader.exe") -Force
 Get-ChildItem $Publish -Force | Move-Item -Destination $Deps -Force
 Copy-Item (Join-Path $Mods "*") $ModsOut -Recurse -Force
+Copy-Item (Join-Path $Root "LICENSE.md") (Join-Path $Deps "LICENSE.md") -Force
+Copy-Item (Join-Path $Root "THIRD-PARTY-NOTICES.txt") (Join-Path $Deps "THIRD-PARTY-NOTICES.txt") -Force
 Remove-Item $Publish -Recurse -Force
 
 Write-Host ""

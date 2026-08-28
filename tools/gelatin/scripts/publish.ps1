@@ -2,10 +2,13 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $ToolRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$RepoRoot = Split-Path -Parent (Split-Path -Parent $ToolRoot)
 $Project = Join-Path $ToolRoot "src\Gelatin.App\Gelatin.App.csproj"
 $DistRoot = Join-Path $ToolRoot "dist"
 $PublishDirectory = Join-Path $DistRoot "gelatin"
 $Archive = Join-Path $DistRoot "gelatin-0.1.2-win-x64.zip"
+$License = Join-Path $RepoRoot "LICENSE.md"
+$ThirdPartyNotices = Join-Path $RepoRoot "THIRD-PARTY-NOTICES.txt"
 
 $env:AVALONIA_TELEMETRY_OPTOUT = "1"
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = "1"
@@ -33,6 +36,9 @@ $Executable = Join-Path $PublishDirectory "Gelatin.exe"
 if (-not (Test-Path $Executable -PathType Leaf)) {
     throw "Publish completed without the required Gelatin.exe."
 }
+
+Copy-Item $License (Join-Path $PublishDirectory "LICENSE.md") -Force
+Copy-Item $ThirdPartyNotices (Join-Path $PublishDirectory "THIRD-PARTY-NOTICES.txt") -Force
 
 Compress-Archive -Path (Join-Path $PublishDirectory "*") -DestinationPath $Archive -CompressionLevel Optimal -Force
 

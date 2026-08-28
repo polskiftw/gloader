@@ -225,3 +225,7 @@ dist/gloader/
 Copy the **contents** of `dist/gloader/` directly into the Terraria installation folder. The package adds `gloader.exe` plus two sibling folders: `gmods/` for mods and `gdeps/` for GLoader runtime/support files.
 
 Raw source mods execute with the same privileges as Terraria. Only use code you trust.
+
+## License and third-party software
+
+Original code and assets in this repository are licensed under the PolyForm Noncommercial License 1.0.0 unless a file says otherwise; see `LICENSE.md`. Third-party components bundled with GLoader or Gelatin remain under their own licenses, which are collected in `THIRD-PARTY-NOTICES.txt` and are not replaced by the PolyForm terms.
