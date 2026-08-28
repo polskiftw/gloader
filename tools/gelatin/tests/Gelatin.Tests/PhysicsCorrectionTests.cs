@@ -148,11 +148,13 @@ public sealed class PhysicsCorrectionTests
     [Fact]
     public void SelfCollisionAlsoSeparatesDifferentAlphaContourLoops()
     {
-        var document = TestAssets.Document(40, 20);
-        document.PngBytes = TestAssets.Png(40, 20, (x, y) =>
-            (x is >= 3 and <= 15 || x is >= 24 and <= 36) && y is >= 5 and <= 14 ? SKColors.White : SKColors.Transparent);
-        document.Config.Image.Width = 40;
-        document.Config.Image.Height = 20;
+        var baseDocument = TestAssets.Document(40, 20);
+        var document = new GelDocument
+        {
+            PngBytes = TestAssets.Png(40, 20, (x, y) =>
+                (x is >= 3 and <= 15 || x is >= 24 and <= 36) && y is >= 5 and <= 14 ? SKColors.White : SKColors.Transparent),
+            Config = baseDocument.Config
+        };
         document.Config.Cores = [];
         document.Config.RigidityStrokes = [];
         document.Config.Material = new MaterialConfig { Softness = 1, Damping = 0.2, AreaPreservation = 0, ShapeMemory = 0, BendResistance = 0, MaxStretch = 3, SelfCollision = true, SelfCollisionThickness = 0.04 };
