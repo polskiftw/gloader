@@ -57,7 +57,7 @@ jobs:
           Write-Host "Gelatin package SHA256: $hash"
 
       - name: Upload Gelatin artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: gelatin-0.1.2-win-x64
           path: tools/gelatin/dist/gelatin-0.1.2-win-x64.zip
