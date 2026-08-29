@@ -135,6 +135,9 @@ jobs:
           if ($anglerConfig -notmatch '(?im)^EnableParticipationCommands\s*=\s*true\s*$') {
             throw "Infinite Angler must ship with participation commands enabled by default."
           }
+          if ($anglerConfig -notmatch '(?im)^EnableDebugQuestFish\s*=\s*false\s*$') {
+            throw "Infinite Angler debug quest-fish helper must ship disabled by default."
+          }
 
           & $loader --target $target --mods $mods
           if ($LASTEXITCODE -ne 0) {
