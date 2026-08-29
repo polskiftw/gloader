@@ -280,9 +280,54 @@ internal static class RadioCatalog
         return true;
     }
 
+    internal static HashSet<string> ParseAdvertisedNightrideMounts(string html)
+    {
+        var mounts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (Match match in Regex.Matches(html ?? string.Empty, @"[?&]station=(?<mount>[a-z0-9_-]+)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+        {
+            var mount = RadioTaxonomy.Slug(match.Groups["mount"].Value);
+            if (mount.Length > 0 && !string.Equals(mount, "archives", StringComparison.OrdinalIgnoreCase))
+                mounts.Add(mount);
+        }
+        return mounts;
+    }
+
     private static List<Station> RefreshNightride()
     {
-        return ParseIcecastCatalog(RadioNet.DownloadText("https://stream.nightride.fm/status-json.xsl", 8000), "nightride", "Nightride FM", "https://nightride.fm/", "Electronic", "Synthwave");
+        var stations = ParseIcecastCatalog(
+            RadioNet.DownloadText("https://stream.nightride.fm/status-json.xsl", 8000),
+            "nightride", "Nightride FM", "https://nightride.fm/", "Electronic", "Synthwave");
+
+        HashSet<string> advertised;
+        try
+        {
+            // Rekt Network's current station selector includes the two REKT channels
+            // plus the seven Nightride-family stations. Intersect that authoritative
+            // advertised list with Icecast so reachable test/mystery mounts never leak
+            // into the built-in catalog.
+            advertised = ParseAdvertisedNightrideMounts(RadioNet.DownloadText("https://rekt.network/stations", 8000));
+        }
+        catch
+        {
+            // Last-known advertised public list. This is deliberately conservative:
+            // provider-page failure must not turn every reachable Icecast mount into a
+            // shipped station.
+            advertised = new HashSet<string>(new[]
+            {
+                "nightride", "chillsynth", "datawave", "spacesynth", "darksynth",
+                "horrorsynth", "ebsm", "rekt", "rektory"
+            }, StringComparer.OrdinalIgnoreCase);
+        }
+
+        if (advertised.Count == 0) return new List<Station>();
+        return stations.Where(station =>
+        {
+            var prefix = "nightride:";
+            var mount = station.Id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                ? station.Id.Substring(prefix.Length)
+                : string.Empty;
+            return advertised.Contains(mount);
+        }).ToList();
     }
 
     private static List<Station> Refresh181Fm() => Parse181FmLinks(RadioNet.DownloadText("https://www.181.fm/legacy.html", 10000));
@@ -348,7 +393,7 @@ internal static class RadioCatalog
         {
             { "nightride", "Nightride FM" }, { "chillsynth", "Chillsynth FM" }, { "darksynth", "Darksynth FM" },
             { "horrorsynth", "Horrorsynth FM" }, { "datawave", "Datawave FM" }, { "spacesynth", "Spacesynth FM" },
-            { "ebsm", "EBSM" }, { "rekt", "REKT" }, { "rektify", "REKTify" }, { "rektory", "REKTory" }, { "d-notive", "D-Notive" }
+            { "ebsm", "EBSM" }, { "rekt", "REKT" }, { "rektory", "REKTory" }
         };
         string name;
         if (special.TryGetValue(stem, out name)) return name;
