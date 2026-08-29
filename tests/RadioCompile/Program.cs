@@ -255,14 +255,22 @@ internal static class Program
             var resolved = RadioNet.ResolveStreamVariant(station, variant);
             return resolved.StartsWith("http", StringComparison.OrdinalIgnoreCase);
         });
-        Live("113.FM current Browse catalog", failures, () => RadioCatalog.ParseProviderStationLinks(RadioNet.DownloadText("https://113.fm/browse", 12000), "113fm", "113.FM", "https://113.fm/").Count >= 50);
-        Live("113.FM The Eagle official stream resolver", failures, () =>
+        Live("113.FM directory-backed provider catalog", failures, () =>
         {
-            var station = RadioCatalog.One("113fm:theeagle", "113.FM The Eagle", "113fm", "113.FM", "https://113.fm/theeagle", "Rock");
-            var variant = RadioCatalog.Variant("https://113.fm/theeagle", "mp3", 128, "station-page", "Official station-page resolver", "113fm");
-            return RadioNet.ResolveStreamVariant(station, variant).StartsWith("http", StringComparison.OrdinalIgnoreCase);
+            var stations = RadioDirectories.SearchRadioBrowser("113.FM", 250)
+                .Where(s => s.Name.IndexOf("113.FM", StringComparison.OrdinalIgnoreCase) >= 0 || s.HomePage.IndexOf("113.fm", StringComparison.OrdinalIgnoreCase) >= 0 || s.Streams.Any(v => v.Url.IndexOf("113fm", StringComparison.OrdinalIgnoreCase) >= 0 || v.Url.IndexOf("113.fm", StringComparison.OrdinalIgnoreCase) >= 0))
+                .ToList();
+            return stations.Count >= 50;
         });
-        Live("SceneSat current 320k MP3 ICY", failures, () => !string.IsNullOrWhiteSpace(RadioMetadata.ReadIcyStreamTitle("https://sj-1.scenesat.com/scenesatmax", 12000, 8)));
+        Live("113.FM representative public stream ICY", failures, () =>
+        {
+            var station = RadioDirectories.SearchRadioBrowser("113.FM", 250)
+                .First(s => s.Streams.Any(v => v.Url.IndexOf("113fm", StringComparison.OrdinalIgnoreCase) >= 0 || v.Url.IndexOf("113.fm", StringComparison.OrdinalIgnoreCase) >= 0));
+            var variant = StreamRanking.Rank(station.Streams).First();
+            var resolved = RadioNet.ResolveStreamVariant(station, variant);
+            return !string.IsNullOrWhiteSpace(RadioMetadata.ReadIcyStreamTitle(resolved, 12000, 8));
+        });
+        Live("SceneSat current 320k MP3 ICY", failures, () => TryIcy("http://Oscar.SceneSat.com:8000/scenesatmax") || TryIcy("http://Salyut80.SceneSat.com:80/scenesatmax"));
         Live("Radio Browser live search", failures, () => RadioDirectories.SearchRadioBrowser("jazz").Count > 0);
         Live("laut.fm live search", failures, () => RadioDirectories.SearchLautFm("rock").Count > 0);
         Live("GTT stream accepts ICY metadata", failures, () => !string.IsNullOrWhiteSpace(RadioMetadata.ReadIcyStreamTitle("https://icecast.gttradio.com/mp3_320k", 12000, 8)));
@@ -274,6 +282,12 @@ internal static class Program
         }
         Console.Error.WriteLine("FAIL: " + string.Join("; ", failures));
         return 2;
+    }
+
+    private static bool TryIcy(string url)
+    {
+        try { return !string.IsNullOrWhiteSpace(RadioMetadata.ReadIcyStreamTitle(url, 10000, 6)); }
+        catch { return false; }
     }
 
     private static void Live(string name, List<string> failures, Func<bool> probe)
