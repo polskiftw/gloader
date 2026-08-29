@@ -161,16 +161,7 @@ internal static class InfiniteAnglerDebugQuestFishRuntime
         _enabled = false;
         AllowedCharacterNames.Clear();
 
-        var modDirectory = AppDomain.CurrentDomain.GetData("GLoader.ModDirectory") as string;
-        if (string.IsNullOrWhiteSpace(modDirectory))
-        {
-            modDirectory = Path.Combine(
-                AppDomain.CurrentDomain.BaseDirectory,
-                "gmods",
-                "InfiniteAngler");
-        }
-
-        var configPath = Path.Combine(modDirectory, ConfigFileName);
+        var configPath = Path.Combine(ResolveModDirectory(), ConfigFileName);
         if (!File.Exists(configPath))
             return;
 
@@ -215,6 +206,32 @@ internal static class InfiniteAnglerDebugQuestFishRuntime
                     AllowedCharacterNames.Add(name);
             }
         }
+    }
+
+    private static string ResolveModDirectory()
+    {
+        // GLoader exposes this key only while Mod.Load() is running. Keep support for
+        // it in case initialization ever moves there, then reproduce GLoader's --mods
+        // resolution for the current lazy-on-first-packet initialization path.
+        var current = AppDomain.CurrentDomain.GetData("GLoader.ModDirectory") as string;
+        if (!string.IsNullOrWhiteSpace(current))
+            return current;
+
+        var args = Environment.GetCommandLineArgs();
+        for (var index = 1; index + 1 < args.Length; index++)
+        {
+            if (!string.Equals(args[index], "--mods", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var modsDirectory = (args[index + 1] ?? string.Empty).Trim().Trim('"');
+            if (!string.IsNullOrWhiteSpace(modsDirectory))
+                return Path.Combine(modsDirectory, "InfiniteAngler");
+        }
+
+        return Path.Combine(
+            AppDomain.CurrentDomain.BaseDirectory,
+            "gmods",
+            "InfiniteAngler");
     }
 
     private static bool PlayerHasItem(object player, int itemType, Array inventory)
@@ -265,7 +282,7 @@ internal static class InfiniteAnglerDebugQuestFishRuntime
         if (modern != null)
         {
             var source = CreateGiftSource(player, modern.GetParameters()[0].ParameterType);
-            modern.Invoke(player, new[] { source, (object)itemType, 1 });
+            modern.Invoke(player, new object[] { source, itemType, 1 });
             return;
         }
 
