@@ -87,7 +87,7 @@ internal static class RadioCatalog
             .WithStream("https://icecast.gttradio.com/mp3_320k", "mp3", 320, "direct")
             .WithMetadata(MetadataMode.Icy);
 
-        yield return One("radiosega:main", "RadioSEGA", "radiosega", "RadioSEGA", "https://www.radiosega.net/", "Video Game Music", "Soundtracks")
+        yield return One("radiosega:main", "RadioSEGA", "radiosega", "RadioSEGA", "https://www.radiosega.net/", "Video Game Music", "Soundtracks", "SEGA")
             .WithStream("https://icecast.radiosega.net/live", "aac", 96, "direct", "HE-AAC")
             .WithStream("https://icecast.radiosega.net/rs-mpeg.mp3", "mp3", 64, "direct", "MP3 fallback")
             .WithMetadata(MetadataMode.Icy);
@@ -100,6 +100,7 @@ internal static class RadioCatalog
             .WithStream("http://Oscar.SceneSat.com:8000/scenesatmax", "mp3", 320, "direct", "320k MP3")
             .WithStream("http://Salyut80.SceneSat.com:80/scenesatmax", "mp3", 320, "direct", "320k MP3 port-80 fallback")
             .WithStream("https://sj-1.scenesat.com/scenesatmax", "mp3", 320, "direct", "320k MP3 HTTPS fallback")
+            .WithStream("http://SC.SceneSat.com:8000", "mp3", 128, "direct", "128k MP3 fallback")
             .WithMetadata(MetadataMode.Icy);
 
         yield return One("slay:main", "SLAY Radio", "slay", "SLAY Radio", "https://www.slayradio.org/", "Chiptune", "Demoscene", "Electronic")
@@ -332,37 +333,7 @@ internal static class RadioCatalog
 
     private static List<Station> Refresh181Fm() => Parse181FmLinks(RadioNet.DownloadText("https://www.181.fm/legacy.html", 10000));
     private static List<Station> RefreshRadcap() => ParseProviderStationLinks(RadioNet.DownloadText("https://radcap.ru/index-db.html", 12000), "radcap", "Radio Caprice", "https://radcap.ru/");
-
-    private static List<Station> Refresh113Fm()
-    {
-        var stations = new List<Station>();
-        try
-        {
-            stations.AddRange(ParseProviderStationLinks(RadioNet.DownloadText("https://113.fm/browse", 8000), "113fm", "113.FM", "https://113.fm/"));
-        }
-        catch { }
-
-        // The public website currently advertises 95+ free channels while its old
-        // /browse and per-station routes intermittently return 404/redirect elsewhere.
-        // Build the runtime provider catalog from healthy Radio Browser records when
-        // those pages are unavailable, rather than dropping the entire provider.
-        foreach (var directoryStation in RadioDirectories.SearchRadioBrowser("113.FM", 250))
-        {
-            var belongs = directoryStation.Name.IndexOf("113.FM", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                          directoryStation.HomePage.IndexOf("113.fm", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                          directoryStation.Streams.Any(stream => (stream.Url ?? string.Empty).IndexOf("113fm", StringComparison.OrdinalIgnoreCase) >= 0 || (stream.Url ?? string.Empty).IndexOf("113.fm", StringComparison.OrdinalIgnoreCase) >= 0);
-            if (!belongs || directoryStation.Streams.Count == 0) continue;
-            if (stations.Any(station => string.Equals(station.Name, directoryStation.Name, StringComparison.OrdinalIgnoreCase))) continue;
-            var uuid = directoryStation.Id.StartsWith("radiobrowser:", StringComparison.OrdinalIgnoreCase) ? directoryStation.Id.Substring("radiobrowser:".Length) : RadioTaxonomy.StableHash(directoryStation.Name);
-            var station = One("113fm:rb-" + uuid, directoryStation.Name, "113fm", "113.FM", string.IsNullOrWhiteSpace(directoryStation.HomePage) ? "https://113.fm/" : directoryStation.HomePage, directoryStation.Tags.ToArray());
-            station.SourcePage = "Radio Browser provider discovery";
-            station.Streams.AddRange(directoryStation.Streams.Select(stream => stream.Clone()));
-            station.MetadataMode = MetadataMode.Icy;
-            station.AddDecades(directoryStation.Decades.ToArray());
-            stations.Add(station);
-        }
-        return stations;
-    }
+    private static List<Station> Refresh113Fm() => Radio113Fm.Discover();
 
     internal static Station One(string id, string name, string provider, string providerDisplay, string homePage, params string[] tags)
     {
@@ -417,12 +388,15 @@ internal static class RadioCatalog
         var map = new[]
         {
             new[] { "synth", "Synthwave" }, new[] { "electro", "Electronic" }, new[] { "trance", "Trance" }, new[] { "dance", "Dance" },
-            new[] { "rock", "Rock" }, new[] { "metal", "Rock" }, new[] { "pop", "Pop" }, new[] { "rap", "Hip-Hop" }, new[] { "hip hop", "Hip-Hop" },
-            new[] { "jazz", "Jazz" }, new[] { "classical", "Classical" }, new[] { "ambient", "Ambient" }, new[] { "lounge", "Lounge" },
-            new[] { "country", "Country" }, new[] { "oldies", "Oldies" }, new[] { "comedy", "Comedy" }, new[] { "christmas", "Holiday" },
-            new[] { "chiptune", "Chiptune" }, new[] { "game", "Video Game Music" }, new[] { "soundtrack", "Soundtracks" }
+            new[] { "rock", "Rock" }, new[] { "pop", "Pop" }, new[] { "rap", "Hip-Hop" }, new[] { "hip hop", "Hip-Hop" },
+            new[] { "r&b", "R&B" }, new[] { "rnb", "R&B" }, new[] { "soul", "Soul" }, new[] { "funk", "Funk" },
+            new[] { "jazz", "Jazz" }, new[] { "blues", "Blues" }, new[] { "classical", "Classical" }, new[] { "ambient", "Ambient" }, new[] { "lounge", "Lounge" },
+            new[] { "country", "Country" }, new[] { "folk", "Folk" }, new[] { "bluegrass", "Bluegrass" }, new[] { "world", "World" },
+            new[] { "reggae", "Reggae" }, new[] { "ska", "Reggae" }, new[] { "oldies", "Oldies" }, new[] { "comedy", "Comedy" }, new[] { "christmas", "Holiday" },
+            new[] { "chiptune", "Chiptune" }, new[] { "game", "Video Game Music" }, new[] { "soundtrack", "Soundtracks" }, new[] { "touhou", "Touhou" }
         };
         foreach (var pair in map) if (value.Contains(pair[0])) station.AddTags(pair[1]);
+        if (value.Contains("metal")) station.AddTags("Metal", "Rock");
         var decade = RadioTaxonomy.InferDecade(value);
         if (decade > 0) station.AddDecades(decade);
     }
