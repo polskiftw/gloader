@@ -13,6 +13,7 @@ internal sealed class RadioState
     public float Volume = 1f;
     public readonly HashSet<string> Favorites = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     public readonly List<string> Recents = new List<string>();
+    public readonly Dictionary<string, Station> SavedStations = new Dictionary<string, Station>(StringComparer.OrdinalIgnoreCase);
 }
 
 internal static class RadioPersistence
@@ -36,12 +37,14 @@ internal static class RadioPersistence
     internal static void SaveState(string modDirectory, RadioState state)
     {
         if (string.IsNullOrWhiteSpace(modDirectory) || state == null) return;
+        PruneSavedStations(state);
         var root = new Dictionary<string, object>
         {
-            { "version", 1 }, { "selectedStationId", state.SelectedStationId ?? string.Empty },
+            { "version", 2 }, { "selectedStationId", state.SelectedStationId ?? string.Empty },
             { "playing", state.Playing }, { "songNotifications", state.SongNotifications },
             { "volume", state.Volume }, { "favorites", state.Favorites.OrderBy(v => v, StringComparer.OrdinalIgnoreCase).Cast<object>().ToList() },
-            { "recents", state.Recents.Take(RecentLimit).Cast<object>().ToList() }
+            { "recents", state.Recents.Take(RecentLimit).Cast<object>().ToList() },
+            { "savedStations", state.SavedStations.Values.OrderBy(station => station.Name, StringComparer.OrdinalIgnoreCase).Select(SerializeStation).Cast<object>().ToList() }
         };
         AtomicWrite(Path.Combine(modDirectory, "Radio.state.json"), MiniJson.Stringify(root));
     }
@@ -52,6 +55,14 @@ internal static class RadioPersistence
         state.Recents.RemoveAll(value => string.Equals(value, id, StringComparison.OrdinalIgnoreCase));
         state.Recents.Insert(0, id);
         while (state.Recents.Count > RecentLimit) state.Recents.RemoveAt(state.Recents.Count - 1);
+        PruneSavedStations(state);
+    }
+
+    internal static void RememberLiveStation(RadioState state, Station station)
+    {
+        if (state == null || station == null || !station.LiveDirectory || string.IsNullOrWhiteSpace(station.Id)) return;
+        state.SavedStations[station.Id] = station;
+        PruneSavedStations(state);
     }
 
     internal static List<Station> LoadCustomStations(string modDirectory)
@@ -201,6 +212,23 @@ internal static class RadioPersistence
         if (favorites != null) foreach (var value in favorites) state.Favorites.Add(Convert.ToString(value, CultureInfo.InvariantCulture));
         var recents = JsonValue.ChildArray(root, "recents");
         if (recents != null) foreach (var value in recents.Take(RecentLimit)) state.Recents.Add(Convert.ToString(value, CultureInfo.InvariantCulture));
+        foreach (var station in DeserializeStations(JsonValue.ChildArray(root, "savedStations")))
+        {
+            station.BuiltIn = false;
+            station.LiveDirectory = true;
+            state.SavedStations[station.Id] = station;
+        }
+        PruneSavedStations(state);
+    }
+
+    private static void PruneSavedStations(RadioState state)
+    {
+        if (state == null || state.SavedStations.Count == 0) return;
+        var keep = new HashSet<string>(state.Favorites, StringComparer.OrdinalIgnoreCase);
+        foreach (var id in state.Recents.Take(RecentLimit)) keep.Add(id);
+        if (!string.IsNullOrWhiteSpace(state.SelectedStationId)) keep.Add(state.SelectedStationId);
+        foreach (var id in state.SavedStations.Keys.Where(id => !keep.Contains(id)).ToArray())
+            state.SavedStations.Remove(id);
     }
 
     private static Dictionary<string, object> SerializeStation(Station station)
@@ -208,7 +236,9 @@ internal static class RadioPersistence
         return new Dictionary<string, object>
         {
             { "id", station.Id }, { "name", station.Name }, { "provider", station.Provider }, { "providerDisplay", station.ProviderDisplay },
-            { "homePage", station.HomePage }, { "tags", station.Tags.Cast<object>().ToList() }, { "decades", station.Decades.Cast<object>().ToList() },
+            { "homePage", station.HomePage }, { "builtIn", station.BuiltIn }, { "liveDirectory", station.LiveDirectory },
+            { "directorySource", station.DirectorySource }, { "metadataVerified", station.MetadataVerified },
+            { "tags", station.Tags.Cast<object>().ToList() }, { "decades", station.Decades.Cast<object>().ToList() },
             { "metadataMode", station.MetadataMode.ToString() }, { "metadataUrl", station.MetadataUrl }, { "sourcePage", station.SourcePage },
             { "streams", station.Streams.Select(stream => (object)new Dictionary<string, object>
                 {
@@ -227,6 +257,10 @@ internal static class RadioPersistence
             var obj = item as Dictionary<string, object>;
             if (obj == null) continue;
             var station = RadioCatalog.One(JsonValue.String(obj, "id"), JsonValue.String(obj, "name"), JsonValue.String(obj, "provider"), JsonValue.String(obj, "providerDisplay"), JsonValue.String(obj, "homePage"));
+            station.BuiltIn = JsonValue.Bool(obj, "builtIn", true);
+            station.LiveDirectory = JsonValue.Bool(obj, "liveDirectory", false);
+            station.DirectorySource = JsonValue.String(obj, "directorySource");
+            station.MetadataVerified = JsonValue.Bool(obj, "metadataVerified", false);
             var tags = JsonValue.ChildArray(obj, "tags");
             if (tags != null) foreach (var tag in tags) station.AddTags(Convert.ToString(tag, CultureInfo.InvariantCulture));
             var decades = JsonValue.ChildArray(obj, "decades");
