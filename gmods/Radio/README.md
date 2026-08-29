@@ -44,11 +44,11 @@ The v1 provider adapters are intentionally split between small stable catalogs a
 - **RadioSEGA** — best compatible public AAC stream first and MP3 fallback; ICY now playing. Unsupported higher-nominal-quality formats are not chosen by this playback backend.
 - **Gensokyo Radio** — compatible public stream resolved at runtime; provider-page metadata fallback.
 - **CVGM** — current official stream-page resolver, preferring the 192 kbps MP3 relays; ICY metadata.
-- **SceneSat** — the current listen menu advertises a public high-bandwidth/max-quality MP3 option and lower MP3 fallback. Its legacy max-quality M3U link currently returns 404, so Radio uses the underlying public 320 kbps Icecast mounts directly, retains 128 kbps direct fallbacks, and has a healthy public-directory fallback.
+- **SceneSat** — the current listen menu advertises a public high-bandwidth/max-quality MP3 option and lower MP3 fallback. Its legacy max-quality M3U link currently returns 404, so Radio uses the underlying public 320 kbps Icecast mounts directly, retains 128 kbps direct fallbacks, and has a public-directory fallback. GitHub-hosted Azure runners do not consistently reach SceneSat's web/Icecast hosts, so SceneSat reachability is reported as a non-gating advisory in the live CI rather than turning runner routing into a release blocker.
 - **SLAY Radio** — public 128 kbps MP3 relays; ICY metadata.
 - **181.FM** — full current public legacy catalog is parsed and cached. The current verification pass found 77 channels. 128 kbps MP3 is preferred over the 64 kbps AAC fallback.
 - **Radio Caprice / RADCAP** — full current provider database is parsed and cached. The current verification pass found 517 station pages. Station pages resolve lazily and prefer the provider's 320 kbps compatible path when present.
-- **113.FM** — current public stream families are probed in parallel instead of relying on the provider's intermittently available old browse routes. A candidate must expose an identifiable station name **and actual track-like ICY metadata**. Duplicate delivery-network copies of the same named station are merged into one logical catalog entry with multiple stream fallbacks.
+- **113.FM** — current public stream families are probed in parallel instead of relying on the provider's intermittently available old browse routes. A candidate must expose an identifiable station name **and actual track-like ICY metadata**. Duplicate delivery-network copies of the same named station are merged into one logical catalog entry with multiple stream fallbacks. The live verification pass has consistently found well above the 60-station completeness floor, with counts varying as individual channels come and go.
 
 Remote provider-catalog refresh happens on background threads and never blocks Terraria startup. The last successful generated catalog is stored in `catalog-cache.json` for up to 14 days. It is a cache, not a hand-maintained source-of-truth list.
 
@@ -65,6 +65,8 @@ Remote provider-catalog refresh happens on background threads and never blocks T
 - **Radio Browser** — healthy, compatible-codec results using stable station UUIDs and rotating API mirrors.
 
 Live-directory stations are visually labeled as such. They are not silently promoted into the vetted built-in catalog. Radio Browser click accounting is sent when one of its stations is selected, per the directory API guidance.
+
+If a live-directory station becomes selected, favorited, or recent, Radio also persists the station definition and stream data needed to restore that entry after a restart. Saved live definitions are pruned once they are no longer selected, favorite, or recent, so the state file does not grow into a second directory cache.
 
 ## Metadata and health
 
@@ -89,11 +91,12 @@ Audio health states are `Unknown`, `Online`, `Buffering`, `Reconnecting`, `Offli
 - Radio volume;
 - song-change popup preference;
 - favorites;
-- recents.
+- recents;
+- the minimal live-directory station definitions needed to restore selected/favorite/recent live entries.
 
 Writes are atomic.
 
-On first run, if an old sibling `VGMRadio/VGMRadio.ini` still exists, Radio migrates the selected Rainwave/GTT station and now-playing-popup preference. gloader also suppresses a leftover legacy `VGMRadio` source folder whenever the new `Radio` mod is installed, so copying a new release over an old installation cannot accidentally start two radio clients. The old folder may be deleted after migration, but it does not need to be manually renamed before the first Radio launch.
+**VGMRadio is retired and is no longer shipped as a separate mod.** On first run, if an old sibling `VGMRadio/VGMRadio.ini` still exists, Radio migrates the selected Rainwave/GTT station and now-playing-popup preference. gloader also suppresses a leftover legacy `VGMRadio` source folder whenever the new `Radio` mod is installed, so copying a new release over an old installation cannot accidentally start two radio clients. The old folder may be deleted after migration, but it does not need to be manually renamed before the first Radio launch.
 
 ## Custom stations
 
@@ -126,6 +129,8 @@ Fields:
 
 `tests/RadioCompile` compiles every Radio source file with the same `GLOADER`/`GLOADER_CLIENT` symbols used by gloader and runs deterministic regressions for JSON, ICY, Rainwave, laut.fm, metadata-change verification, stream ranking, taxonomy, custom-station error isolation, persistence, VGMRadio settings migration, provider catalog parsers, station-page URL resolution, Radio Browser parsing, and station-switch generation/buffer invalidation.
 
+`tests/RadioPolicyCompile` covers browser/provider policy that is easy to regress silently: advertised-only Nightride mounts, decade subfilters, taxonomy-aware free-text queries such as `80s rap`, favorites/verification ranking, quality/fallback ordering, and persistence of live-directory favorites/recents.
+
 `tests/ModDiscoveryCompile` verifies the overlay-upgrade rule: a leftover `VGMRadio` folder is ignored only when `Radio` is actually installed, and unrelated mods remain discoverable.
 
-`.github/workflows/radio-live-smoke.yml` is the separate network/provider truth check. It re-fetches current provider APIs/catalogs/streams/metadata so provider breakage is visible without turning deterministic compilation into an internet-dependent test. The normal `gloader` workflow still builds, tests, publishes, validates the package layout, and runs the existing Host & Play integration fixture on GitHub's Windows runner.
+`.github/workflows/radio-live-smoke.yml` is the separate network/provider truth check. It re-fetches current provider APIs/catalogs/streams/metadata so provider breakage is visible without turning deterministic compilation into an internet-dependent test. The normal `gloader` workflow still builds, tests, publishes, validates the package layout (including asserting that retired VGMRadio is absent), and runs the existing Host & Play integration fixture on GitHub's Windows runner.
