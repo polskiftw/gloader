@@ -61,20 +61,25 @@ internal static class Radio113Fm
             .ThenBy(station => station.Id, StringComparer.OrdinalIgnoreCase)
             .First();
 
+        // Snapshot streams before clearing the chosen object: for a non-mirrored
+        // station `first` is also the only item in this list.
+        var mergedStreams = items
+            .SelectMany(station => station.Streams)
+            .Where(stream => stream != null && !string.IsNullOrWhiteSpace(stream.Url))
+            .GroupBy(stream => stream.Url, StringComparer.OrdinalIgnoreCase)
+            .Select(grouping => grouping.First().Clone())
+            .ToList();
+
         var stableName = first.Name.StartsWith("113.FM ", StringComparison.OrdinalIgnoreCase)
             ? first.Name.Substring("113.FM ".Length)
             : first.Name;
         first.Id = "113fm:" + RadioTaxonomy.Slug(stableName);
         first.Streams.Clear();
+        first.Streams.AddRange(mergedStreams);
         foreach (var station in items)
         {
             first.AddTags(station.Tags.ToArray());
             first.AddDecades(station.Decades.ToArray());
-            foreach (var stream in station.Streams)
-            {
-                if (!first.Streams.Any(existing => string.Equals(existing.Url, stream.Url, StringComparison.OrdinalIgnoreCase)))
-                    first.Streams.Add(stream.Clone());
-            }
         }
         return first;
     }
