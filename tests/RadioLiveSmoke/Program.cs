@@ -88,10 +88,10 @@ internal static class Program
 
         Probe("SceneSat current quality advertisement + reachable fallback", () =>
         {
-            var page = RadioNet.DownloadText("https://www.scenesat.com/listenmenu", 12000);
-            var advertises320 = page.IndexOf("320", StringComparison.OrdinalIgnoreCase) >= 0 &&
-                                page.IndexOf("mp3", StringComparison.OrdinalIgnoreCase) >= 0;
-            var advertises128 = page.IndexOf("128", StringComparison.OrdinalIgnoreCase) >= 0;
+            var page = RadioNet.DownloadText("https://www.scenesat.com/listentous", 12000);
+            var advertises320 = page.IndexOf("320kbps", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                                page.IndexOf("MP3", StringComparison.OrdinalIgnoreCase) >= 0;
+            var advertises128 = page.IndexOf("128kbps", StringComparison.OrdinalIgnoreCase) >= 0;
             if (!advertises320 || !advertises128) return false;
 
             if (ProbeAudio("http://Oscar.SceneSat.com:8000/scenesatmax", 5000) ||
