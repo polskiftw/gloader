@@ -86,22 +86,25 @@ internal static class Program
             return variant != null && ProbeAudio(variant.Url, 8000);
         });
 
-        Probe("SceneSat current quality advertisement + reachable fallback", () =>
+        Probe("SceneSat current max-quality MP3 + reachable fallback", () =>
         {
-            var page = RadioNet.DownloadText("https://www.scenesat.com/listentous", 12000);
-            var advertises320 = page.IndexOf("320kbps", StringComparison.OrdinalIgnoreCase) >= 0 &&
-                                page.IndexOf("MP3", StringComparison.OrdinalIgnoreCase) >= 0;
-            var advertises128 = page.IndexOf("128kbps", StringComparison.OrdinalIgnoreCase) >= 0;
-            if (!advertises320 || !advertises128) return false;
+            // SceneSat's current listen menu still advertises a public "High bandwidth,
+            // max quality - MP3" option. Its linked legacy M3U is presently 404, so the
+            // mod deliberately uses the underlying public Icecast mounts plus a healthy
+            // Radio Browser fallback instead of trusting that stale playlist link.
+            var page = RadioNet.DownloadText("https://scenesat.com/listenmenu", 12000);
+            var advertisesMaxMp3 = page.IndexOf("High bandwidth, max quality - MP3", StringComparison.OrdinalIgnoreCase) >= 0;
+            var advertisesFallbackMp3 = page.IndexOf("medium quality - MP3", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (!advertisesMaxMp3 || !advertisesFallbackMp3) return false;
 
             if (ProbeAudio("http://Oscar.SceneSat.com:8000/scenesatmax", 5000) ||
                 ProbeAudio("http://Salyut80.SceneSat.com:80/scenesatmax", 5000) ||
                 ProbeAudio("http://SC.SceneSat.com:8000", 5000))
                 return true;
 
-            // GitHub's hosted Azure network currently cannot route to several SceneSat
-            // Icecast hosts. Radio Browser's lastcheckok=true gives an independent live
-            // health signal rather than treating an Azure routing failure as a dead station.
+            // GitHub's hosted Azure network cannot always route to SceneSat's Icecast
+            // hosts. A healthy compatible current Radio Browser record is an independent
+            // live signal when that runner-specific route is unavailable.
             return RadioDirectories.SearchRadioBrowser("SceneSat", 30)
                 .Any(s => StreamRanking.Rank(s.Streams).Count > 0);
         });
