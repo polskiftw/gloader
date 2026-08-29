@@ -139,7 +139,15 @@ internal static class RadioTaxonomy
             !string.Equals(category, "Favorites", StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(category, "Recent", StringComparison.OrdinalIgnoreCase) &&
             !MatchesTagOrName(station, category)) return false;
-        if (!string.IsNullOrWhiteSpace(subcategory) && !MatchesTagOrName(station, subcategory)) return false;
+        if (!string.IsNullOrWhiteSpace(subcategory))
+        {
+            var subcategoryDecade = InferDecade(subcategory);
+            if (subcategoryDecade > 0)
+            {
+                if (!station.Decades.Contains(subcategoryDecade)) return false;
+            }
+            else if (!MatchesTagOrName(station, subcategory)) return false;
+        }
         if (decade > 0 && !station.Decades.Contains(decade)) return false;
         if (string.IsNullOrWhiteSpace(query)) return true;
 
