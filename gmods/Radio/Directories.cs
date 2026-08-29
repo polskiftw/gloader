@@ -89,12 +89,17 @@ internal static class RadioDirectories
     internal static List<Station> SearchRadioBrowser(string query, int limit = 30)
     {
         limit = Math.Max(1, Math.Min(250, limit));
+        // 113.FM's current public directory records are not consistently punctuated
+        // ("113.FM", "113FM", and "113.fm" all exist). A punctuation-free provider
+        // query catches the complete family, after which callers still filter provider
+        // identity/homepage/stream hosts before treating results as 113.FM stations.
+        var effectiveQuery = string.Equals(query, "113.FM", StringComparison.OrdinalIgnoreCase) ? "113" : query;
         Exception last = null;
         foreach (var baseUrl in RadioBrowserServers())
         {
             try
             {
-                var url = baseUrl + "/json/stations/search?hidebroken=true&limit=" + limit + "&order=bitrate&reverse=true&name=" + Uri.EscapeDataString(query);
+                var url = baseUrl + "/json/stations/search?hidebroken=true&limit=" + limit + "&order=bitrate&reverse=true&name=" + Uri.EscapeDataString(effectiveQuery);
                 var root = MiniJson.Parse(RadioNet.DownloadText(url, 9000)) as List<object>;
                 return ParseRadioBrowserResults(root);
             }
