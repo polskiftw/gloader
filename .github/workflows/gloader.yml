@@ -44,7 +44,6 @@ jobs:
           dotnet restore tests/NoLiquidDupeCompile/NoLiquidDupeCompile.csproj
           dotnet restore tests/RadioCompile/RadioCompile.csproj
           dotnet restore tests/RadioPolicyCompile/RadioPolicyCompile.csproj
-          dotnet restore tests/VGMRadioCompile/VGMRadioCompile.csproj
           dotnet restore tests/ModDiscoveryCompile/ModDiscoveryCompile.csproj
           dotnet restore tests/HostPlayFixture/Client.csproj
           dotnet restore tests/HostPlayFixture/Server.csproj
@@ -57,7 +56,6 @@ jobs:
           dotnet build tests/NoLiquidDupeCompile/NoLiquidDupeCompile.csproj -c Release --no-restore
           dotnet build tests/RadioCompile/RadioCompile.csproj -c Release --no-restore
           dotnet build tests/RadioPolicyCompile/RadioPolicyCompile.csproj -c Release --no-restore
-          dotnet build tests/VGMRadioCompile/VGMRadioCompile.csproj -c Release --no-restore
           dotnet build tests/ModDiscoveryCompile/ModDiscoveryCompile.csproj -c Release --no-restore
           dotnet build tests/HostPlayFixture/Client.csproj -c Release --no-restore
           dotnet build tests/HostPlayFixture/Server.csproj -c Release --no-restore
@@ -84,14 +82,6 @@ jobs:
           & "tests/ModDiscoveryCompile/bin/Release/net48/ModDiscoveryCompile.exe"
           if ($LASTEXITCODE -ne 0) {
             throw "Mod discovery migration regression failed with exit code $LASTEXITCODE"
-          }
-
-      - name: VGMRadio legacy regression test
-        shell: pwsh
-        run: |
-          & "tests/VGMRadioCompile/bin/Release/net48/VGMRadioCompile.exe"
-          if ($LASTEXITCODE -ne 0) {
-            throw "VGMRadio legacy regression test failed with exit code $LASTEXITCODE"
           }
 
       - name: Publish
@@ -122,7 +112,11 @@ jobs:
           }
 
           if (-not (Test-Path "dist/gloader/gmods/Radio/Main.cs")) {
-            throw "Published package must contain the new Radio mod."
+            throw "Published package must contain the General Radio mod."
+          }
+
+          if (Test-Path "dist/gloader/gmods/VGMRadio") {
+            throw "VGMRadio is retired and must not be shipped as a separate mod."
           }
 
       - name: Steam Host & Play + Infinite Angler raw packet-82 integration test
@@ -174,17 +168,7 @@ jobs:
             --repo "${{ github.repository }}" `
             --target "${{ github.sha }}" `
             --title "gloader v$env:RELEASE_VERSION" `
-            --notes "Replaces DVDLogo's classic DVD mark asset with the new owl mascot while preserving the existing bouncing/color-change behavior and configuration. This release also includes the repository licensing and third-party notice packaging added since v0.1.17-alpha."
-
-      - name: Refresh owl release notes
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.head_commit.message == 'Refresh 0.1.18-alpha release notes'
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release edit "v0.1.18-alpha" `
-            --repo "${{ github.repository }}" `
-            --notes "Replaces DVDLogo's classic DVD mark asset with the new owl mascot while preserving the existing bouncing/color-change behavior and configuration. This release also includes the repository licensing and third-party notice packaging added since v0.1.17-alpha."
+            --notes "Adds General Radio v1: a pause-menu internet-radio browser with unified public provider catalogs, live directory discovery, metadata, favorites/recents, custom stations, resilient playback, and VGMRadio migration/retirement."
 
       - name: Upload
         uses: actions/upload-artifact@v4
