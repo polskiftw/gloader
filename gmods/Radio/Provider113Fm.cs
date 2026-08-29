@@ -22,7 +22,7 @@ internal static class Radio113Fm
                 return _cached.ToList();
         }
 
-        var found = new ConcurrentDictionary<string, Station>(StringComparer.OrdinalIgnoreCase);
+        var found = new ConcurrentBag<Station>();
         var candidates = BuildCandidates().ToArray();
         Parallel.ForEach(
             candidates,
@@ -31,10 +31,16 @@ internal static class Radio113Fm
             {
                 Station station;
                 if (!TryProbe(candidate, out station) || station == null) return;
-                found.TryAdd(station.Id, station);
+                found.Add(station);
             });
 
-        var result = found.Values
+        // 113.FM currently mirrors some named channels across both StreamGuys and
+        // CDNStream IDs. Present one logical station and retain every validated URL as
+        // ranked failover instead of inflating the catalog with duplicate rows.
+        var result = found
+            .GroupBy(station => station.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(MergeNamedStation)
+            .Where(station => station != null)
             .OrderBy(station => station.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
@@ -44,6 +50,33 @@ internal static class Radio113Fm
             _cachedUtc = DateTime.UtcNow;
             return _cached.ToList();
         }
+    }
+
+    private static Station MergeNamedStation(IGrouping<string, Station> group)
+    {
+        var items = group == null ? new List<Station>() : group.ToList();
+        if (items.Count == 0) return null;
+        var first = items
+            .OrderByDescending(station => StreamRanking.Rank(station.Streams).FirstOrDefault()?.BitrateKbps ?? 0)
+            .ThenBy(station => station.Id, StringComparer.OrdinalIgnoreCase)
+            .First();
+
+        var stableName = first.Name.StartsWith("113.FM ", StringComparison.OrdinalIgnoreCase)
+            ? first.Name.Substring("113.FM ".Length)
+            : first.Name;
+        first.Id = "113fm:" + RadioTaxonomy.Slug(stableName);
+        first.Streams.Clear();
+        foreach (var station in items)
+        {
+            first.AddTags(station.Tags.ToArray());
+            first.AddDecades(station.Decades.ToArray());
+            foreach (var stream in station.Streams)
+            {
+                if (!first.Streams.Any(existing => string.Equals(existing.Url, stream.Url, StringComparison.OrdinalIgnoreCase)))
+                    first.Streams.Add(stream.Clone());
+            }
+        }
+        return first;
     }
 
     private static IEnumerable<Candidate> BuildCandidates()
@@ -70,7 +103,7 @@ internal static class Radio113Fm
         {
             try
             {
-                var request = RadioNet.CreateRequest(url, 1800, true);
+                var request = RadioNet.CreateRequest(url, 2200, true);
                 request.KeepAlive = false;
                 request.ServicePoint.ConnectionLimit = Math.Max(request.ServicePoint.ConnectionLimit, 32);
                 using (var response = (HttpWebResponse)request.GetResponse())
@@ -88,9 +121,8 @@ internal static class Radio113Fm
 
                     var name = NormalizeStationName(rawName);
                     if (string.IsNullOrWhiteSpace(name)) continue;
-                    var id = "113fm:direct-" + candidate.Key;
-                    var result = RadioCatalog.One(id, name, "113fm", "113.FM", "https://113fmradio.com/", "Radio");
-                    result.SourcePage = "113.FM public free stream discovery";
+                    var result = RadioCatalog.One("113fm:probe-" + candidate.Key, name, "113fm", "113.FM", "https://113fmradio.com/", "Radio");
+                    result.SourcePage = "113.FM public free stream discovery; ICY track metadata observed";
                     result.Streams.Add(RadioCatalog.Variant(url, "mp3", bitrate, "direct", bitrate + "k MP3"));
                     result.MetadataMode = MetadataMode.Icy;
                     if (!string.IsNullOrWhiteSpace(rawGenre))
@@ -100,6 +132,13 @@ internal static class Radio113Fm
                     }
                     var decade = RadioTaxonomy.InferDecade(name + " " + rawGenre);
                     if (decade > 0) result.AddDecades(decade);
+
+                    // The handoff requires 113.FM entries to pass a metadata probe, not
+                    // merely answer HTTP. Read the stream's first few ICY blocks and
+                    // require a track-like title distinct from station branding.
+                    var title = TryReadIcyTitle(response, 4);
+                    if (!RadioMetadata.IsTrackLike(title, result)) continue;
+
                     station = result;
                     return true;
                 }
@@ -111,6 +150,42 @@ internal static class Radio113Fm
             }
         }
         return false;
+    }
+
+    private static string TryReadIcyTitle(HttpWebResponse response, int metadataBlocks)
+    {
+        if (response == null) return null;
+        int interval;
+        if (!int.TryParse(response.GetResponseHeader("icy-metaint"), NumberStyles.Integer, CultureInfo.InvariantCulture, out interval) || interval <= 0)
+            return null;
+        var stream = response.GetResponseStream();
+        if (stream == null) return null;
+        var skip = new byte[Math.Min(8192, Math.Max(1, interval))];
+        for (var block = 0; block < Math.Max(1, metadataBlocks); block++)
+        {
+            var remaining = interval;
+            while (remaining > 0)
+            {
+                var read = stream.Read(skip, 0, Math.Min(skip.Length, remaining));
+                if (read <= 0) return null;
+                remaining -= read;
+            }
+            var lengthByte = stream.ReadByte();
+            if (lengthByte < 0) return null;
+            var byteCount = lengthByte * 16;
+            if (byteCount <= 0) continue;
+            var metadata = new byte[byteCount];
+            var offset = 0;
+            while (offset < metadata.Length)
+            {
+                var read = stream.Read(metadata, offset, metadata.Length - offset);
+                if (read <= 0) return null;
+                offset += read;
+            }
+            var title = RadioMetadata.ExtractIcyStreamTitle(Encoding.UTF8.GetString(metadata).TrimEnd('\0'));
+            if (!string.IsNullOrWhiteSpace(title)) return title.Trim();
+        }
+        return null;
     }
 
     private static string NormalizeStationName(string rawName)
