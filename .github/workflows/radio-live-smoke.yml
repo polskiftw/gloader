@@ -4,10 +4,11 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - main
       - general-radio-v1
     paths:
       - "gmods/Radio/**"
-      - "tests/RadioCompile/**"
+      - "tests/RadioLiveSmoke/**"
       - ".github/workflows/radio-live-smoke.yml"
   schedule:
     - cron: "17 11 * * 1"
@@ -28,18 +29,18 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
-      - name: Restore Radio test harness
+      - name: Restore Radio live smoke harness
         shell: pwsh
-        run: dotnet restore tests/RadioCompile/RadioCompile.csproj
+        run: dotnet restore tests/RadioLiveSmoke/RadioLiveSmoke.csproj
 
-      - name: Build Radio test harness
+      - name: Build Radio live smoke harness
         shell: pwsh
-        run: dotnet build tests/RadioCompile/RadioCompile.csproj -c Release --no-restore
+        run: dotnet build tests/RadioLiveSmoke/RadioLiveSmoke.csproj -c Release --no-restore
 
-      - name: Fresh provider/catalog/metadata probes
+      - name: Fresh provider/catalog/stream/metadata probes
         shell: pwsh
         run: |
-          & "tests/RadioCompile/bin/Release/net48/RadioCompile.exe" --live
+          & "tests/RadioLiveSmoke/bin/Release/net48/RadioLiveSmoke.exe"
           if ($LASTEXITCODE -ne 0) {
             throw "Radio live provider smoke failed with exit code $LASTEXITCODE"
           }
