@@ -21,7 +21,7 @@ internal static class RadioDirectories
 
     internal static List<Station> SearchLautFm(string query)
     {
-        var url = "https://api.laut.fm/search/stations?query=" + Uri.EscapeDataString(query) + "&limit:20";
+        var url = "https://api.laut.fm/search/stations?query=" + Uri.EscapeDataString(query) + "&limit=20";
         return ParseLautFmSearch(MiniJson.Parse(RadioNet.DownloadText(url, 9000)));
     }
 
