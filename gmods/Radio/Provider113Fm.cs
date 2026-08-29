@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Net;
+using System.Text;
 using System.Threading.Tasks;
 
 internal static class Radio113Fm
@@ -78,14 +79,15 @@ internal static class Radio113Fm
                     var contentType = (response.ContentType ?? string.Empty).ToLowerInvariant();
                     if (contentType.Length > 0 && !contentType.Contains("audio") && !contentType.Contains("mpeg") && !contentType.Contains("mp3")) continue;
 
-                    var rawName = (response.GetResponseHeader("icy-name") ?? string.Empty).Trim();
-                    var rawGenre = (response.GetResponseHeader("icy-genre") ?? string.Empty).Trim();
+                    var rawName = RepairHeaderText((response.GetResponseHeader("icy-name") ?? string.Empty).Trim());
+                    var rawGenre = RepairHeaderText((response.GetResponseHeader("icy-genre") ?? string.Empty).Trim());
                     var rawBitrate = (response.GetResponseHeader("icy-br") ?? string.Empty).Trim();
                     int bitrate;
                     if (!int.TryParse(rawBitrate.Split(',').FirstOrDefault(), NumberStyles.Integer, CultureInfo.InvariantCulture, out bitrate) || bitrate <= 0)
                         bitrate = 128;
 
-                    var name = NormalizeStationName(rawName, candidate.Key);
+                    var name = NormalizeStationName(rawName);
+                    if (string.IsNullOrWhiteSpace(name)) continue;
                     var id = "113fm:direct-" + candidate.Key;
                     var result = RadioCatalog.One(id, name, "113fm", "113.FM", "https://113fmradio.com/", "Radio");
                     result.SourcePage = "113.FM public free stream discovery";
@@ -111,14 +113,37 @@ internal static class Radio113Fm
         return false;
     }
 
-    private static string NormalizeStationName(string rawName, string key)
+    private static string NormalizeStationName(string rawName)
     {
-        var value = (rawName ?? string.Empty).Trim();
-        if (value.Length == 0 || value == "." || value.Equals("113.FM", StringComparison.OrdinalIgnoreCase) || value.Equals("113FM", StringComparison.OrdinalIgnoreCase))
-            return "113.FM Channel " + key.Substring(key.IndexOf('-') + 1);
-        if (value.StartsWith("113.fm", StringComparison.OrdinalIgnoreCase) || value.StartsWith("113FM", StringComparison.OrdinalIgnoreCase) || value.StartsWith("113.FM", StringComparison.OrdinalIgnoreCase))
-            return value;
+        var value = (rawName ?? string.Empty).Trim().TrimStart('.').Trim();
+        foreach (var prefix in new[] { "113.FM", "113FM", "113.fm" })
+        {
+            if (!value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
+            value = value.Substring(prefix.Length).TrimStart(' ', '-', ':', '.').Trim();
+            break;
+        }
+
+        // A generic provider-only icy-name is not enough to identify a station and can
+        // be returned by parking/default mounts. Ignore it instead of manufacturing a
+        // fake channel name that would inflate the catalog.
+        if (value.Length < 2 || value.Equals("Radio", StringComparison.OrdinalIgnoreCase)) return null;
         return "113.FM " + value;
+    }
+
+    private static string RepairHeaderText(string value)
+    {
+        if (string.IsNullOrEmpty(value)) return string.Empty;
+        try
+        {
+            // HttpWebResponse exposes HTTP header bytes as ISO-8859-1. Some Icecast
+            // servers put UTF-8 names in those bytes, producing visible mojibake unless
+            // we reinterpret them. ASCII remains unchanged by this round-trip.
+            return Encoding.UTF8.GetString(Encoding.GetEncoding(28591).GetBytes(value));
+        }
+        catch
+        {
+            return value;
+        }
     }
 
     private sealed class Candidate
