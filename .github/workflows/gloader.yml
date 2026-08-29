@@ -44,6 +44,7 @@ jobs:
           dotnet restore tests/NoLiquidDupeCompile/NoLiquidDupeCompile.csproj
           dotnet restore tests/RadioCompile/RadioCompile.csproj
           dotnet restore tests/VGMRadioCompile/VGMRadioCompile.csproj
+          dotnet restore tests/ModDiscoveryCompile/ModDiscoveryCompile.csproj
           dotnet restore tests/HostPlayFixture/Client.csproj
           dotnet restore tests/HostPlayFixture/Server.csproj
 
@@ -55,6 +56,7 @@ jobs:
           dotnet build tests/NoLiquidDupeCompile/NoLiquidDupeCompile.csproj -c Release --no-restore
           dotnet build tests/RadioCompile/RadioCompile.csproj -c Release --no-restore
           dotnet build tests/VGMRadioCompile/VGMRadioCompile.csproj -c Release --no-restore
+          dotnet build tests/ModDiscoveryCompile/ModDiscoveryCompile.csproj -c Release --no-restore
           dotnet build tests/HostPlayFixture/Client.csproj -c Release --no-restore
           dotnet build tests/HostPlayFixture/Server.csproj -c Release --no-restore
 
@@ -64,6 +66,14 @@ jobs:
           & "tests/RadioCompile/bin/Release/net48/RadioCompile.exe"
           if ($LASTEXITCODE -ne 0) {
             throw "Radio regression test failed with exit code $LASTEXITCODE"
+          }
+
+      - name: General Radio overlay-upgrade discovery test
+        shell: pwsh
+        run: |
+          & "tests/ModDiscoveryCompile/bin/Release/net48/ModDiscoveryCompile.exe"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Mod discovery migration regression failed with exit code $LASTEXITCODE"
           }
 
       - name: VGMRadio legacy regression test
