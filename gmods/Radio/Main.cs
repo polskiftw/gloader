@@ -54,6 +54,7 @@ internal static partial class GeneralRadio
 
         State = RadioPersistence.LoadState(ModDirectory);
         RadioCatalog.Initialize(ModDirectory);
+        RadioCatalog.AddDirectoryResults(State.SavedStations.Values);
         RadioProviderAugmentation.ApplyStaticFallbacks();
         RadioProviderAugmentation.BeginBackgroundDiscovery();
         SelectedStation = RadioCatalog.Find(State.SelectedStationId) ?? RadioCatalog.Find("rainwave:5") ?? FirstStation();
@@ -77,6 +78,7 @@ internal static partial class GeneralRadio
             SelectedStation = station;
             State.SelectedStationId = station.Id;
             State.Playing = true;
+            RadioPersistence.RememberLiveStation(State, station);
             RadioPersistence.TouchRecent(State, station.Id);
             CurrentTrack = null;
             Health = RadioHealth.Buffering;
@@ -132,7 +134,10 @@ internal static partial class GeneralRadio
         if (station == null) return;
         lock (StateLock)
         {
-            if (!State.Favorites.Add(station.Id)) State.Favorites.Remove(station.Id);
+            if (State.Favorites.Add(station.Id))
+                RadioPersistence.RememberLiveStation(State, station);
+            else
+                State.Favorites.Remove(station.Id);
             RadioPersistence.SaveState(ModDirectory, State);
         }
     }
