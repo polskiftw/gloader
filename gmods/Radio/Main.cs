@@ -54,6 +54,8 @@ internal static partial class GeneralRadio
 
         State = RadioPersistence.LoadState(ModDirectory);
         RadioCatalog.Initialize(ModDirectory);
+        RadioProviderAugmentation.ApplyStaticFallbacks();
+        RadioProviderAugmentation.BeginBackgroundDiscovery();
         SelectedStation = RadioCatalog.Find(State.SelectedStationId) ?? RadioCatalog.Find("rainwave:5") ?? FirstStation();
         if (SelectedStation != null) State.SelectedStationId = SelectedStation.Id;
 
