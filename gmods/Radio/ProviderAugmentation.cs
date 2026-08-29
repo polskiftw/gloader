@@ -1,12 +1,9 @@
 #if !GLOADER_SERVER
 using System;
 using System.Linq;
-using System.Threading;
 
 internal static class RadioProviderAugmentation
 {
-    private static int _discoveryStarted;
-
     internal static void ApplyStaticFallbacks()
     {
         var sceneSat = RadioCatalog.Find("scenesat:main");
@@ -20,24 +17,9 @@ internal static class RadioProviderAugmentation
 
     internal static void BeginBackgroundDiscovery()
     {
-        if (Interlocked.Exchange(ref _discoveryStarted, 1) != 0) return;
-        new Thread(() =>
-        {
-            try
-            {
-                var current113 = Radio113Fm.Discover();
-                if (current113.Count > 0) RadioCatalog.AddDirectoryResults(current113);
-            }
-            catch
-            {
-                // Catalog refresh is best-effort. Built-ins and cached catalogs remain
-                // usable if a provider cannot be enumerated during this launch.
-            }
-        })
-        {
-            IsBackground = true,
-            Name = "gloader Radio provider discovery"
-        }.Start();
+        // RadioCatalog.BeginRefresh owns all provider-wide enumeration, including the
+        // metadata-validating 113.FM scan. Keep this entrypoint for Main.cs compatibility
+        // but do not launch a second copy of that expensive scan.
     }
 
     private static void AddStreamIfMissing(Station station, StreamVariant variant)
