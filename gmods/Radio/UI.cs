@@ -12,6 +12,7 @@ internal static class RadioUi
     internal static bool IsOpen;
 
     private static string _category = "Everything";
+    private static string _subcategory = string.Empty;
     private static int _decade;
     private static string _query = string.Empty;
     private static bool _searchFocused;
@@ -134,14 +135,20 @@ internal static class RadioUi
         {
             var value = RadioTaxonomy.FrontCategories[i];
             var selected = string.Equals(_category, value, StringComparison.OrdinalIgnoreCase);
-            DrawButton(spriteBatch, categoryX, categoryY + i * 27, categoryWidth, 24, value, selected, () => { _category = value; _page = 0; });
+            DrawButton(spriteBatch, categoryX, categoryY + i * 23, categoryWidth, 21, value, selected, () =>
+            {
+                _category = value;
+                _subcategory = string.Empty;
+                _page = 0;
+            });
         }
 
         var contentX = categoryX + categoryWidth + 18;
         var contentWidth = left + width - contentX - 16;
         DrawSearch(spriteBatch, contentX, top + 54, contentWidth);
         DrawDecades(spriteBatch, contentX, top + 90, contentWidth);
-        DrawStationRows(spriteBatch, contentX, top + 126, contentWidth, height - 220);
+        DrawSubcategories(spriteBatch, contentX, top + 120, contentWidth);
+        DrawStationRows(spriteBatch, contentX, top + 154, contentWidth, height - 248);
         DrawNowPlayingStrip(spriteBatch, left + 204, top + height - 80, width - 220, 62);
     }
 
@@ -157,7 +164,7 @@ internal static class RadioUi
             catch { }
         }
 
-        DrawButton(spriteBatch, x, y, Math.Max(200, width - 260), 28, (_searchFocused ? "Search: " : "Search: ") + (string.IsNullOrEmpty(_query) ? "(click and type)" : _query), _searchFocused, () => _searchFocused = !_searchFocused);
+        DrawButton(spriteBatch, x, y, Math.Max(200, width - 260), 28, "Search: " + (string.IsNullOrEmpty(_query) ? "(click and type)" : _query), _searchFocused, () => _searchFocused = !_searchFocused);
         DrawButton(spriteBatch, x + width - 250, y, 112, 28, "Search live", false, BeginDirectorySearch);
         DrawButton(spriteBatch, x + width - 132, y, 60, 28, "Clear", false, () => { _query = ""; _page = 0; _searchFocused = false; });
         DrawButton(spriteBatch, x + width - 66, y, 66, 28, GeneralRadio.State.SongNotifications ? "Popup ✓" : "Popup ✕", GeneralRadio.State.SongNotifications, GeneralRadio.ToggleNotifications);
@@ -166,13 +173,46 @@ internal static class RadioUi
 
     private static void DrawDecades(object spriteBatch, int x, int y, int width)
     {
-        var labels = new[] { 0, 1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020 };
-        var buttonWidth = Math.Max(48, Math.Min(72, (width - 8 * 4) / labels.Length));
+        var labels = new[] { 0, 1940, 1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020 };
+        var buttonWidth = Math.Max(44, Math.Min(68, (width - (labels.Length - 1) * 4) / labels.Length));
         for (var i = 0; i < labels.Length; i++)
         {
             var decade = labels[i];
-            var label = decade == 0 ? "Any" : (decade % 100).ToString("00") + "s";
-            DrawButton(spriteBatch, x + i * (buttonWidth + 4), y, buttonWidth, 24, label, _decade == decade, () => { _decade = decade; _page = 0; });
+            var label = decade == 0 ? "Any" : (decade >= 2000 ? decade.ToString(CultureInfo.InvariantCulture).Substring(2) + "s" : (decade % 100).ToString("00") + "s");
+            DrawButton(spriteBatch, x + i * (buttonWidth + 4), y, buttonWidth, 24, label, _decade == decade, () =>
+            {
+                _decade = decade;
+                _subcategory = string.Empty;
+                _page = 0;
+            });
+        }
+    }
+
+    private static void DrawSubcategories(object spriteBatch, int x, int y, int width)
+    {
+        var options = RadioTaxonomy.SubcategoriesFor(_category, _decade);
+        if (options.Length == 0)
+        {
+            _subcategory = string.Empty;
+            DrawText(spriteBatch, "FILTER  All", x, y + 6, 150, 170, 195, 255, 0.68f);
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_subcategory) && !options.Contains(_subcategory, StringComparer.OrdinalIgnoreCase))
+            _subcategory = string.Empty;
+
+        var count = options.Length + 1;
+        var gap = 4;
+        var buttonWidth = Math.Max(70, Math.Min(116, (width - (count - 1) * gap) / count));
+        DrawButton(spriteBatch, x, y, buttonWidth, 24, "All", string.IsNullOrWhiteSpace(_subcategory), () => { _subcategory = string.Empty; _page = 0; });
+        for (var i = 0; i < options.Length; i++)
+        {
+            var value = options[i];
+            DrawButton(spriteBatch, x + (i + 1) * (buttonWidth + gap), y, buttonWidth, 24, value, string.Equals(_subcategory, value, StringComparison.OrdinalIgnoreCase), () =>
+            {
+                _subcategory = value;
+                _page = 0;
+            });
         }
     }
 
@@ -186,9 +226,19 @@ internal static class RadioUi
             recents = GeneralRadio.State.Recents.ToList();
             favorites = new HashSet<string>(GeneralRadio.State.Favorites, StringComparer.OrdinalIgnoreCase);
         }
-        var filtered = all.Where(station => RadioTaxonomy.Matches(station, _category, _decade, _query, favorites, recents)).ToList();
+        var filtered = all.Where(station => RadioTaxonomy.Matches(station, _category, _subcategory, _decade, _query, favorites, recents)).ToList();
         if (string.Equals(_category, "Recent", StringComparison.OrdinalIgnoreCase))
+        {
             filtered = filtered.OrderBy(station => recents.IndexOf(station.Id)).ToList();
+        }
+        else
+        {
+            filtered = filtered
+                .OrderByDescending(station => RadioTaxonomy.BrowseTier(station, favorites))
+                .ThenByDescending(station => RadioTaxonomy.SearchScore(station, _query))
+                .ThenBy(station => station.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
 
         var rowsPerPage = Math.Max(5, Math.Min(10, availableHeight / 38));
         var maxPage = Math.Max(0, (filtered.Count - 1) / rowsPerPage);
@@ -196,8 +246,10 @@ internal static class RadioUi
         if (_page < 0) _page = 0;
         var rows = filtered.Skip(_page * rowsPerPage).Take(rowsPerPage).ToList();
 
-        DrawText(spriteBatch, filtered.Count + " stations", x, y - 20, 170, 185, 205, 255, 0.75f);
-        DrawText(spriteBatch, "Built-in catalogs and live-directory results are labeled separately.", x + 105, y - 20, 145, 160, 180, 255, 0.70f);
+        var filterText = filtered.Count + " stations";
+        if (!string.IsNullOrWhiteSpace(_subcategory)) filterText += "  •  " + _subcategory;
+        DrawText(spriteBatch, filterText, x, y - 20, 170, 185, 205, 255, 0.75f);
+        DrawText(spriteBatch, "Built-in catalogs and live-directory results are labeled separately.", x + 190, y - 20, 145, 160, 180, 255, 0.70f);
         for (var i = 0; i < rows.Count; i++)
         {
             var station = rows[i];
@@ -293,7 +345,7 @@ internal static class RadioUi
         var hovered = MouseIn(x, y, width, height);
         var baseValue = selected ? 72 : hovered ? 61 : 45;
         DrawRect(spriteBatch, x, y, width, height, baseValue, selected ? 95 : baseValue + 8, selected ? 124 : baseValue + 18, 235);
-        DrawText(spriteBatch, label, x + 7, y + 6, 235, 240, 248, 255, 0.72f);
+        DrawText(spriteBatch, label, x + 7, y + Math.Max(3, (height - 16) / 2), 235, 240, 248, 255, height <= 22 ? 0.64f : 0.72f);
         if (Clicked(x, y, width, height)) { ConsumeClick(); action?.Invoke(); }
     }
 
