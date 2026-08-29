@@ -10,6 +10,7 @@ on:
       - "build.ps1"
       - "gloader.sln"
       - ".github/workflows/gloader.yml"
+      - ".github/workflows/radio-live-smoke.yml"
   pull_request:
     paths:
       - "src/**"
@@ -18,6 +19,7 @@ on:
       - "build.ps1"
       - "gloader.sln"
       - ".github/workflows/gloader.yml"
+      - ".github/workflows/radio-live-smoke.yml"
 
 permissions:
   contents: write
@@ -40,6 +42,7 @@ jobs:
           dotnet restore gloader.sln
           dotnet restore tests/InfiniteAnglerCompile/InfiniteAnglerCompile.csproj
           dotnet restore tests/NoLiquidDupeCompile/NoLiquidDupeCompile.csproj
+          dotnet restore tests/RadioCompile/RadioCompile.csproj
           dotnet restore tests/VGMRadioCompile/VGMRadioCompile.csproj
           dotnet restore tests/HostPlayFixture/Client.csproj
           dotnet restore tests/HostPlayFixture/Server.csproj
@@ -50,16 +53,25 @@ jobs:
           dotnet build gloader.sln -c Release --no-restore
           dotnet build tests/InfiniteAnglerCompile/InfiniteAnglerCompile.csproj -c Release --no-restore
           dotnet build tests/NoLiquidDupeCompile/NoLiquidDupeCompile.csproj -c Release --no-restore
+          dotnet build tests/RadioCompile/RadioCompile.csproj -c Release --no-restore
           dotnet build tests/VGMRadioCompile/VGMRadioCompile.csproj -c Release --no-restore
           dotnet build tests/HostPlayFixture/Client.csproj -c Release --no-restore
           dotnet build tests/HostPlayFixture/Server.csproj -c Release --no-restore
 
-      - name: VGMRadio Rainwave metadata parser test
+      - name: Radio deterministic unit and migration tests
+        shell: pwsh
+        run: |
+          & "tests/RadioCompile/bin/Release/net48/RadioCompile.exe"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Radio regression test failed with exit code $LASTEXITCODE"
+          }
+
+      - name: VGMRadio legacy regression test
         shell: pwsh
         run: |
           & "tests/VGMRadioCompile/bin/Release/net48/VGMRadioCompile.exe"
           if ($LASTEXITCODE -ne 0) {
-            throw "VGMRadio Rainwave metadata parser test failed with exit code $LASTEXITCODE"
+            throw "VGMRadio legacy regression test failed with exit code $LASTEXITCODE"
           }
 
       - name: Publish
@@ -87,6 +99,10 @@ jobs:
           $dependencyFiles = @(Get-ChildItem "dist/gloader/gdeps" -File)
           if ($dependencyFiles.Count -eq 0) {
             throw "gdeps must contain the published gloader runtime/support files."
+          }
+
+          if (-not (Test-Path "dist/gloader/gmods/Radio/Main.cs")) {
+            throw "Published package must contain the new Radio mod."
           }
 
       - name: Steam Host & Play + Infinite Angler raw packet-82 integration test
