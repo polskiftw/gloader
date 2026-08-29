@@ -16,7 +16,7 @@ Terraria/
   gmods/
     InfiniteAngler/
     NoLiquidDupe/
-    VGMRadio/
+    Radio/
     DVDLogo/
   gdeps/
     [gloader runtime/support files]
@@ -34,12 +34,10 @@ gmods/
     InfiniteAngler.ini
   NoLiquidDupe/
     Main.cs
-  VGMRadio/
-    Main.cs
-    NowPlaying.cs
-    Providers.cs
-    Settings.cs
-    VGMRadio.ini
+  Radio/
+    [Radio source files]
+    README.md
+    stations.json
   DVDLogo/
     Main.cs
     DVDLogo.ini
@@ -164,25 +162,24 @@ OUT state lasts across quest swaps for that connection. Disconnecting clears it,
 
 `gmods/NoLiquidDupe/Main.cs` is a server-authoritative fix for the regular-bucket water/lava/honey duplication loop. It keeps the liquid volume conserved for partial regular-bucket scoops while leaving full scoops, Bottomless Buckets, pumps, and normal liquid simulation alone. Joining clients can remain vanilla.
 
-### VGM Radio
+### Radio
 
-`gmods/VGMRadio/` is client-only. It keeps one continuous video-game-music radio stream playing independently of Terraria biome/boss music changes, uses Terraria's Music slider, smoothly ducks while paused, and can show now-playing text.
+`gmods/Radio/` is the general-purpose client-side internet-radio mod. Its station browser lives in Terraria's pause/options UI; there are no radio items, tiles, NPCs, accessories, furniture objects, or other in-world mechanics.
 
-It currently supports two sources:
+Radio includes:
 
-- `Rainwave` — choose among `All`, `Game`, `OCReMix`, `Covers`, `Chiptunes`, and `Chill`.
-- `GTT` (Game That Tune Radio) — one large mixed VGM station. VGMRadio uses GTT's metadata-preserving spoiler MP3 stream so the now-playing overlay continues to work during GTT guessing-game programming.
+- a categorized, multi-tagged, decade-aware browser with subcategories, Favorites, Recent, and ranked search;
+- complete refreshable catalogs for supported public providers plus small stable built-in networks;
+- compatible highest-quality free stream selection with ranked fallbacks and reconnect/backoff behavior;
+- ICY and provider/API now-playing metadata;
+- a persistent now-playing strip and optional song-change popup;
+- live discovery through laut.fm and Radio Browser;
+- persistent live-directory favorites/recents and custom stations in `gmods/Radio/stations.json`;
+- migration of the old VGMRadio Rainwave/GTT selection and now-playing preference.
 
-Its user settings live beside its source:
+See `gmods/Radio/README.md` for the provider list, quality policy, exclusions, metadata rules, custom-station schema, live-directory behavior, and CI details.
 
-```ini
-# gmods/VGMRadio/VGMRadio.ini
-Source=Rainwave
-Station=All
-ShowNowPlaying=true
-```
-
-`Station` applies only to Rainwave and is ignored when `Source=GTT`.
+**VGMRadio is retired and is no longer shipped as a separate mod.** If an older install still has `gmods/VGMRadio/`, the new Radio mod can read its `VGMRadio.ini` on first migration. While Radio is installed, gloader deliberately ignores that leftover legacy source folder so an overlay upgrade cannot start two radio clients. The old folder can be deleted after migration.
 
 ### DVD Logo
 

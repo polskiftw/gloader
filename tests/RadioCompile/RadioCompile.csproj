@@ -9,7 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="../../gmods/VGMRadio/*.cs" Link="%(Filename)%(Extension)" />
+    <Compile Include="../../gmods/Radio/*.cs" Link="%(Filename)%(Extension)" />
     <Compile Include="Program.cs" />
   </ItemGroup>
 

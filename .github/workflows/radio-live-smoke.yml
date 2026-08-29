@@ -1,0 +1,46 @@
+name: Radio live provider smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - general-radio-v1
+    paths:
+      - "gmods/Radio/**"
+      - "tests/RadioLiveSmoke/**"
+      - ".github/workflows/radio-live-smoke.yml"
+  schedule:
+    - cron: "17 11 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  live-provider-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore Radio live smoke harness
+        shell: pwsh
+        run: dotnet restore tests/RadioLiveSmoke/RadioLiveSmoke.csproj
+
+      - name: Build Radio live smoke harness
+        shell: pwsh
+        run: dotnet build tests/RadioLiveSmoke/RadioLiveSmoke.csproj -c Release --no-restore
+
+      - name: Fresh provider/catalog/stream/metadata probes
+        shell: pwsh
+        run: |
+          & "tests/RadioLiveSmoke/bin/Release/net48/RadioLiveSmoke.exe"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Radio live provider smoke failed with exit code $LASTEXITCODE"
+          }

@@ -13,12 +13,29 @@ namespace GLoader
             Directory.CreateDirectory(modsDirectory);
 
             var mods = new List<ModSource>();
-
-            foreach (var directory in Directory
+            var directories = Directory
                 .EnumerateDirectories(modsDirectory, "*", SearchOption.TopDirectoryOnly)
-                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            // General Radio supersedes VGMRadio. Package upgrades are commonly copied
+            // over an existing Terraria folder, which does not delete the user's old
+            // gmods/VGMRadio directory. If Radio is installed, ignore that leftover
+            // legacy source folder so an overlay upgrade cannot start two audio clients.
+            var hasGeneralRadio = directories.Any(directory =>
+                !directory.EndsWith(".disabled", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(Path.GetFileName(directory), "Radio", StringComparison.OrdinalIgnoreCase) &&
+                Directory.EnumerateFiles(directory, "*.cs", SearchOption.AllDirectories).Any(path => !IsDisabled(path)));
+
+            foreach (var directory in directories)
             {
                 if (directory.EndsWith(".disabled", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var displayName = Path.GetFileName(directory);
+                if (hasGeneralRadio && string.Equals(displayName, "VGMRadio", StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
@@ -34,7 +51,6 @@ namespace GLoader
                     continue;
                 }
 
-                var displayName = Path.GetFileName(directory);
                 mods.Add(new ModSource(
                     MakeId(displayName),
                     displayName,
