@@ -218,7 +218,8 @@ internal static class RadioTaxonomy
         var value = (token ?? string.Empty).Trim().ToLowerInvariant();
         if (value.Length == 0) return string.Empty;
         if (value.EndsWith("'s") && value.Length >= 4 && char.IsDigit(value[0])) value = value.Substring(0, value.Length - 2) + "s";
-        return value;
+        var normalized = NormalizeTag(value);
+        return string.IsNullOrWhiteSpace(normalized) ? value : normalized.ToLowerInvariant();
     }
 
     private static string CollapseSpaces(string value)
