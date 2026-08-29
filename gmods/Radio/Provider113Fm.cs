@@ -71,6 +71,7 @@ internal static class Radio113Fm
             {
                 var request = RadioNet.CreateRequest(url, 1800, true);
                 request.KeepAlive = false;
+                request.ServicePoint.ConnectionLimit = Math.Max(request.ServicePoint.ConnectionLimit, 32);
                 using (var response = (HttpWebResponse)request.GetResponse())
                 {
                     if (response.StatusCode != HttpStatusCode.OK) continue;
@@ -82,7 +83,7 @@ internal static class Radio113Fm
                     var rawBitrate = (response.GetResponseHeader("icy-br") ?? string.Empty).Trim();
                     int bitrate;
                     if (!int.TryParse(rawBitrate.Split(',').FirstOrDefault(), NumberStyles.Integer, CultureInfo.InvariantCulture, out bitrate) || bitrate <= 0)
-                        bitrate = url.IndexOf("_128", StringComparison.OrdinalIgnoreCase) >= 0 ? 128 : 128;
+                        bitrate = 128;
 
                     var name = NormalizeStationName(rawName, candidate.Key);
                     var id = "113fm:direct-" + candidate.Key;
