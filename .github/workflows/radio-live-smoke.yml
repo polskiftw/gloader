@@ -2,6 +2,13 @@ name: Radio live provider smoke
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - general-radio-v1
+    paths:
+      - "gmods/Radio/**"
+      - "tests/RadioCompile/**"
+      - ".github/workflows/radio-live-smoke.yml"
   schedule:
     - cron: "17 11 * * 1"
 
