@@ -41,6 +41,7 @@ jobs:
         run: |
           dotnet restore gloader.sln
           dotnet restore tests/InfiniteAnglerCompile/InfiniteAnglerCompile.csproj
+          dotnet restore tests/InfiniteAnglerDebugFixture/InfiniteAnglerDebugFixture.csproj
           dotnet restore tests/NoLiquidDupeCompile/NoLiquidDupeCompile.csproj
           dotnet restore tests/RadioCompile/RadioCompile.csproj
           dotnet restore tests/RadioPolicyCompile/RadioPolicyCompile.csproj
@@ -53,12 +54,24 @@ jobs:
         run: |
           dotnet build gloader.sln -c Release --no-restore
           dotnet build tests/InfiniteAnglerCompile/InfiniteAnglerCompile.csproj -c Release --no-restore
+          dotnet build tests/InfiniteAnglerDebugFixture/InfiniteAnglerDebugFixture.csproj -c Release --no-restore
           dotnet build tests/NoLiquidDupeCompile/NoLiquidDupeCompile.csproj -c Release --no-restore
           dotnet build tests/RadioCompile/RadioCompile.csproj -c Release --no-restore
           dotnet build tests/RadioPolicyCompile/RadioPolicyCompile.csproj -c Release --no-restore
           dotnet build tests/ModDiscoveryCompile/ModDiscoveryCompile.csproj -c Release --no-restore
           dotnet build tests/HostPlayFixture/Client.csproj -c Release --no-restore
           dotnet build tests/HostPlayFixture/Server.csproj -c Release --no-restore
+
+      - name: Infinite Angler debug quest-fish regression test
+        shell: pwsh
+        run: |
+          $mods = Join-Path $env:RUNNER_TEMP "infinite-angler-debug-fixture-mods"
+          Remove-Item $mods -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $mods | Out-Null
+          & "tests/InfiniteAnglerDebugFixture/bin/Release/net48/InfiniteAnglerDebugFixture.exe" --mods $mods
+          if ($LASTEXITCODE -ne 0) {
+            throw "Infinite Angler debug quest-fish regression failed with exit code $LASTEXITCODE"
+          }
 
       - name: Radio deterministic unit and migration tests
         shell: pwsh
@@ -135,6 +148,9 @@ jobs:
           if ($anglerConfig -notmatch '(?im)^EnableParticipationCommands\s*=\s*true\s*$') {
             throw "Infinite Angler must ship with participation commands enabled by default."
           }
+          if ($anglerConfig -notmatch '(?im)^EnableDebugQuestFish\s*=\s*false\s*$') {
+            throw "Infinite Angler debug quest-fish helper must ship disabled by default."
+          }
 
           & $loader --target $target --mods $mods
           if ($LASTEXITCODE -ne 0) {
@@ -168,7 +184,7 @@ jobs:
             --repo "${{ github.repository }}" `
             --target "${{ github.sha }}" `
             --title "gloader v$env:RELEASE_VERSION" `
-            --notes "Adds General Radio v1: a pause-menu internet-radio browser with unified public provider catalogs, live directory discovery, metadata, favorites/recents, custom stations, resilient playback, and VGMRadio migration/retirement."
+            --notes "Adds a small Infinite Angler debug function."
 
       - name: Upload
         uses: actions/upload-artifact@v4
