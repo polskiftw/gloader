@@ -75,7 +75,7 @@ internal static class RadioNet
     private static string ResolveStationPage(string pageUrl, string providerHint)
     {
         var html = DownloadText(pageUrl, 8000);
-        var candidates = ExtractHttpUrls(html)
+        var candidates = ExtractPageUrls(pageUrl, html)
             .Where(url => IsLikelyAudioUrl(url) || url.IndexOf(".m3u", StringComparison.OrdinalIgnoreCase) >= 0 || url.IndexOf(".pls", StringComparison.OrdinalIgnoreCase) >= 0)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -96,6 +96,23 @@ internal static class RadioNet
         throw new InvalidDataException("No compatible public stream was found on station page: " + pageUrl);
     }
 
+    internal static List<string> ExtractPageUrls(string pageUrl, string html)
+    {
+        var results = ExtractHttpUrls(html);
+        Uri baseUri;
+        if (!Uri.TryCreate(pageUrl, UriKind.Absolute, out baseUri)) return results;
+        foreach (Match match in Regex.Matches(html ?? string.Empty, @"(?:href|src)\s*=\s*[""'](?<url>[^""']+)[""']", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+        {
+            var raw = WebUtility.HtmlDecode(match.Groups["url"].Value.Trim());
+            Uri resolved;
+            if (!Uri.TryCreate(baseUri, raw, out resolved)) continue;
+            if (resolved.Scheme != Uri.UriSchemeHttp && resolved.Scheme != Uri.UriSchemeHttps) continue;
+            var value = resolved.AbsoluteUri;
+            if (!results.Contains(value, StringComparer.OrdinalIgnoreCase)) results.Add(value);
+        }
+        return results;
+    }
+
     private static int PageCandidateScore(string url, string providerHint)
     {
         var value = (url ?? string.Empty).ToLowerInvariant();
@@ -107,7 +124,12 @@ internal static class RadioNet
         if (value.Contains(".mp3") || value.Contains("mpeg")) score += 500;
         if (value.Contains("aac")) score += 450;
         if (value.Contains(".ogg") || value.Contains("opus")) score -= 1000;
-        if (string.Equals(providerHint, "radcap", StringComparison.OrdinalIgnoreCase) && value.Contains("rc2")) score += 1200;
+        if (string.Equals(providerHint, "radcap", StringComparison.OrdinalIgnoreCase))
+        {
+            if (value.Contains("/rc2/") || value.Contains("rc2")) score += 2500;
+            if (value.Contains("/rc3/") || value.Contains("rc3")) score -= 500; // advertised reserve server, not the public first choice
+        }
+        if (string.Equals(providerHint, "113fm", StringComparison.OrdinalIgnoreCase) && value.Contains("listen.113fm.net")) score += 1200;
         return score;
     }
 

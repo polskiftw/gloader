@@ -21,16 +21,44 @@ internal static class RadioDirectories
 
     internal static List<Station> SearchLautFm(string query)
     {
-        var url = "https://api.laut.fm/search/stations?query=" + Uri.EscapeDataString(query) + "&limit=20";
-        var root = MiniJson.Parse(RadioNet.DownloadText(url, 9000)) as List<object>;
+        var url = "https://api.laut.fm/search/stations?query=" + Uri.EscapeDataString(query) + "&limit:20";
+        return ParseLautFmSearch(MiniJson.Parse(RadioNet.DownloadText(url, 9000)));
+    }
+
+    internal static List<Station> ParseLautFmSearch(object payload)
+    {
         var result = new List<Station>();
-        foreach (var item in root ?? new List<object>())
+        var stationObjects = new List<Dictionary<string, object>>();
+
+        var rootObject = payload as Dictionary<string, object>;
+        if (rootObject != null)
         {
-            var obj = item as Dictionary<string, object>;
-            if (obj == null) continue;
+            foreach (var groupItem in JsonValue.ChildArray(rootObject, "results") ?? new List<object>())
+            {
+                var group = groupItem as Dictionary<string, object>;
+                if (group == null) continue;
+                foreach (var itemValue in JsonValue.ChildArray(group, "items") ?? new List<object>())
+                {
+                    var item = itemValue as Dictionary<string, object>;
+                    if (item == null) continue;
+                    stationObjects.Add(JsonValue.ChildObject(item, "station") ?? item);
+                }
+            }
+        }
+        else
+        {
+            foreach (var itemValue in payload as List<object> ?? new List<object>())
+            {
+                var item = itemValue as Dictionary<string, object>;
+                if (item != null) stationObjects.Add(JsonValue.ChildObject(item, "station") ?? item);
+            }
+        }
+
+        foreach (var obj in stationObjects)
+        {
             var name = JsonValue.String(obj, "name").Trim();
             if (name.Length == 0) continue;
-            var display = JsonValue.String(obj, "display_name", name);
+            var display = JsonValue.String(obj, "display_name", name).Trim();
             var station = RadioCatalog.One("laut:" + RadioTaxonomy.Slug(name), display, "laut.fm", "laut.fm", "https://laut.fm/" + Uri.EscapeDataString(name), "Radio");
             station.BuiltIn = false;
             station.LiveDirectory = true;
@@ -47,19 +75,26 @@ internal static class RadioDirectories
                     station.AddTags(genreObj == null ? Convert.ToString(genreItem, CultureInfo.InvariantCulture) : JsonValue.String(genreObj, "name"));
                 }
             }
+            var decade = RadioTaxonomy.InferDecade(display + " " + string.Join(" ", station.Tags));
+            if (decade > 0) station.AddDecades(decade);
             result.Add(station);
         }
-        return result;
+
+        return result
+            .GroupBy(station => station.Id, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
     }
 
-    internal static List<Station> SearchRadioBrowser(string query)
+    internal static List<Station> SearchRadioBrowser(string query, int limit = 30)
     {
+        limit = Math.Max(1, Math.Min(250, limit));
         Exception last = null;
         foreach (var baseUrl in RadioBrowserServers())
         {
             try
             {
-                var url = baseUrl + "/json/stations/search?hidebroken=true&limit=30&order=bitrate&reverse=true&name=" + Uri.EscapeDataString(query);
+                var url = baseUrl + "/json/stations/search?hidebroken=true&limit=" + limit + "&order=bitrate&reverse=true&name=" + Uri.EscapeDataString(query);
                 var root = MiniJson.Parse(RadioNet.DownloadText(url, 9000)) as List<object>;
                 return ParseRadioBrowserResults(root);
             }
@@ -125,7 +160,6 @@ internal static class RadioDirectories
         catch { }
         foreach (var fallback in new[] { "https://de1.api.radio-browser.info", "https://de2.api.radio-browser.info", "https://at1.api.radio-browser.info" })
             if (!result.Contains(fallback, StringComparer.OrdinalIgnoreCase)) result.Add(fallback);
-        // Deterministic rotation spreads clients across mirrors without relying on a single host.
         var offset = result.Count == 0 ? 0 : Math.Abs(Environment.TickCount) % result.Count;
         return result.Skip(offset).Concat(result.Take(offset)).ToList();
     }

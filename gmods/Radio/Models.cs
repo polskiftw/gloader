@@ -147,18 +147,21 @@ internal static class StreamRanking
             return int.MinValue + 1;
 
         var codec = (stream.Codec ?? string.Empty).ToLowerInvariant();
-        var codecScore = 1000;
-        if (codec.Contains("aac")) codecScore = 5000;
-        else if (codec.Contains("mp3") || codec.Contains("mpeg")) codecScore = 4500;
-        else if (codec.Contains("wma")) codecScore = 3000;
+        var codecBonus = -250;
+        if (codec.Contains("aac")) codecBonus = 400;
+        else if (codec.Contains("mp3") || codec.Contains("mpeg")) codecBonus = 0;
+        else if (codec.Contains("wma")) codecBonus = -100;
 
-        // Lossless is only rewarded when it is a format the Windows Media Foundation
-        // path is actually expected to decode. Ogg/Opus/Vorbis/FLAC test mounts are
-        // intentionally not treated as compatible merely because they sound better.
-        if (stream.Lossless && IsCompatibleCodec(stream.Codec))
-            codecScore += 3000;
-
-        return codecScore + Math.Max(0, Math.Min(2000, stream.BitrateKbps));
+        // Bitrate is the dominant quality signal. The small AAC efficiency bonus means
+        // 96k AAC can beat 64k MP3, while 128k MP3 still correctly beats 64k AAC.
+        // This also avoids selecting a low-bitrate stream merely because its codec name
+        // sounds newer. Unsupported Ogg/Opus/Vorbis/FLAC mounts were already filtered.
+        var bitrateScore = stream.BitrateKbps > 0
+            ? Math.Max(0, Math.Min(1000, stream.BitrateKbps)) * 20
+            : 1000;
+        var score = bitrateScore + codecBonus;
+        if (stream.Lossless) score += 4000;
+        return score;
     }
 
     internal static List<StreamVariant> Rank(IEnumerable<StreamVariant> streams)

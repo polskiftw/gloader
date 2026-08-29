@@ -97,8 +97,8 @@ internal static class RadioCatalog
             .WithMetadata(MetadataMode.Icy);
 
         yield return One("scenesat:main", "SceneSat", "scenesat", "SceneSat", "https://scenesat.com/", "Demoscene", "Electronic", "Chiptune")
-            .WithStream("https://scenesat.com/listen/normal/max.m3u", "mp3", 320, "playlist", "Max quality MP3")
-            .WithStream("https://scenesat.com/listen/normal/mid.m3u", "mp3", 128, "playlist", "MP3 fallback")
+            .WithStream("https://sj-1.scenesat.com/scenesatmax", "mp3", 320, "direct", "320k MP3")
+            .WithStream("http://Oscar.SceneSat.com:8000/scenesatmax", "mp3", 320, "direct", "320k MP3 fallback")
             .WithMetadata(MetadataMode.Icy);
 
         yield return One("slay:main", "SLAY Radio", "slay", "SLAY Radio", "https://www.slayradio.org/", "Chiptune", "Demoscene", "Electronic")
@@ -206,25 +206,40 @@ internal static class RadioCatalog
     internal static List<Station> Parse181FmLinks(string html)
     {
         var result = new Dictionary<string, Station>(StringComparer.OrdinalIgnoreCase);
-        foreach (Match match in Regex.Matches(html ?? string.Empty, @"href\s*=\s*[""'](?<url>https?://listen\.181fm\.com/(?<slug>[^""']+?)(?:_128k)?\.mp3[^""']*)[""'][^>]*>(?<name>.*?)</a>", RegexOptions.IgnoreCase | RegexOptions.Singleline))
+        var text = html ?? string.Empty;
+
+        foreach (Match match in Regex.Matches(text, @"href\s*=\s*[""'](?<url>https?://listen\.181fm\.com/(?<slug>[^""']+?)_128k\.mp3[^""']*)[""'][^>]*>(?<name>.*?)</a>", RegexOptions.IgnoreCase | RegexOptions.Singleline))
+            Add181Station(result, match.Groups["url"].Value, match.Groups["slug"].Value, StripHtml(match.Groups["name"].Value));
+
+        // The current 181.FM legacy page is deliberately simple and may expose stream
+        // URLs as text rather than stable anchor markup. URL discovery is therefore the
+        // canonical fallback, so the whole public catalog survives cosmetic HTML changes.
+        foreach (Match match in Regex.Matches(text, @"(?<url>https?://listen\.181fm\.com/(?<slug>181-[a-z0-9-]+)_128k\.mp3(?:\?[^\s""'<>]*)?)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+            Add181Station(result, match.Groups["url"].Value, match.Groups["slug"].Value, string.Empty);
+
+        return result.Values.ToList();
+    }
+
+    private static void Add181Station(Dictionary<string, Station> result, string rawUrl, string rawSlug, string rawName)
+    {
+        var url = WebUtility.HtmlDecode(rawUrl ?? string.Empty).Trim();
+        var slug = (rawSlug ?? string.Empty).Trim();
+        if (url.Length == 0 || slug.Length == 0) return;
+        var id = "181fm:" + RadioTaxonomy.Slug(slug);
+        Station station;
+        if (!result.TryGetValue(id, out station))
         {
-            var url = WebUtility.HtmlDecode(match.Groups["url"].Value);
-            var slug = match.Groups["slug"].Value.Replace("_128k", string.Empty);
-            var name = StripHtml(match.Groups["name"].Value).Trim();
-            if (name.Length == 0) name = "181.FM " + PrettyMount(slug);
-            var id = "181fm:" + RadioTaxonomy.Slug(slug);
-            Station station;
-            if (!result.TryGetValue(id, out station))
-            {
-                station = One(id, name, "181fm", "181.FM", "https://www.181.fm/", "Radio");
-                result[id] = station;
-            }
-            station.Streams.Add(Variant(url, "mp3", 128, "direct", "128k MP3"));
-            var aac = Regex.Replace(url, @"_128k\.mp3.*$", "_64k.aac", RegexOptions.IgnoreCase);
-            if (!string.Equals(aac, url, StringComparison.OrdinalIgnoreCase)) station.Streams.Add(Variant(aac, "aac", 64, "direct", "64k AAC fallback"));
+            var name = (rawName ?? string.Empty).Trim();
+            if (name.Length == 0) name = "181.FM " + PrettyMount(slug.StartsWith("181-", StringComparison.OrdinalIgnoreCase) ? slug.Substring(4) : slug);
+            station = One(id, name, "181fm", "181.FM", "https://www.181.fm/", "Radio");
+            result[id] = station;
             InferTags(station, name + " " + slug);
         }
-        return result.Values.ToList();
+        if (!station.Streams.Any(stream => string.Equals(stream.Url, url, StringComparison.OrdinalIgnoreCase)))
+            station.Streams.Add(Variant(url, "mp3", 128, "direct", "128k MP3"));
+        var aac = Regex.Replace(url, @"_128k\.mp3(?=\?|$)", "_64k.aac", RegexOptions.IgnoreCase);
+        if (!string.Equals(aac, url, StringComparison.OrdinalIgnoreCase) && !station.Streams.Any(stream => string.Equals(stream.Url, aac, StringComparison.OrdinalIgnoreCase)))
+            station.Streams.Add(Variant(aac, "aac", 64, "direct", "64k AAC fallback"));
     }
 
     internal static List<Station> ParseProviderStationLinks(string html, string provider, string providerDisplay, string baseUrl)
@@ -235,20 +250,23 @@ internal static class RadioCatalog
         {
             var href = WebUtility.HtmlDecode(match.Groups["href"].Value.Trim());
             var name = StripHtml(match.Groups["name"].Value).Trim();
-            if (name.Length < 3 || name.Length > 100) continue;
+            if (name.Length < 3 || name.Length > 120) continue;
             Uri uri;
             if (!Uri.TryCreate(baseUri, href, out uri) || !string.Equals(uri.Host, baseUri.Host, StringComparison.OrdinalIgnoreCase)) continue;
             var path = uri.AbsolutePath.ToLowerInvariant();
-            var isCandidate = provider == "radcap" ? path.EndsWith(".html") : (path.Contains("channel") || path.Contains("station"));
-            if (!isCandidate) continue;
-            if (IsNavigationName(name)) continue;
+            var isCandidate = provider == "radcap"
+                ? path.EndsWith(".html") && !path.EndsWith("index-db.html") && !path.EndsWith("index.html")
+                : provider == "113fm" ? Is113FmCandidate(path, name) : (path.Contains("channel") || path.Contains("station"));
+            if (!isCandidate || IsNavigationName(name)) continue;
             var slug = RadioTaxonomy.Slug(Path.GetFileNameWithoutExtension(uri.AbsolutePath));
             if (slug.Length < 2) slug = RadioTaxonomy.Slug(name);
             var id = provider + ":" + slug;
             if (result.ContainsKey(id)) continue;
             var station = One(id, name, provider, providerDisplay, baseUrl, "Radio");
             station.SourcePage = uri.AbsoluteUri;
-            station.Streams.Add(Variant(uri.AbsoluteUri, "aac", provider == "radcap" ? 320 : 0, "station-page", "Official station-page resolver", provider));
+            var codec = provider == "radcap" ? "aac" : provider == "113fm" ? "mp3" : string.Empty;
+            var bitrate = provider == "radcap" ? 320 : provider == "113fm" ? 128 : 0;
+            station.Streams.Add(Variant(uri.AbsoluteUri, codec, bitrate, "station-page", "Official station-page resolver", provider));
             station.Streams.Add(Variant("", "mp3", 0, "radio-browser-exact", "Radio Browser fallback", name));
             InferTags(station, name + " " + slug);
             result[id] = station;
@@ -256,14 +274,51 @@ internal static class RadioCatalog
         return result.Values.ToList();
     }
 
+    private static bool Is113FmCandidate(string path, string name)
+    {
+        var slug = (path ?? string.Empty).Trim('/').ToLowerInvariant();
+        if (slug.Length < 2 || slug.Contains("/")) return false;
+        foreach (var blocked in new[] { "browse", "about", "contact", "faq", "faqs", "chat", "login", "register", "profile", "news", "privacy", "terms", "search", "genres" })
+            if (slug == blocked) return false;
+        var lowerName = (name ?? string.Empty).ToLowerInvariant();
+        if (lowerName.Contains("browse channels") || lowerName.Contains("sign in")) return false;
+        return true;
+    }
+
     private static List<Station> RefreshNightride()
     {
         return ParseIcecastCatalog(RadioNet.DownloadText("https://stream.nightride.fm/status-json.xsl", 8000), "nightride", "Nightride FM", "https://nightride.fm/", "Electronic", "Synthwave");
     }
 
-    private static List<Station> Refresh181Fm() => Parse181FmLinks(RadioNet.DownloadText("https://www.181.fm/links", 8000));
-    private static List<Station> RefreshRadcap() => ParseProviderStationLinks(RadioNet.DownloadText("https://radcap.ru/", 10000), "radcap", "Radio Caprice", "https://radcap.ru/");
-    private static List<Station> Refresh113Fm() => ParseProviderStationLinks(RadioNet.DownloadText("https://113.fm/browse", 10000), "113fm", "113.FM", "https://113.fm/");
+    private static List<Station> Refresh181Fm() => Parse181FmLinks(RadioNet.DownloadText("https://www.181.fm/legacy.html", 10000));
+    private static List<Station> RefreshRadcap() => ParseProviderStationLinks(RadioNet.DownloadText("https://radcap.ru/index-db.html", 12000), "radcap", "Radio Caprice", "https://radcap.ru/");
+
+    private static List<Station> Refresh113Fm()
+    {
+        var official = ParseProviderStationLinks(RadioNet.DownloadText("https://113.fm/browse", 12000), "113fm", "113.FM", "https://113.fm/");
+        if (official.Count >= 50) return official;
+
+        // 113.FM's modern Browse page has alternated between server-rendered and
+        // client-rendered markup. Keep the provider catalog complete when that happens
+        // by supplementing it from healthy Radio Browser records that identify 113.FM.
+        foreach (var directoryStation in RadioDirectories.SearchRadioBrowser("113.FM", 200))
+        {
+            var belongs = directoryStation.Name.IndexOf("113.FM", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                          directoryStation.HomePage.IndexOf("113.fm", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                          directoryStation.Streams.Any(stream => (stream.Url ?? string.Empty).IndexOf("113fm", StringComparison.OrdinalIgnoreCase) >= 0 || (stream.Url ?? string.Empty).IndexOf("113.fm", StringComparison.OrdinalIgnoreCase) >= 0);
+            if (!belongs || directoryStation.Streams.Count == 0) continue;
+            var uuid = directoryStation.Id.StartsWith("radiobrowser:", StringComparison.OrdinalIgnoreCase) ? directoryStation.Id.Substring("radiobrowser:".Length) : RadioTaxonomy.StableHash(directoryStation.Name);
+            var id = "113fm:rb-" + uuid;
+            if (official.Any(station => string.Equals(station.Id, id, StringComparison.OrdinalIgnoreCase) || string.Equals(station.Name, directoryStation.Name, StringComparison.OrdinalIgnoreCase))) continue;
+            var station = One(id, directoryStation.Name, "113fm", "113.FM", string.IsNullOrWhiteSpace(directoryStation.HomePage) ? "https://113.fm/" : directoryStation.HomePage, directoryStation.Tags.ToArray());
+            station.SourcePage = "Radio Browser provider fallback";
+            station.Streams.AddRange(directoryStation.Streams.Select(stream => stream.Clone()));
+            station.MetadataMode = MetadataMode.Icy;
+            station.AddDecades(directoryStation.Decades.ToArray());
+            official.Add(station);
+        }
+        return official;
+    }
 
     internal static Station One(string id, string name, string provider, string providerDisplay, string homePage, params string[] tags)
     {

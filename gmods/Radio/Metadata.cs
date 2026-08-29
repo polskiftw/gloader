@@ -15,21 +15,36 @@ internal static class RadioMetadata
     {
         track = null;
         if (station == null || station.MetadataMode == MetadataMode.None) return false;
-        if (station.MetadataMode == MetadataMode.Rainwave) return TryRainwave(station.MetadataUrl, out track);
-        if (station.MetadataMode == MetadataMode.LautFm) return TryLautFm(station.MetadataUrl, out track);
-        if (station.MetadataMode == MetadataMode.WebPage && !string.IsNullOrWhiteSpace(station.MetadataUrl)) return TryWebPage(station, out track);
 
-        foreach (var variant in StreamRanking.Rank(station.Streams))
+        TrackInfo candidate = null;
+        var success = false;
+        if (station.MetadataMode == MetadataMode.Rainwave)
+            success = TryRainwave(station.MetadataUrl, out candidate);
+        else if (station.MetadataMode == MetadataMode.LautFm)
+            success = TryLautFm(station.MetadataUrl, out candidate);
+        else if (station.MetadataMode == MetadataMode.WebPage && !string.IsNullOrWhiteSpace(station.MetadataUrl))
+            success = TryWebPage(station, out candidate);
+        else
         {
-            try
+            foreach (var variant in StreamRanking.Rank(station.Streams))
             {
-                var url = RadioNet.ResolveStreamVariant(station, variant);
-                var title = ReadIcyStreamTitle(url, 6000, 4);
-                if (IsTrackLike(title, station)) { track = TrackInfo.FromDisplay(title); return true; }
+                try
+                {
+                    var url = RadioNet.ResolveStreamVariant(station, variant);
+                    var title = ReadIcyStreamTitle(url, 6000, 4);
+                    if (!IsTrackLike(title, station)) continue;
+                    candidate = TrackInfo.FromDisplay(title);
+                    success = true;
+                    break;
+                }
+                catch { }
             }
-            catch { }
         }
-        return false;
+
+        if (!success || candidate == null || !IsTrackLike(candidate.Display, station)) return false;
+        MetadataProbe.Observe(station, candidate);
+        track = candidate;
+        return true;
     }
 
     internal static bool TryParseRainwaveNowPlayingJson(string json, out TrackInfo track)
@@ -181,6 +196,40 @@ internal static class RadioMetadata
 
 internal static class MetadataProbe
 {
+    private static readonly object Sync = new object();
+    private static readonly Dictionary<string, string> FirstTitles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    private static readonly HashSet<string> Verified = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+    internal static bool Observe(Station station, TrackInfo track)
+    {
+        if (station == null || track == null || !RadioMetadata.IsTrackLike(track.Display, station)) return false;
+        var id = string.IsNullOrWhiteSpace(station.Id) ? station.Name : station.Id;
+        if (string.IsNullOrWhiteSpace(id)) return false;
+        lock (Sync)
+        {
+            if (Verified.Contains(id))
+            {
+                station.MetadataVerified = true;
+                return true;
+            }
+            string first;
+            if (!FirstTitles.TryGetValue(id, out first))
+            {
+                FirstTitles[id] = track.Display;
+                station.MetadataVerified = false;
+                return false;
+            }
+            if (!string.Equals(first, track.Display, StringComparison.Ordinal))
+            {
+                Verified.Add(id);
+                station.MetadataVerified = true;
+                return true;
+            }
+            station.MetadataVerified = false;
+            return false;
+        }
+    }
+
     internal static bool HasUsableTrackMetadata(Station station, out string firstTitle)
     {
         firstTitle = null;
@@ -188,6 +237,15 @@ internal static class MetadataProbe
         if (!RadioMetadata.TryReadTrack(station, out track) || track == null || string.IsNullOrWhiteSpace(track.Display)) return false;
         firstTitle = track.Display;
         return RadioMetadata.IsTrackLike(firstTitle, station);
+    }
+
+    internal static void ResetForTests()
+    {
+        lock (Sync)
+        {
+            FirstTitles.Clear();
+            Verified.Clear();
+        }
     }
 }
 #endif

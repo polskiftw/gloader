@@ -18,6 +18,8 @@ internal static class Program
             TestIcyMetadata();
             TestRainwaveMetadata();
             TestLautFmMetadata();
+            TestLautFmSearchParser();
+            TestMetadataVerification();
             TestStreamRanking();
             TestTaxonomy();
             TestCustomStations();
@@ -26,6 +28,7 @@ internal static class Program
             Test181Parser();
             TestIcecastCatalogParser();
             TestProviderLinkParser();
+            TestStationPageUrlResolution();
             TestRadioBrowserParser();
             TestGenerationAndBufferClear();
 
@@ -69,8 +72,29 @@ internal static class Program
     private static void TestLautFmMetadata()
     {
         TrackInfo track;
-        Assert(RadioMetadata.TryParseLautFmCurrentSong("{\"title\":\"Lucia\",\"artist\":{\"name\":\"Roosevelt\"}}", out track), "laut.fm parse");
-        Assert(track.Display == "Roosevelt - Lucia", "laut.fm display");
+        Assert(RadioMetadata.TryParseLautFmCurrentSong("{\"title\":\"Lucia\",\"artist\":{\"name\":\"Roosevelt\"}}", out track), "laut.fm current_song parse");
+        Assert(track.Display == "Roosevelt - Lucia", "laut.fm current_song display");
+    }
+
+    private static void TestLautFmSearchParser()
+    {
+        var payload = MiniJson.Parse("{\"total\":1,\"results\":[{\"category\":\"stations\",\"items\":[{\"station\":{\"name\":\"nightdrive\",\"display_name\":\"Night Drive\",\"genres\":[{\"name\":\"Synthwave\"}]}}]}]}");
+        var stations = RadioDirectories.ParseLautFmSearch(payload);
+        Assert(stations.Count == 1, "laut.fm nested search results parse");
+        Assert(stations[0].Id == "laut:nightdrive" && stations[0].Tags.Contains("Synthwave"), "laut.fm station identity/tags");
+        Assert(stations[0].MetadataUrl.EndsWith("/current_song", StringComparison.Ordinal), "laut.fm current_song metadata endpoint");
+    }
+
+    private static void TestMetadataVerification()
+    {
+        MetadataProbe.ResetForTests();
+        var station = RadioCatalog.One("meta:test", "Metadata Test", "test", "Test", "https://example.com");
+        var first = TrackInfo.FromDisplay("Artist A - Song A");
+        var second = TrackInfo.FromDisplay("Artist B - Song B");
+        Assert(!MetadataProbe.Observe(station, first), "metadata first title remains unverified");
+        Assert(!MetadataProbe.Observe(station, first), "repeated static title remains unverified");
+        Assert(MetadataProbe.Observe(station, second), "changed title verifies track metadata");
+        Assert(station.MetadataVerified, "station remembers verified changing metadata");
     }
 
     private static void TestStreamRanking()
@@ -79,14 +103,16 @@ internal static class Program
         {
             new StreamVariant { Url = "opus", Codec = "opus", BitrateKbps = 320, PublicFree = true },
             new StreamVariant { Url = "mp3-128", Codec = "mp3", BitrateKbps = 128, PublicFree = true },
+            new StreamVariant { Url = "aac-64", Codec = "aac", BitrateKbps = 64, PublicFree = true },
             new StreamVariant { Url = "aac-256", Codec = "aac", BitrateKbps = 256, PublicFree = true },
             new StreamVariant { Url = "paid", Codec = "mp3", BitrateKbps = 320, PublicFree = false },
             new StreamVariant { Url = "auth", Codec = "mp3", BitrateKbps = 320, PublicFree = true, RequiresAuthentication = true }
         };
         var ranked = StreamRanking.Rank(streams);
-        Assert(ranked.Count == 2, "rank filters unsupported/paid/auth");
-        Assert(ranked[0].Url == "aac-256", "AAC high-quality compatible first");
-        Assert(ranked[1].Url == "mp3-128", "MP3 fallback second");
+        Assert(ranked.Count == 3, "rank filters unsupported/paid/auth");
+        Assert(ranked[0].Url == "aac-256", "high-bitrate AAC first");
+        Assert(ranked[1].Url == "mp3-128", "128k MP3 beats 64k AAC");
+        Assert(ranked[2].Url == "aac-64", "64k AAC retained as fallback");
     }
 
     private static void TestTaxonomy()
@@ -150,12 +176,13 @@ internal static class Program
 
     private static void Test181Parser()
     {
-        var html = "<h3>80s</h3><a href=\"https://listen.181fm.com/181-awesome80s_128k.mp3\">Awesome 80's</a>" +
-                   "<a href='https://listen.181fm.com/181-rock_128k.mp3'>Rock 181</a>";
+        var html = "<h3>80s</h3><a href=\"https://listen.181fm.com/181-awesome80s_128k.mp3\">Awesome 80's</a>\n" +
+                   "https://listen.181fm.com/181-rock_128k.mp3";
         var stations = RadioCatalog.Parse181FmLinks(html);
-        Assert(stations.Count == 2, "181 parser station count");
+        Assert(stations.Count == 2, "181 parser handles anchors and bare legacy URLs");
         Assert(stations.Any(s => s.Decades.Contains(1980)), "181 taxonomy inference");
         Assert(stations.All(s => s.Streams.Any(v => v.BitrateKbps == 128 && v.Codec == "mp3")), "181 MP3 stream extraction");
+        Assert(stations.All(s => StreamRanking.Rank(s.Streams).First().BitrateKbps == 128), "181 prefers 128k MP3 over 64k AAC");
     }
 
     private static void TestIcecastCatalogParser()
@@ -172,10 +199,21 @@ internal static class Program
 
     private static void TestProviderLinkParser()
     {
-        var radcap = "<a href='/hardbop.html'>Hard Bop</a><a href='/ambient.html'>Ambient</a><a href='/about.html'>About</a>";
-        var stations = RadioCatalog.ParseProviderStationLinks(radcap, "radcap", "Radio Caprice", "https://radcap.ru/");
-        Assert(stations.Count == 2, "RADCAP station-page parser");
-        Assert(stations.All(s => s.Streams.Count == 2), "RADCAP primary resolver + fallback");
+        var radcap = "<a href='/hardbop.html'>Hard Bop</a><a href='/ambient.html'>Ambient</a><a href='/index-db.html'>Index</a><a href='/about.html'>About</a>";
+        var radcapStations = RadioCatalog.ParseProviderStationLinks(radcap, "radcap", "Radio Caprice", "https://radcap.ru/");
+        Assert(radcapStations.Count == 2, "RADCAP station-page parser ignores database index and navigation pages");
+        Assert(radcapStations.All(s => s.Streams.First().BitrateKbps == 320), "RADCAP advertises 320k primary variants");
+
+        var fm113 = "<a href='/theeagle'>113.FM The Eagle</a><a href='/power'>113.FM Power</a><a href='/browse'>Browse Channels</a>";
+        var fm113Stations = RadioCatalog.ParseProviderStationLinks(fm113, "113fm", "113.FM", "https://113.fm/");
+        Assert(fm113Stations.Count == 2, "113.FM root-slug channel parser");
+        Assert(fm113Stations.All(s => s.Streams.First().Codec == "mp3" && s.Streams.First().BitrateKbps == 128), "113.FM station-page quality hints");
+    }
+
+    private static void TestStationPageUrlResolution()
+    {
+        var urls = RadioNet.ExtractPageUrls("https://radcap.ru/ambient.html", "<a href='/play/rc2/radio-caprice-ambient.m3u'>320 AAC</a>");
+        Assert(urls.Contains("https://radcap.ru/play/rc2/radio-caprice-ambient.m3u"), "relative station-page playlist resolution");
     }
 
     private static void TestRadioBrowserParser()
@@ -206,10 +244,25 @@ internal static class Program
             return RadioMetadata.TryParseRainwaveNowPlayingJson(RadioNet.DownloadText("https://rainwave.cc/api4/info?sid=5", 10000), out track) && !string.IsNullOrWhiteSpace(track.Display);
         });
         Live("Nightride Icecast full catalog", failures, () => RadioCatalog.ParseIcecastCatalog(RadioNet.DownloadText("https://stream.nightride.fm/status-json.xsl", 10000), "nightride", "Nightride FM", "https://nightride.fm", "Electronic", "Synthwave").Count >= 7);
-        Live("181.FM official catalog", failures, () => RadioCatalog.Parse181FmLinks(RadioNet.DownloadText("https://www.181.fm/links", 10000)).Count >= 40);
-        Live("RADCAP official catalog", failures, () => RadioCatalog.ParseProviderStationLinks(RadioNet.DownloadText("https://radcap.ru/", 12000), "radcap", "Radio Caprice", "https://radcap.ru/").Count >= 400);
-        Live("113.FM official catalog", failures, () => RadioCatalog.ParseProviderStationLinks(RadioNet.DownloadText("https://113.fm/browse", 12000), "113fm", "113.FM", "https://113.fm/").Count >= 50);
-        Live("SceneSat max-quality playlist", failures, () => RadioNet.ResolvePlaylist("https://scenesat.com/listen/normal/max.m3u").StartsWith("http", StringComparison.OrdinalIgnoreCase));
+        Live("181.FM official legacy catalog", failures, () => RadioCatalog.Parse181FmLinks(RadioNet.DownloadText("https://www.181.fm/legacy.html", 10000)).Count >= 40);
+        Live("181.FM representative 128k MP3 ICY", failures, () => !string.IsNullOrWhiteSpace(RadioMetadata.ReadIcyStreamTitle("https://listen.181fm.com/181-awesome80s_128k.mp3", 12000, 8)));
+        Live("RADCAP official catalog database", failures, () => RadioCatalog.ParseProviderStationLinks(RadioNet.DownloadText("https://radcap.ru/index-db.html", 12000), "radcap", "Radio Caprice", "https://radcap.ru/").Count >= 400);
+        Live("RADCAP representative 320k station resolver", failures, () =>
+        {
+            var stations = RadioCatalog.ParseProviderStationLinks(RadioNet.DownloadText("https://radcap.ru/index-db.html", 12000), "radcap", "Radio Caprice", "https://radcap.ru/");
+            var station = stations.FirstOrDefault(s => s.Name.IndexOf("ambient", StringComparison.OrdinalIgnoreCase) >= 0) ?? stations.First();
+            var variant = StreamRanking.Rank(station.Streams).First();
+            var resolved = RadioNet.ResolveStreamVariant(station, variant);
+            return resolved.StartsWith("http", StringComparison.OrdinalIgnoreCase);
+        });
+        Live("113.FM current Browse catalog", failures, () => RadioCatalog.ParseProviderStationLinks(RadioNet.DownloadText("https://113.fm/browse", 12000), "113fm", "113.FM", "https://113.fm/").Count >= 50);
+        Live("113.FM The Eagle official stream resolver", failures, () =>
+        {
+            var station = RadioCatalog.One("113fm:theeagle", "113.FM The Eagle", "113fm", "113.FM", "https://113.fm/theeagle", "Rock");
+            var variant = RadioCatalog.Variant("https://113.fm/theeagle", "mp3", 128, "station-page", "Official station-page resolver", "113fm");
+            return RadioNet.ResolveStreamVariant(station, variant).StartsWith("http", StringComparison.OrdinalIgnoreCase);
+        });
+        Live("SceneSat current 320k MP3 ICY", failures, () => !string.IsNullOrWhiteSpace(RadioMetadata.ReadIcyStreamTitle("https://sj-1.scenesat.com/scenesatmax", 12000, 8)));
         Live("Radio Browser live search", failures, () => RadioDirectories.SearchRadioBrowser("jazz").Count > 0);
         Live("laut.fm live search", failures, () => RadioDirectories.SearchLautFm("rock").Count > 0);
         Live("GTT stream accepts ICY metadata", failures, () => !string.IsNullOrWhiteSpace(RadioMetadata.ReadIcyStreamTitle("https://icecast.gttradio.com/mp3_320k", 12000, 8)));
