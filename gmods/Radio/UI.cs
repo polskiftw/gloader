@@ -129,13 +129,18 @@ internal static class RadioUi
 
         var categoryX = left + 16;
         var categoryY = top + 58;
-        var categoryWidth = 172;
+        var categoryWidth = 145;
+        var categoryGap = 6;
+        var categoryRows = (RadioTaxonomy.FrontCategories.Length + 1) / 2;
+        var categoryPanelWidth = categoryWidth * 2 + categoryGap;
         DrawText(spriteBatch, "BROWSE", categoryX + 8, categoryY - 24, 170, 185, 210, 255, 0.8f);
         for (var i = 0; i < RadioTaxonomy.FrontCategories.Length; i++)
         {
             var value = RadioTaxonomy.FrontCategories[i];
+            var column = i / categoryRows;
+            var row = i % categoryRows;
             var selected = string.Equals(_category, value, StringComparison.OrdinalIgnoreCase);
-            DrawButton(spriteBatch, categoryX, categoryY + i * 23, categoryWidth, 21, value, selected, () =>
+            DrawButton(spriteBatch, categoryX + column * (categoryWidth + categoryGap), categoryY + row * 23, categoryWidth, 21, value, selected, () =>
             {
                 _category = value;
                 _subcategory = string.Empty;
@@ -143,13 +148,13 @@ internal static class RadioUi
             });
         }
 
-        var contentX = categoryX + categoryWidth + 18;
+        var contentX = categoryX + categoryPanelWidth + 18;
         var contentWidth = left + width - contentX - 16;
         DrawSearch(spriteBatch, contentX, top + 54, contentWidth);
         DrawDecades(spriteBatch, contentX, top + 90, contentWidth);
         DrawSubcategories(spriteBatch, contentX, top + 120, contentWidth);
         DrawStationRows(spriteBatch, contentX, top + 154, contentWidth, height - 248);
-        DrawNowPlayingStrip(spriteBatch, left + 204, top + height - 80, width - 220, 62);
+        DrawNowPlayingStrip(spriteBatch, contentX, top + height - 80, contentWidth, 62);
     }
 
     private static void DrawSearch(object spriteBatch, int x, int y, int width)
@@ -164,7 +169,7 @@ internal static class RadioUi
             catch { }
         }
 
-        DrawButton(spriteBatch, x, y, Math.Max(200, width - 260), 28, "Search: " + (string.IsNullOrEmpty(_query) ? "(click and type)" : _query), _searchFocused, () => _searchFocused = !_searchFocused);
+        DrawButton(spriteBatch, x, y, Math.Max(180, width - 260), 28, "Search: " + (string.IsNullOrEmpty(_query) ? "(click and type)" : _query), _searchFocused, () => _searchFocused = !_searchFocused);
         DrawButton(spriteBatch, x + width - 250, y, 112, 28, "Search live", false, BeginDirectorySearch);
         DrawButton(spriteBatch, x + width - 132, y, 60, 28, "Clear", false, () => { _query = ""; _page = 0; _searchFocused = false; });
         DrawButton(spriteBatch, x + width - 66, y, 66, 28, GeneralRadio.State.SongNotifications ? "Popup ✓" : "Popup ✕", GeneralRadio.State.SongNotifications, GeneralRadio.ToggleNotifications);
@@ -174,7 +179,7 @@ internal static class RadioUi
     private static void DrawDecades(object spriteBatch, int x, int y, int width)
     {
         var labels = new[] { 0, 1940, 1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020 };
-        var buttonWidth = Math.Max(44, Math.Min(68, (width - (labels.Length - 1) * 4) / labels.Length));
+        var buttonWidth = Math.Max(42, Math.Min(68, (width - (labels.Length - 1) * 4) / labels.Length));
         for (var i = 0; i < labels.Length; i++)
         {
             var decade = labels[i];
@@ -203,7 +208,7 @@ internal static class RadioUi
 
         var count = options.Length + 1;
         var gap = 4;
-        var buttonWidth = Math.Max(70, Math.Min(116, (width - (count - 1) * gap) / count));
+        var buttonWidth = Math.Max(58, Math.Min(108, (width - (count - 1) * gap) / count));
         DrawButton(spriteBatch, x, y, buttonWidth, 24, "All", string.IsNullOrWhiteSpace(_subcategory), () => { _subcategory = string.Empty; _page = 0; });
         for (var i = 0; i < options.Length; i++)
         {
