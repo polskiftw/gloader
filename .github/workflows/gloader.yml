@@ -168,7 +168,7 @@ jobs:
             --repo "${{ github.repository }}" `
             --target "${{ github.sha }}" `
             --title "gloader v$env:RELEASE_VERSION" `
-            --notes "Adds General Radio v1: a pause-menu internet-radio browser with unified public provider catalogs, live directory discovery, metadata, favorites/recents, custom stations, resilient playback, and VGMRadio migration/retirement."
+            --notes "Adds a small Infinite Angler debug function."
 
       - name: Upload
         uses: actions/upload-artifact@v4
