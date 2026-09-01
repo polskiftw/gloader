@@ -211,6 +211,11 @@ namespace Terraria.IO
 
 namespace Terraria.WorldBuilding
 {
+    public static class GenVars
+    {
+        public static int extraBastStatueCountMax;
+    }
+
     public class GenerationProgress
     {
         public void Set(float value) { }
