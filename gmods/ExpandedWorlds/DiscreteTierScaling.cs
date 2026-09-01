@@ -49,7 +49,7 @@ internal static class ExpandedWorldDiscreteTierGenerationPatch
         var code = instructions.ToList();
         int patched = 0;
 
-        // Audited 1.4.4+ source shape for The Dirtiest Block:
+        // Audited 1.4.5-era source shape for The Dirtiest Block:
         //
         //   int target = 3;
         //   target = GetWorldSize() switch {
@@ -60,9 +60,14 @@ internal static class ExpandedWorldDiscreteTierGenerationPatch
         //   if (tenthAnniversaryWorldGen)
         //       target *= 5;
         //
-        // We identify the switch-result local rather than relying on a compiler-
-        // specific local number. The inserted call occurs after the switch result
-        // is stored and before vanilla's Celebration x5 branch.
+        // We inject directly before the switch result is stored. At that point
+        // the int result is already on the evaluation stack, so the helper can
+        // transform it without reconstructing compiler locals by index.
+        //
+        // Any labels/exception blocks attached to the store are moved onto our
+        // call. That is important: switch branches may target the join/store
+        // instruction, and leaving labels there would allow a branch to skip the
+        // adjustment entirely.
         for (int callIndex = 0; callIndex < code.Count; callIndex++)
         {
             if (!Calls(code[callIndex], GetWorldSizeMethod))
@@ -79,20 +84,18 @@ internal static class ExpandedWorldDiscreteTierGenerationPatch
                 saw9 |= IsIntConstant(code[i], 9);
                 saw3 |= IsIntConstant(code[i], 3);
 
-                int local = GetStoredLocalIndex(code[i]);
-                if (local < 0 || !saw6 || !saw9 || !saw3)
+                if (!IsLocalStore(code[i]) || !saw6 || !saw9 || !saw3)
                     continue;
 
-                var replacement = new[]
-                {
-                    LoadLocal(local),
-                    new CodeInstruction(OpCodes.Call, AdjustDirtiestBlockCountMethod),
-                    StoreLocal(local),
-                };
+                var adjust = new CodeInstruction(OpCodes.Call, AdjustDirtiestBlockCountMethod);
+                adjust.labels.AddRange(code[i].labels);
+                code[i].labels.Clear();
+                adjust.blocks.AddRange(code[i].blocks);
+                code[i].blocks.Clear();
 
-                code.InsertRange(i + 1, replacement);
+                code.Insert(i, adjust);
                 patched++;
-                callIndex = i + replacement.Length;
+                callIndex = i + 1;
                 break;
             }
         }
@@ -142,55 +145,14 @@ internal static class ExpandedWorldDiscreteTierGenerationPatch
                Equals(instruction.operand, method);
     }
 
-    private static CodeInstruction LoadLocal(int local)
+    private static bool IsLocalStore(CodeInstruction instruction)
     {
-        switch (local)
-        {
-            case 0: return new CodeInstruction(OpCodes.Ldloc_0);
-            case 1: return new CodeInstruction(OpCodes.Ldloc_1);
-            case 2: return new CodeInstruction(OpCodes.Ldloc_2);
-            case 3: return new CodeInstruction(OpCodes.Ldloc_3);
-            default:
-                if (local <= byte.MaxValue)
-                    return new CodeInstruction(OpCodes.Ldloc_S, (byte)local);
-                return new CodeInstruction(OpCodes.Ldloc, (short)local);
-        }
-    }
-
-    private static CodeInstruction StoreLocal(int local)
-    {
-        switch (local)
-        {
-            case 0: return new CodeInstruction(OpCodes.Stloc_0);
-            case 1: return new CodeInstruction(OpCodes.Stloc_1);
-            case 2: return new CodeInstruction(OpCodes.Stloc_2);
-            case 3: return new CodeInstruction(OpCodes.Stloc_3);
-            default:
-                if (local <= byte.MaxValue)
-                    return new CodeInstruction(OpCodes.Stloc_S, (byte)local);
-                return new CodeInstruction(OpCodes.Stloc, (short)local);
-        }
-    }
-
-    private static int GetStoredLocalIndex(CodeInstruction instruction)
-    {
-        if (instruction.opcode == OpCodes.Stloc_0) return 0;
-        if (instruction.opcode == OpCodes.Stloc_1) return 1;
-        if (instruction.opcode == OpCodes.Stloc_2) return 2;
-        if (instruction.opcode == OpCodes.Stloc_3) return 3;
-        if (instruction.opcode != OpCodes.Stloc && instruction.opcode != OpCodes.Stloc_S)
-            return -1;
-        return GetOperandLocalIndex(instruction.operand);
-    }
-
-    private static int GetOperandLocalIndex(object operand)
-    {
-        if (operand is LocalBuilder builder) return builder.LocalIndex;
-        if (operand is byte b) return b;
-        if (operand is sbyte sb) return sb;
-        if (operand is short s) return s;
-        if (operand is int i) return i;
-        return -1;
+        return instruction.opcode == OpCodes.Stloc_0 ||
+               instruction.opcode == OpCodes.Stloc_1 ||
+               instruction.opcode == OpCodes.Stloc_2 ||
+               instruction.opcode == OpCodes.Stloc_3 ||
+               instruction.opcode == OpCodes.Stloc ||
+               instruction.opcode == OpCodes.Stloc_S;
     }
 
     private static bool IsIntConstant(CodeInstruction instruction, int expected)
@@ -199,6 +161,7 @@ internal static class ExpandedWorldDiscreteTierGenerationPatch
             return (int)instruction.operand == expected;
         if (instruction.opcode == OpCodes.Ldc_I4_S && instruction.operand is sbyte)
             return (sbyte)instruction.operand == expected;
+        if (expected == -1 && instruction.opcode == OpCodes.Ldc_I4_M1) return true;
         if (expected == 0 && instruction.opcode == OpCodes.Ldc_I4_0) return true;
         if (expected == 1 && instruction.opcode == OpCodes.Ldc_I4_1) return true;
         if (expected == 2 && instruction.opcode == OpCodes.Ldc_I4_2) return true;
@@ -208,8 +171,6 @@ internal static class ExpandedWorldDiscreteTierGenerationPatch
         if (expected == 6 && instruction.opcode == OpCodes.Ldc_I4_6) return true;
         if (expected == 7 && instruction.opcode == OpCodes.Ldc_I4_7) return true;
         if (expected == 8 && instruction.opcode == OpCodes.Ldc_I4_8) return true;
-        if (expected == 9 && instruction.opcode == OpCodes.Ldc_I4_S && instruction.operand is sbyte)
-            return (sbyte)instruction.operand == 9;
         return false;
     }
 }
