@@ -1,0 +1,61 @@
+name: Expanded Worlds retail patch audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/expanded-world-sizes
+    paths:
+      - .github/workflows/expanded-worlds-retail-patch-audit.yml
+      - gmods/ExpandedWorlds/**
+      - tests/ExpandedWorldRetailPatchFixture/**
+
+jobs:
+  apply-expanded-world-patches:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Download official Terraria 1.4.5.8 dedicated server
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archiveVersion = '1458'
+          $zip = Join-Path $env:RUNNER_TEMP "terraria-server-$archiveVersion.zip"
+          $root = Join-Path $env:RUNNER_TEMP 'terraria-server'
+          $url = "https://terraria.org/api/download/pc-dedicated-server/terraria-server-$archiveVersion.zip"
+
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $root -Force
+
+          $server = Join-Path $root "$archiveVersion/Windows/TerrariaServer.exe"
+          if (-not (Test-Path $server)) {
+            throw "TerrariaServer.exe not found at expected path: $server"
+          }
+
+          "TERRARIA_SERVER=$server" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build retail patch fixture
+        shell: pwsh
+        run: |
+          dotnet build tests/ExpandedWorldRetailPatchFixture/ExpandedWorldRetailPatchFixture.csproj -c Release
+
+      - name: Compile Expanded Worlds and apply every Harmony patch to exact 1.4.5.8 IL
+        shell: pwsh
+        run: |
+          $fixture = Join-Path $PWD 'tests/ExpandedWorldRetailPatchFixture/bin/Release/net48/ExpandedWorldRetailPatchFixture.exe'
+          if (-not (Test-Path $fixture)) {
+            throw "Retail patch fixture executable not found: $fixture"
+          }
+          & $fixture $env:TERRARIA_SERVER $PWD
+          if ($LASTEXITCODE -ne 0) {
+            throw "Expanded Worlds retail patch fixture exited with code $LASTEXITCODE"
+          }
