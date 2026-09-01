@@ -7,6 +7,9 @@ on:
       - feat/expanded-world-sizes
     paths:
       - .github/workflows/expanded-worlds-source-audit.yml
+      - gmods/ExpandedWorlds/**
+      - tests/ExpandedWorldCompile/**
+      - tests/ExpandedWorldMathCompile/**
 
 jobs:
   audit-worldgen:
@@ -63,6 +66,12 @@ jobs:
           & $ilspy -t Terraria.GameContent.Generation.Dungeon.DungeonData $server | Set-Content -Encoding UTF8 $dungeonData
           & $ilspy -t Terraria.GameContent.Biomes.HiveBiome $server | Set-Content -Encoding UTF8 $hiveBiome
 
+          foreach ($requiredFile in @($types, $worldGen, $genVars, $dungeonData, $hiveBiome)) {
+            if (-not (Test-Path $requiredFile) -or (Get-Item $requiredFile).Length -eq 0) {
+              throw "ILSpy did not produce required audit input: $requiredFile"
+            }
+          }
+
           $report = Join-Path $auditDir 'terraria-1.4.5.8-worldgen-audit.txt'
           @(
             "Terraria dedicated server: $version",
@@ -110,22 +119,34 @@ jobs:
           }
 
           Add-MatchesWithContext -Title 'GenVars fixed-capacity declarations' -Path $genVars -Patterns @(
-            'skyLakes',
+            'skyLake',
             'floatingIslandHouseX',
+            'floatingIslandHouseY',
+            'floatingIslandStyle',
             'larvaX',
+            'larvaY',
             'JChestX',
+            'JChestY',
             'mCaveX',
-            'LakeX',
-            'mushroomBiomesPosition',
-            'oasisPosition',
-            'orePatchX',
+            'mCaveY',
+            'maxTunnels',
             'tunnelX',
-            'dungeonGenVars'
+            'maxOrePatch',
+            'orePatchX',
+            'maxMushroomBiomes',
+            'mushroomBiomesPosition',
+            'maxLakes',
+            'LakeX',
+            'maxOasis',
+            'oasisPosition',
+            'dungeonGenVars',
+            'CurrentDungeonGenVars'
           ) -Before 3 -After 7
 
           Add-MatchesWithContext -Title 'DungeonData dynamic collections' -Path $dungeonData -Patterns @(
             'dungeonRooms',
             'dungeonHalls',
+            'dungeonFeatures',
             'dungeonDoorData',
             'dungeonPlatformData',
             'protectedDungeonBounds'
@@ -142,6 +163,7 @@ jobs:
 
           Add-MatchesWithContext -Title 'WorldGen reads and writes of fixed-capacity records' -Path $worldGen -Patterns @(
             'skyLakes',
+            'skyLake',
             'floatingIslandHouseX',
             'numIslandHouses',
             'larvaX',
@@ -150,16 +172,16 @@ jobs:
             'numJChests',
             'mCaveX',
             'numMCaves',
-            'LakeX',
-            'numLakes',
-            'mushroomBiomesPosition',
-            'numMushroomBiomes',
-            'oasisPosition',
-            'numOasis',
+            'tunnelX',
+            'numTunnels',
             'orePatchX',
             'numOrePatch',
-            'tunnelX',
-            'numTunnels'
+            'mushroomBiomesPosition',
+            'numMushroomBiomes',
+            'LakeX',
+            'numLakes',
+            'oasisPosition',
+            'numOasis'
           ) -Before 16 -After 24
 
           Add-MatchesWithContext -Title 'Secret-seed worldgen switches touching high-risk generation' -Path $worldGen -Patterns @(
@@ -178,6 +200,7 @@ jobs:
           ) -Before 12 -After 24
 
           Add-MatchesWithContext -Title 'Hard-coded world-size and width-tier assumptions' -Path $worldGen -Patterns @(
+            '0.0008',
             '8400',
             '6400',
             '4200',
@@ -187,14 +210,64 @@ jobs:
             'maxTilesX < 8400'
           ) -Before 5 -After 8
 
+          $failures = New-Object System.Collections.Generic.List[string]
+
+          function Assert-SourcePattern {
+            param(
+              [string]$Name,
+              [string]$Path,
+              [string]$Pattern
+            )
+
+            $matched = Select-String -Path $Path -Pattern $Pattern -Quiet
+            $result = if ($matched) { 'PASS' } else { 'FAIL' }
+            Add-Content -Encoding UTF8 $report "$result - $Name"
+            Write-Host "$result - $Name"
+            if (-not $matched) {
+              $failures.Add($Name)
+            }
+          }
+
+          Add-Content -Encoding UTF8 $report ''
+          Add-Content -Encoding UTF8 $report '=== Enforced source-shape contract ==='
+
+          Assert-SourcePattern 'Floating Island sky-lake metadata capacity is 300' $genVars 'skyLake\s*=\s*new bool\[300\]'
+          Assert-SourcePattern 'Floating Island X metadata capacity is 300' $genVars 'floatingIslandHouseX\s*=\s*new int\[300\]'
+          Assert-SourcePattern 'Floating Island Y metadata capacity is 300' $genVars 'floatingIslandHouseY\s*=\s*new int\[300\]'
+          Assert-SourcePattern 'Floating Island style metadata capacity is 300' $genVars 'floatingIslandStyle\s*=\s*new int\[300\]'
+          Assert-SourcePattern 'Larva X storage capacity is 100' $genVars 'larvaX\s*=\s*new int\[100\]'
+          Assert-SourcePattern 'Larva Y storage capacity is 100' $genVars 'larvaY\s*=\s*new int\[100\]'
+          Assert-SourcePattern 'Jungle chest X storage capacity is 100' $genVars 'JChestX\s*=\s*new int\[100\]'
+          Assert-SourcePattern 'Jungle chest Y storage capacity is 100' $genVars 'JChestY\s*=\s*new int\[100\]'
+          Assert-SourcePattern 'Mountain cave X storage capacity is 30' $genVars 'mCaveX\s*=\s*new int\[30\]'
+          Assert-SourcePattern 'Mountain cave Y storage capacity is 30' $genVars 'mCaveY\s*=\s*new int\[30\]'
+          Assert-SourcePattern 'Tunnel storage maximum is 50' $genVars 'maxTunnels\s*=\s*50'
+          Assert-SourcePattern 'Ore-patch storage maximum is 50' $genVars 'maxOrePatch\s*=\s*50'
+          Assert-SourcePattern 'Mushroom-biome storage maximum is 50' $genVars 'maxMushroomBiomes\s*=\s*50'
+          Assert-SourcePattern 'Lake storage maximum is 50' $genVars 'maxLakes\s*=\s*50'
+          Assert-SourcePattern 'Oasis storage maximum is 20' $genVars 'maxOasis\s*=\s*20'
+          Assert-SourcePattern 'Per-dungeon generation state is a dynamic list' $genVars 'List<DungeonGenVars>\s+dungeonGenVars'
+
+          Assert-SourcePattern 'Dungeon rooms use List<T>' $dungeonData 'List<DungeonRoom>\s+dungeonRooms'
+          Assert-SourcePattern 'Dungeon halls use List<T>' $dungeonData 'List<DungeonHall>\s+dungeonHalls'
+          Assert-SourcePattern 'Dungeon features use List<T>' $dungeonData 'List<IDungeonFeature>\s+dungeonFeatures'
+          Assert-SourcePattern 'Dungeon doors use List<T>' $dungeonData 'List<DungeonDoorData>\s+dungeonDoorData'
+          Assert-SourcePattern 'Dungeon platforms use List<T>' $dungeonData 'List<DungeonPlatformData>\s+dungeonPlatformData'
+          Assert-SourcePattern 'Dungeon protected bounds use List<T>' $dungeonData 'List<DungeonBounds>\s+protectedDungeonBounds'
+
           Write-Host '--- BEGIN EXPANDED WORLDS SOURCE AUDIT ---'
           Get-Content $report
           Write-Host '--- END EXPANDED WORLDS SOURCE AUDIT ---'
 
+          if ($failures.Count -gt 0) {
+            throw "Terraria $version source-shape audit failed: $($failures -join '; ')"
+          }
+
       - name: Upload audit report and exact decompile inputs
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: expanded-worlds-terraria-1.4.5.8-source-audit
           path: audit-output/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7
