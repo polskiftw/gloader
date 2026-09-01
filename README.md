@@ -88,6 +88,28 @@ public static class Mod
 
 Harmony attributes are discovered and applied automatically.
 
+## Launcher GUI
+
+Run `gloader.exe` with no arguments to open the native Windows launcher. The launcher is built directly into the same `gloader.exe`; there is no second launcher/helper executable.
+
+The launcher is intentionally just a friendly front end for the existing filesystem contract:
+
+- checking or unchecking a mod renames `Thing/` <-> `Thing.disabled/` immediately;
+- **Configure** appears when a mod has one or more top-level `.ini` files; one file opens directly and multiple files are offered in a small menu;
+- **Mods Folder** opens `gmods/` and **Refresh** rescans it;
+- **Logs** can open the newest log, the client log, the server log, or the logs folder;
+- **Show console** is a one-run debug option and is not persisted;
+- **Launch Vanilla** launches with mods disabled for that run without changing the checkboxes;
+- **Launch Terraria** starts normally with the checked mods.
+
+If both `Thing/` and `Thing.disabled/` exist at the same time, the launcher shows a conflict and refuses to rename either one instead of guessing which folder should win.
+
+To bypass the GUI and launch directly with the current mod state:
+
+```powershell
+.\gloader.exe --run
+```
+
 ## Host & Play server support
 
 Run the visible client through gloader normally from the Terraria folder:
