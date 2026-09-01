@@ -25,6 +25,16 @@ internal static class ExpandedWorldDiscreteCountMath
         return checked(2 * oneBasedWorldTier);
     }
 
+    public static int BoulderPetBaseQuota(int oneBasedWorldTier)
+    {
+        if (oneBasedWorldTier < 1)
+            throw new ArgumentOutOfRangeException(nameof(oneBasedWorldTier));
+
+        // Source Small/Medium/Large: 2, 4, 6. The No Traps seed multiplies this
+        // base by two afterward, so keep the source multiplier outside this rule.
+        return checked(2 * oneBasedWorldTier);
+    }
+
     public static IntRange SpikeCaveCountRange(int oneBasedWorldTier)
     {
         if (oneBasedWorldTier < 1)
@@ -217,6 +227,48 @@ internal static class ExpandedWorldGlowTulipCountPatch
             6,
             ExpandedWorldDiscreteCountMath.GlowTulipCount,
             "Glow Tulip");
+    }
+}
+
+/// <summary>
+/// placeTrap uses a 2/4/6 Small/Medium/Large cap for the rare Boulder Pet trap
+/// variant. No Traps doubles the source cap after this switch, so only the base
+/// is continued to 8/10 and the seed multiplier remains vanilla-owned.
+/// </summary>
+[HarmonyPatch]
+internal static class ExpandedWorldBoulderPetQuotaPatch
+{
+    private static readonly MethodInfo AdjustMethod =
+        AccessTools.Method(typeof(ExpandedWorldBoulderPetQuotaPatch), nameof(AdjustBaseQuota))
+        ?? throw new MissingMethodException(typeof(ExpandedWorldBoulderPetQuotaPatch).FullName, nameof(AdjustBaseQuota));
+
+    private static MethodBase TargetMethod()
+    {
+        MethodBase method = AccessTools.Method(typeof(WorldGen), "placeTrap");
+        if (method == null)
+            throw new MissingMethodException(typeof(WorldGen).FullName, "placeTrap");
+        return method;
+    }
+
+    [HarmonyTranspiler]
+    private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions, MethodBase __originalMethod)
+    {
+        return ExpandedWorldDiscreteCountPatchUtil.InjectAfterTierSwitch(
+            instructions,
+            __originalMethod,
+            AdjustMethod,
+            "Boulder Pet base quota",
+            new[] { 2, 4, 6 },
+            requireGetWorldSizeCall: true);
+    }
+
+    private static int AdjustBaseQuota(int vanillaCount)
+    {
+        return ExpandedWorldDiscreteCountPatchUtil.ExpandedTierOrLarge(
+            vanillaCount,
+            6,
+            ExpandedWorldDiscreteCountMath.BoulderPetBaseQuota,
+            "Boulder Pet base quota");
     }
 }
 
