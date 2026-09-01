@@ -16,6 +16,7 @@ internal static class Program
         int[] expectedDirtiestCelebration = { 15, 30, 45, 60, 75 };
         int[] expectedStatueMultiplier = { 2, 3, 4, 5, 6 };
         int[] expectedGlowTulips = { 2, 4, 6, 8, 10 };
+        int[] expectedBoulderPetBaseQuota = { 2, 4, 6, 8, 10 };
         int[] expectedSpikeCaveMinimum = { 3, 5, 7, 9, 11 };
         int[] expectedSpikeCaveMaximum = { 4, 6, 8, 10, 12 };
         int[] expectedChilletEggs = { 6, 9, 12, 15, 18 };
@@ -55,6 +56,15 @@ internal static class Program
                 Console.Error.WriteLine(
                     "Expanded Worlds compile fixture: Glow Tulip tier " + tier +
                     " expected " + expectedGlowTulips[tier - 1] + ", got " + glowTulips + ".");
+                return 1;
+            }
+
+            int boulderPetBaseQuota = ExpandedWorldDiscreteCountMath.BoulderPetBaseQuota(tier);
+            if (boulderPetBaseQuota != expectedBoulderPetBaseQuota[tier - 1])
+            {
+                Console.Error.WriteLine(
+                    "Expanded Worlds compile fixture: Boulder Pet base quota tier " + tier +
+                    " expected " + expectedBoulderPetBaseQuota[tier - 1] + ", got " + boulderPetBaseQuota + ".");
                 return 1;
             }
 
