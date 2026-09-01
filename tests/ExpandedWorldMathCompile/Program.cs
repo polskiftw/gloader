@@ -77,7 +77,6 @@ internal static class Program
         CheckRange("Bee Hives Medium", 8, 12, ExpandedWorldMath.BeeHives(6400));
         CheckRange("Bee Hives Large", 11, 16, ExpandedWorldMath.BeeHives(8400));
 
-        // Underground Desert horizontal geometry is already genuinely width based.
         CheckCount("Underground Desert width Small", 320, ExpandedWorldMath.UndergroundDesertWidth(4200));
         CheckCount("Underground Desert width Medium", 484, ExpandedWorldMath.UndergroundDesertWidth(6400));
         CheckCount("Underground Desert width Large", 640, ExpandedWorldMath.UndergroundDesertWidth(8400));
@@ -85,15 +84,51 @@ internal static class Program
 
     private static void ValidateAxisModel()
     {
-        CheckDouble("XL horizontal scale", 20d / 7d, ExpandedWorldMath.HorizontalScale(12000));
-        CheckDouble("Huge horizontal scale", 4d, ExpandedWorldMath.HorizontalScale(16800));
-        CheckDouble("XL vertical scale", 2d, ExpandedWorldMath.VerticalScale(2400));
-        CheckDouble("Huge vertical scale", 2d, ExpandedWorldMath.VerticalScale(2400));
-        CheckDouble("XL area scale", 40d / 7d, ExpandedWorldMath.AreaScale(12000, 2400));
-        CheckDouble("Huge area scale", 8d, ExpandedWorldMath.AreaScale(16800, 2400));
+        CheckDouble("XL horizontal scale", 3d, ExpandedWorldMath.HorizontalScale(ExpandedWorldMath.XLWidth));
+        CheckDouble("Huge horizontal scale", 4d, ExpandedWorldMath.HorizontalScale(ExpandedWorldMath.HugeWidth));
+        CheckDouble("XL vertical scale", 2d, ExpandedWorldMath.VerticalScale(ExpandedWorldMath.XLHeight));
+        CheckDouble("Huge vertical scale", 2d, ExpandedWorldMath.VerticalScale(ExpandedWorldMath.HugeHeight));
+        CheckDouble("XL area scale", 6d, ExpandedWorldMath.AreaScale(ExpandedWorldMath.XLWidth, ExpandedWorldMath.XLHeight));
+        CheckDouble("Huge area scale", 8d, ExpandedWorldMath.AreaScale(ExpandedWorldMath.HugeWidth, ExpandedWorldMath.HugeHeight));
+
+        // The area-equivalent isotropic scale is the square root of area scale.
+        // Anchored at Large, this gives sqrt(1.5) for XL and sqrt(2) for Huge.
+        CheckDouble(
+            "XL isotropic scale relative to Large",
+            Math.Sqrt(1.5d),
+            ExpandedWorldMath.IsotropicLinearRelativeToLarge(ExpandedWorldMath.XLWidth, ExpandedWorldMath.XLHeight));
+        CheckDouble(
+            "Huge isotropic scale relative to Large",
+            Math.Sqrt(2d),
+            ExpandedWorldMath.IsotropicLinearRelativeToLarge(ExpandedWorldMath.HugeWidth, ExpandedWorldMath.HugeHeight));
+
+        CheckDouble(
+            "XL Large-linear width continuation",
+            4.5d,
+            ExpandedWorldMath.ScaleLargeLinearByWidth(3d, ExpandedWorldMath.XLWidth));
+        CheckDouble(
+            "Huge Large-linear width continuation",
+            6d,
+            ExpandedWorldMath.ScaleLargeLinearByWidth(3d, ExpandedWorldMath.HugeWidth));
+        CheckDouble(
+            "XL Large-linear vertical continuation",
+            3d,
+            ExpandedWorldMath.ScaleLargeLinearByHeight(3d, ExpandedWorldMath.XLHeight));
+        CheckDouble(
+            "Huge Large-linear vertical continuation",
+            3d,
+            ExpandedWorldMath.ScaleLargeLinearByHeight(3d, ExpandedWorldMath.HugeHeight));
+        CheckDouble(
+            "XL Large-linear isotropic continuation",
+            3d * Math.Sqrt(1.5d),
+            ExpandedWorldMath.ScaleLargeLinearIsotropically(3d, ExpandedWorldMath.XLWidth, ExpandedWorldMath.XLHeight));
+        CheckDouble(
+            "Huge Large-linear isotropic continuation",
+            3d * Math.Sqrt(2d),
+            ExpandedWorldMath.ScaleLargeLinearIsotropically(3d, ExpandedWorldMath.HugeWidth, ExpandedWorldMath.HugeHeight));
 
         // At the Large anchor, horizontal and vertical scale are both 2.0, so
-        // the axis-aware generalization exactly equals current vanilla arithmetic.
+        // the axis-aware Desert generalization exactly equals vanilla arithmetic.
         CheckCount("Large Desert rows roll=0", 510, ExpandedWorldMath.UndergroundDesertBlockRows(0d, 2400));
         CheckCount("Large Desert rows roll=.5", 595, ExpandedWorldMath.UndergroundDesertBlockRows(0.5d, 2400));
         CheckCount("Large Remix Desert rows", 680, ExpandedWorldMath.UndergroundDesertBlockRowsRemix(2400));
@@ -102,58 +137,63 @@ internal static class Program
 
     private static void ValidateExpandedTargets()
     {
-        CheckCount("Life Crystals XL", 576, ExpandedWorldMath.LifeCrystals(12000, 2400));
-        CheckCount("Life Crystals Huge", 806, ExpandedWorldMath.LifeCrystals(16800, 2400));
+        int xlW = ExpandedWorldMath.XLWidth;
+        int xlH = ExpandedWorldMath.XLHeight;
+        int hugeW = ExpandedWorldMath.HugeWidth;
+        int hugeH = ExpandedWorldMath.HugeHeight;
 
-        CheckCount("Surface Chests XL", 60, ExpandedWorldMath.SurfaceChests(12000));
-        CheckCount("Surface Chests Huge", 84, ExpandedWorldMath.SurfaceChests(16800));
+        CheckCount("Life Crystals XL", 604, ExpandedWorldMath.LifeCrystals(xlW, xlH));
+        CheckCount("Life Crystals Huge", 806, ExpandedWorldMath.LifeCrystals(hugeW, hugeH));
 
-        CheckCount("Floating Islands XL", 9, ExpandedWorldMath.FloatingIslands(12000));
-        CheckCount("Floating Islands Huge", 13, ExpandedWorldMath.FloatingIslands(16800));
+        CheckCount("Surface Chests XL", 63, ExpandedWorldMath.SurfaceChests(xlW));
+        CheckCount("Surface Chests Huge", 84, ExpandedWorldMath.SurfaceChests(hugeW));
 
-        CheckCount("Floating Lakes XL", 4, ExpandedWorldMath.FloatingLakes(12000));
-        CheckCount("Floating Lakes Huge", 6, ExpandedWorldMath.FloatingLakes(16800));
+        CheckCount("Floating Islands XL", 10, ExpandedWorldMath.FloatingIslands(xlW));
+        CheckCount("Floating Islands Huge", 13, ExpandedWorldMath.FloatingIslands(hugeW));
 
-        CheckRange("Marble XL", 22, 45, ExpandedWorldMath.MarbleCaves(12000, 2400));
-        CheckRange("Marble Huge", 32, 64, ExpandedWorldMath.MarbleCaves(16800, 2400));
+        CheckCount("Floating Lakes XL", 4, ExpandedWorldMath.FloatingLakes(xlW));
+        CheckCount("Floating Lakes Huge", 6, ExpandedWorldMath.FloatingLakes(hugeW));
 
-        CheckRange("Granite XL", 11, 22, ExpandedWorldMath.GraniteCaves(12000));
-        CheckRange("Granite Huge", 16, 32, ExpandedWorldMath.GraniteCaves(16800));
+        CheckRange("Marble XL", 24, 48, ExpandedWorldMath.MarbleCaves(xlW, xlH));
+        CheckRange("Marble Huge", 32, 64, ExpandedWorldMath.MarbleCaves(hugeW, hugeH));
 
-        CheckRange("Underground Cabins XL", 200, 228, ExpandedWorldMath.UndergroundCabins(12000, 2400));
-        CheckRange("Underground Cabins Huge", 280, 320, ExpandedWorldMath.UndergroundCabins(16800, 2400));
+        CheckRange("Granite XL", 12, 24, ExpandedWorldMath.GraniteCaves(xlW));
+        CheckRange("Granite Huge", 16, 32, ExpandedWorldMath.GraniteCaves(hugeW));
 
-        CheckRange("Cave Chests XL", 200, 228, ExpandedWorldMath.CaveChests(12000, 2400));
-        CheckRange("Cave Chests Huge", 280, 320, ExpandedWorldMath.CaveChests(16800, 2400));
+        CheckRange("Underground Cabins XL", 210, 240, ExpandedWorldMath.UndergroundCabins(xlW, xlH));
+        CheckRange("Underground Cabins Huge", 280, 320, ExpandedWorldMath.UndergroundCabins(hugeW, hugeH));
 
-        CheckRange("Dead Man's Chests XL", 28, 57, ExpandedWorldMath.DeadMansChests(12000));
-        CheckRange("Dead Man's Chests Huge", 40, 80, ExpandedWorldMath.DeadMansChests(16800));
+        CheckRange("Cave Chests XL", 210, 240, ExpandedWorldMath.CaveChests(xlW, xlH));
+        CheckRange("Cave Chests Huge", 280, 320, ExpandedWorldMath.CaveChests(hugeW, hugeH));
 
-        CheckCount("Extra Desert Cabins XL", 11, ExpandedWorldMath.AdditionalDesertCabins(12000, 2400));
-        CheckCount("Extra Desert Cabins Huge", 16, ExpandedWorldMath.AdditionalDesertCabins(16800, 2400));
+        CheckRange("Dead Man's Chests XL", 30, 60, ExpandedWorldMath.DeadMansChests(xlW));
+        CheckRange("Dead Man's Chests Huge", 40, 80, ExpandedWorldMath.DeadMansChests(hugeW));
 
-        CheckRange("Living Trees XL", 17, 31, ExpandedWorldMath.LivingTreeMicroBiomes(12000));
-        CheckRange("Living Trees Huge", 24, 44, ExpandedWorldMath.LivingTreeMicroBiomes(16800));
+        CheckCount("Extra Desert Cabins XL", 12, ExpandedWorldMath.AdditionalDesertCabins(xlW, xlH));
+        CheckCount("Extra Desert Cabins Huge", 16, ExpandedWorldMath.AdditionalDesertCabins(hugeW, hugeH));
 
-        CheckRange("Long Tracks XL", 2, 5, ExpandedWorldMath.LongMinecartTrackCount(12000));
-        CheckRange("Long Tracks Huge", 4, 8, ExpandedWorldMath.LongMinecartTrackCount(16800));
+        CheckRange("Living Trees XL", 18, 33, ExpandedWorldMath.LivingTreeMicroBiomes(xlW));
+        CheckRange("Living Trees Huge", 24, 44, ExpandedWorldMath.LivingTreeMicroBiomes(hugeW));
 
-        CheckRange("Bee Hives XL", 15, 22, ExpandedWorldMath.BeeHives(12000));
-        CheckRange("Bee Hives Huge", 21, 32, ExpandedWorldMath.BeeHives(16800));
+        CheckRange("Long Tracks XL", 3, 6, ExpandedWorldMath.LongMinecartTrackCount(xlW));
+        CheckRange("Long Tracks Huge", 4, 8, ExpandedWorldMath.LongMinecartTrackCount(hugeW));
+
+        CheckRange("Bee Hives XL", 16, 24, ExpandedWorldMath.BeeHives(xlW));
+        CheckRange("Bee Hives Huge", 21, 32, ExpandedWorldMath.BeeHives(hugeW));
 
         // X expands; Y remains exactly Large because XL/Huge keep Large height.
-        CheckCount("Underground Desert width XL", 912, ExpandedWorldMath.UndergroundDesertWidth(12000));
-        CheckCount("Underground Desert width Huge", 1280, ExpandedWorldMath.UndergroundDesertWidth(16800));
-        CheckCount("Underground Desert rows XL roll=0", 510, ExpandedWorldMath.UndergroundDesertBlockRows(0d, 2400));
-        CheckCount("Underground Desert rows Huge roll=0", 510, ExpandedWorldMath.UndergroundDesertBlockRows(0d, 2400));
-        CheckCount("Underground Desert rows XL roll=.5", 595, ExpandedWorldMath.UndergroundDesertBlockRows(0.5d, 2400));
-        CheckCount("Underground Desert rows Huge roll=.5", 595, ExpandedWorldMath.UndergroundDesertBlockRows(0.5d, 2400));
-        CheckCount("Underground Desert height XL roll=.5", 1190, ExpandedWorldMath.UndergroundDesertHeight(0.5d, 2400));
-        CheckCount("Underground Desert height Huge roll=.5", 1190, ExpandedWorldMath.UndergroundDesertHeight(0.5d, 2400));
-        CheckCount("Remix Underground Desert height XL", 1360, ExpandedWorldMath.UndergroundDesertHeightRemix(2400));
-        CheckCount("Remix Underground Desert height Huge", 1360, ExpandedWorldMath.UndergroundDesertHeightRemix(2400));
-        CheckCount("Tenth-anniversary Desert Y offset XL", 40, ExpandedWorldMath.UndergroundDesertTenthAnniversaryYOffset(2400));
-        CheckCount("Tenth-anniversary Desert Y offset Huge", 40, ExpandedWorldMath.UndergroundDesertTenthAnniversaryYOffset(2400));
+        CheckCount("Underground Desert width XL", 960, ExpandedWorldMath.UndergroundDesertWidth(xlW));
+        CheckCount("Underground Desert width Huge", 1280, ExpandedWorldMath.UndergroundDesertWidth(hugeW));
+        CheckCount("Underground Desert rows XL roll=0", 510, ExpandedWorldMath.UndergroundDesertBlockRows(0d, xlH));
+        CheckCount("Underground Desert rows Huge roll=0", 510, ExpandedWorldMath.UndergroundDesertBlockRows(0d, hugeH));
+        CheckCount("Underground Desert rows XL roll=.5", 595, ExpandedWorldMath.UndergroundDesertBlockRows(0.5d, xlH));
+        CheckCount("Underground Desert rows Huge roll=.5", 595, ExpandedWorldMath.UndergroundDesertBlockRows(0.5d, hugeH));
+        CheckCount("Underground Desert height XL roll=.5", 1190, ExpandedWorldMath.UndergroundDesertHeight(0.5d, xlH));
+        CheckCount("Underground Desert height Huge roll=.5", 1190, ExpandedWorldMath.UndergroundDesertHeight(0.5d, hugeH));
+        CheckCount("Remix Underground Desert height XL", 1360, ExpandedWorldMath.UndergroundDesertHeightRemix(xlH));
+        CheckCount("Remix Underground Desert height Huge", 1360, ExpandedWorldMath.UndergroundDesertHeightRemix(hugeH));
+        CheckCount("Tenth-anniversary Desert Y offset XL", 40, ExpandedWorldMath.UndergroundDesertTenthAnniversaryYOffset(xlH));
+        CheckCount("Tenth-anniversary Desert Y offset Huge", 40, ExpandedWorldMath.UndergroundDesertTenthAnniversaryYOffset(hugeH));
     }
 
     private static void CheckCount(string name, int expected, int actual)
