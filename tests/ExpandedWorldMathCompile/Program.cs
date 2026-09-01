@@ -152,6 +152,49 @@ internal static class Program
         int hugeW = ExpandedWorldMath.HugeWidth;
         int hugeH = ExpandedWorldMath.HugeHeight;
 
+        CheckCount("Large Floating Island worst-case records", 210,
+            ExpandedWorldCapacityMath.FloatingIslandRecordUpperBound(8400, 3, true, 10));
+        CheckTrue("Large Floating Island worst case fits vanilla 300 slots",
+            ExpandedWorldCapacityMath.FloatingIslandRecordUpperBound(8400, 3, true, 10) <= 300);
+        CheckCount("XL Floating Island normal records", 13,
+            ExpandedWorldCapacityMath.FloatingIslandRecordUpperBound(xlW, 3, false, 1));
+        CheckCount("Huge Floating Island normal records", 16,
+            ExpandedWorldCapacityMath.FloatingIslandRecordUpperBound(hugeW, 3, false, 1));
+        CheckCount("XL Floating Island Error World records", 33,
+            ExpandedWorldCapacityMath.FloatingIslandRecordUpperBound(xlW, 3, true, 1));
+        CheckCount("Huge Floating Island Error World records", 42,
+            ExpandedWorldCapacityMath.FloatingIslandRecordUpperBound(hugeW, 3, true, 1));
+        CheckCount("XL Floating Island Care Bears x10 records", 130,
+            ExpandedWorldCapacityMath.FloatingIslandRecordUpperBound(xlW, 3, false, 10));
+        CheckCount("Huge Floating Island Care Bears x10 records", 160,
+            ExpandedWorldCapacityMath.FloatingIslandRecordUpperBound(hugeW, 3, false, 10));
+        CheckCount("XL Floating Island worst-case scratch capacity", 330,
+            ExpandedWorldCapacityMath.FloatingIslandScratchCapacity(xlW));
+        CheckCount("Huge Floating Island worst-case scratch capacity", 420,
+            ExpandedWorldCapacityMath.FloatingIslandScratchCapacity(hugeW));
+        CheckTrue("XL Floating Island worst case exceeds vanilla 300 slots",
+            ExpandedWorldCapacityMath.FloatingIslandScratchCapacity(xlW) > 300);
+        CheckTrue("Huge Floating Island worst case exceeds vanilla 300 slots",
+            ExpandedWorldCapacityMath.FloatingIslandScratchCapacity(hugeW) > 300);
+
+        CheckCount("XL Mountain Cave records", 12,
+            ExpandedWorldCapacityMath.MountainCaveRecordUpperBound(xlW, false));
+        CheckCount("Huge Mountain Cave records", 16,
+            ExpandedWorldCapacityMath.MountainCaveRecordUpperBound(hugeW, false));
+        CheckCount("XL Remix Mountain Cave records", 18,
+            ExpandedWorldCapacityMath.MountainCaveRecordUpperBound(xlW, true));
+        CheckCount("Huge Remix Mountain Cave records", 24,
+            ExpandedWorldCapacityMath.MountainCaveRecordUpperBound(hugeW, true));
+        CheckTrue("Huge Remix Mountain Caves fit vanilla 30 slots",
+            ExpandedWorldCapacityMath.MountainCaveRecordUpperBound(hugeW, true) <= 30);
+
+        CheckCount("XL ordinary Lake attempt upper bound", 17,
+            ExpandedWorldCapacityMath.OrdinaryLakeAttemptUpperBound(xlW));
+        CheckCount("Huge ordinary Lake attempt upper bound", 23,
+            ExpandedWorldCapacityMath.OrdinaryLakeAttemptUpperBound(hugeW));
+        CheckTrue("Huge ordinary Lakes stay below vanilla 50-slot buffer",
+            ExpandedWorldCapacityMath.OrdinaryLakeAttemptUpperBound(hugeW) < 50);
+
         CheckCount("XL Dungeon main-loop iterations", 279, ExpandedWorldCapacityMath.DungeonMainLoopMaxIterations(xlW));
         CheckCount("Huge Dungeon main-loop iterations", 372, ExpandedWorldCapacityMath.DungeonMainLoopMaxIterations(hugeW));
         CheckCount("XL Dungeon main room records", 57, ExpandedWorldCapacityMath.DungeonMainRoomRecordUpperBound(xlW));
