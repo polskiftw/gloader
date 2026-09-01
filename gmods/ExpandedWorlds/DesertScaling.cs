@@ -14,15 +14,12 @@ using Terraria.GameContent.Biomes.Desert;
 /// maxTilesX / 4200 and uses it for both horizontal and vertical geometry.
 ///
 /// Expanded Worlds intentionally changes the aspect ratio. Keep the source's
-/// horizontal uses on maxTilesX / 4200, but replace only the three vertical uses
-/// with maxTilesY / 1200:
+/// horizontal uses on maxTilesX / 4200, but replace only the vertical uses with
+/// maxTilesY / 1200. Everything else in CreateFromPlacement remains vanilla.
 ///
-///   normal depth:              170 * scale
-///   Remix depth:               340 * scale
-///   tenth-anniversary Y offset: 20 * scale
-///
-/// Everything else in CreateFromPlacement remains vanilla, including the exact
-/// random draw, truncation, seed branches, surface scan and rectangle creation.
+/// The transpiler is deliberately fail-closed. It recognizes both float and
+/// double numeric constants because compiler/decompiler representation can vary,
+/// but it still requires exactly the expected source-shape anchors.
 /// </summary>
 [HarmonyPatch(typeof(DesertDescription), nameof(DesertDescription.CreateFromPlacement))]
 internal static class ExpandedWorldDesertAxisScalingPatch
@@ -51,9 +48,9 @@ internal static class ExpandedWorldDesertAxisScalingPatch
             if (!LoadsLocal(code[i], scaleLocal) || !IsVerticalScaleUse(code, i))
                 continue;
 
-            // Stack at this point contains the source's width-derived double.
-            // Transform only that value; leave every surrounding arithmetic and
-            // random operation exactly as Terraria emitted it.
+            // The identified scale local is a float in Terraria. Insert a
+            // float->float transformation immediately after ldloc so any
+            // compiler-emitted conv.r8 remains in its original position.
             code.Insert(i + 1, new CodeInstruction(OpCodes.Call, AdjustVerticalScaleMethod));
             replacements++;
             i++;
@@ -65,27 +62,27 @@ internal static class ExpandedWorldDesertAxisScalingPatch
                 "[Expanded Worlds] Underground Desert source shape changed in " +
                 (__originalMethod?.DeclaringType?.FullName ?? "DesertDescription") + "." +
                 (__originalMethod?.Name ?? "CreateFromPlacement") +
-                ": expected exactly 3 vertical overall-scale uses (170/340/20), found " +
+                ": expected exactly 3 vertical overall-scale uses, found " +
                 replacements + ". Refusing to guess against this Terraria build.");
         }
 
         return code;
     }
 
-    private static double AdjustVerticalScale(double vanillaOverallScale)
+    private static float AdjustVerticalScale(float vanillaOverallScale)
     {
         if (!ExpandedWorldState.GenerationArmed || Main.maxTilesX <= ExpandedWorldMath.LargeWidth)
             return vanillaOverallScale;
 
-        return ExpandedWorldMath.VerticalScale(Main.maxTilesY);
+        return (float)ExpandedWorldMath.VerticalScale(Main.maxTilesY);
     }
 
     private static int FindVanillaOverallScaleLocal(IReadOnlyList<CodeInstruction> code)
     {
         // Source anchor:
-        //   double num = (double)Main.maxTilesX / 4200.0;
-        // Find the store following that exact physical-width calculation rather
-        // than assuming a compiler-specific local number.
+        //   float scale = (float)Main.maxTilesX / 4200f;
+        // Locate the local from the physical-width calculation instead of
+        // assuming a compiler-specific local index.
         for (int i = 0; i < code.Count; i++)
         {
             if (code[i].opcode != OpCodes.Ldsfld || !Equals(code[i].operand, MaxTilesXField))
@@ -94,9 +91,9 @@ internal static class ExpandedWorldDesertAxisScalingPatch
             bool saw4200 = false;
             bool sawDivision = false;
 
-            for (int j = i + 1; j < code.Count && j <= i + 8; j++)
+            for (int j = i + 1; j < code.Count && j <= i + 10; j++)
             {
-                if (IsDoubleConstant(code[j], 4200d))
+                if (IsNumericConstant(code[j], 4200d))
                     saw4200 = true;
                 else if (code[j].opcode == OpCodes.Div)
                     sawDivision = true;
@@ -119,21 +116,19 @@ internal static class ExpandedWorldDesertAxisScalingPatch
 
     private static bool IsVerticalScaleUse(IReadOnlyList<CodeInstruction> code, int scaleLoadIndex)
     {
-        // The three vertical source expressions are uniquely anchored by these
-        // constants. Look only a short distance backward from the load of the
-        // identified scale local so unrelated arithmetic cannot match.
-        int start = Math.Max(0, scaleLoadIndex - 8);
+        // The audited vertical source expressions are anchored by these source
+        // constants. Accept R4/R8 representations, but do not search across a
+        // local store into a previous assignment.
+        int start = Math.Max(0, scaleLoadIndex - 10);
         for (int i = scaleLoadIndex - 1; i >= start; i--)
         {
-            if (IsDoubleConstant(code[i], 170d) ||
-                IsDoubleConstant(code[i], 340d) ||
-                IsDoubleConstant(code[i], 20d))
+            if (IsNumericConstant(code[i], 170d) ||
+                IsNumericConstant(code[i], 340d) ||
+                IsNumericConstant(code[i], 20d))
             {
                 return true;
             }
 
-            // A local store marks the beginning of another source assignment;
-            // do not search through it for an old constant.
             if (GetStoredLocalIndex(code[i]) >= 0)
                 break;
         }
@@ -141,12 +136,15 @@ internal static class ExpandedWorldDesertAxisScalingPatch
         return false;
     }
 
-    private static bool IsDoubleConstant(CodeInstruction instruction, double expected)
+    private static bool IsNumericConstant(CodeInstruction instruction, double expected)
     {
-        if (instruction.opcode != OpCodes.Ldc_R8 || !(instruction.operand is double))
-            return false;
+        if (instruction.opcode == OpCodes.Ldc_R8 && instruction.operand is double)
+            return Math.Abs((double)instruction.operand - expected) < 1e-9;
 
-        return Math.Abs((double)instruction.operand - expected) < 1e-12;
+        if (instruction.opcode == OpCodes.Ldc_R4 && instruction.operand is float)
+            return Math.Abs((double)(float)instruction.operand - expected) < 1e-6;
+
+        return false;
     }
 
     private static bool LoadsLocal(CodeInstruction instruction, int localIndex)
