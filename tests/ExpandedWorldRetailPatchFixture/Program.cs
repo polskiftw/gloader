@@ -106,7 +106,7 @@ internal static class Program
 
         using (var peStream = new MemoryStream())
         {
-            EmitResult result = compilation.Emit(peStream);
+            var result = compilation.Emit(peStream);
             if (!result.Success)
             {
                 string errors = string.Join(
