@@ -1,0 +1,173 @@
+name: Expanded Worlds Terraria source audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/expanded-world-sizes
+    paths:
+      - .github/workflows/expanded-worlds-source-audit.yml
+
+jobs:
+  audit-worldgen:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install ILSpy command line
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .audit-tools | Out-Null
+          dotnet tool install ilspycmd --tool-path .audit-tools
+
+      - name: Audit Terraria 1.4.5.8 worldgen source shape
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '1.4.5.8'
+          $zip = Join-Path $env:RUNNER_TEMP "terraria-server-$version.zip"
+          $root = Join-Path $env:RUNNER_TEMP 'terraria-server'
+          $url = "https://terraria.org/api/download/pc-dedicated-server/terraria-server-$version.zip"
+
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $root -Force
+
+          $server = Join-Path $root "$version/Windows/TerrariaServer.exe"
+          if (-not (Test-Path $server)) {
+            throw "TerrariaServer.exe not found at expected path: $server"
+          }
+
+          $hash = (Get-FileHash $server -Algorithm SHA256).Hash
+          $ilspy = Join-Path $PWD '.audit-tools/ilspycmd.exe'
+          $auditDir = Join-Path $PWD 'audit-output'
+          New-Item -ItemType Directory -Force $auditDir | Out-Null
+
+          $worldGen = Join-Path $env:RUNNER_TEMP 'WorldGen.cs'
+          $genVars = Join-Path $env:RUNNER_TEMP 'GenVars.cs'
+          $dungeonData = Join-Path $env:RUNNER_TEMP 'DungeonData.cs'
+          $types = Join-Path $env:RUNNER_TEMP 'types.txt'
+
+          & $ilspy -l c $server | Set-Content -Encoding UTF8 $types
+          & $ilspy -t Terraria.WorldGen $server | Set-Content -Encoding UTF8 $worldGen
+          & $ilspy -t Terraria.WorldBuilding.GenVars $server | Set-Content -Encoding UTF8 $genVars
+          & $ilspy -t Terraria.GameContent.Generation.Dungeon.DungeonData $server | Set-Content -Encoding UTF8 $dungeonData
+
+          $report = Join-Path $auditDir 'terraria-1.4.5.8-worldgen-audit.txt'
+          @(
+            "Terraria dedicated server: $version",
+            "TerrariaServer.exe SHA256: $hash",
+            "Audit generated: $([DateTime]::UtcNow.ToString('u'))",
+            '',
+            '=== Relevant type names ==='
+          ) | Set-Content -Encoding UTF8 $report
+
+          Select-String -Path $types -Pattern 'WorldGen.*SecretSeed|DungeonData|DungeonGenVars|WorldBuilding.GenVars' |
+            ForEach-Object { $_.Line } | Add-Content -Encoding UTF8 $report
+
+          function Add-MatchesWithContext {
+            param(
+              [string]$Title,
+              [string]$Path,
+              [string[]]$Patterns,
+              [int]$Before = 5,
+              [int]$After = 8
+            )
+
+            Add-Content -Encoding UTF8 $report ''
+            Add-Content -Encoding UTF8 $report "=== $Title ==="
+            foreach ($pattern in $Patterns) {
+              Add-Content -Encoding UTF8 $report ''
+              Add-Content -Encoding UTF8 $report "--- pattern: $pattern ---"
+              $matches = Select-String -Path $Path -Pattern $pattern -Context $Before,$After
+              if (-not $matches) {
+                Add-Content -Encoding UTF8 $report '[NO MATCH]'
+                continue
+              }
+
+              foreach ($match in $matches) {
+                Add-Content -Encoding UTF8 $report "[line $($match.LineNumber)]"
+                foreach ($line in $match.Context.PreContext) {
+                  Add-Content -Encoding UTF8 $report $line
+                }
+                Add-Content -Encoding UTF8 $report $match.Line
+                foreach ($line in $match.Context.PostContext) {
+                  Add-Content -Encoding UTF8 $report $line
+                }
+                Add-Content -Encoding UTF8 $report '...'
+              }
+            }
+          }
+
+          Add-MatchesWithContext -Title 'GenVars fixed-capacity declarations' -Path $genVars -Patterns @(
+            'floatingIslandHouseX',
+            'larvaX',
+            'JChestX',
+            'mCaveX',
+            'LakeX',
+            'mushroomX',
+            'oases',
+            'orePatch',
+            'tunnelX',
+            'dungeonGenVars'
+          ) -Before 2 -After 5
+
+          Add-MatchesWithContext -Title 'DungeonData dynamic collections' -Path $dungeonData -Patterns @(
+            'dungeonRooms',
+            'dungeonHalls',
+            'dungeonDoorData',
+            'dungeonPlatformData',
+            'protectedDungeonBounds'
+          ) -Before 2 -After 3
+
+          Add-MatchesWithContext -Title 'WorldGen reads and writes of fixed-capacity records' -Path $worldGen -Patterns @(
+            'floatingIslandHouseX',
+            'numIslandHouses',
+            'larvaX',
+            'numLarva',
+            'JChestX',
+            'numJChests',
+            'mCaveX',
+            'numMCaves',
+            'LakeX',
+            'numLakes',
+            'mushroomX',
+            'numMushrooms',
+            'oases',
+            'numOasis',
+            'orePatch',
+            'numOrePatch',
+            'tunnelX',
+            'numTunnels'
+          ) -Before 8 -After 12
+
+          Add-MatchesWithContext -Title 'Secret-seed worldgen switches touching high-risk generation' -Path $worldGen -Patterns @(
+            'extraFloatingIslands',
+            'extraFloatingIslandsReducedAmount',
+            'dualDungeons',
+            'extraLivingTrees',
+            'notTheBees',
+            'NotTheBees',
+            'drunkWorldGen',
+            'remixWorldGen',
+            'getGoodWorldGen'
+          ) -Before 8 -After 14
+
+          Write-Host '--- BEGIN EXPANDED WORLDS SOURCE AUDIT ---'
+          Get-Content $report
+          Write-Host '--- END EXPANDED WORLDS SOURCE AUDIT ---'
+
+      - name: Upload audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: expanded-worlds-terraria-1.4.5.8-source-audit
+          path: audit-output/terraria-1.4.5.8-worldgen-audit.txt
+          if-no-files-found: error
+          retention-days: 7
