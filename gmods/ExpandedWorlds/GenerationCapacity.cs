@@ -6,17 +6,18 @@ using HarmonyLib;
 using Terraria;
 
 /// <summary>
-/// Protects Expanded Worlds from fixed-capacity Dungeon bookkeeping without
-/// changing generation behavior.
+/// Protects Expanded Worlds from source worldgen bookkeeping capacities without
+/// changing generation counts, RNG, placement choices, or seed behavior.
 ///
-/// Terraria 1.4.5 replaced the historical fixed room/door/platform scratch
-/// arrays with per-DungeonData List<T> collections so secret seeds can generate
-/// multiple independent Dungeons. On that source shape there is nothing to
-/// resize: validate the audited dynamic-storage contract and leave it untouched.
+/// Current Terraria 1.4.5 uses dynamic per-DungeonData List<T> collections for
+/// Dungeon state, so those are validation-only. Floating Island metadata remains
+/// fixed arrays, however, and the 1.4.5.8 Error World + Care Bears combination
+/// can exceed vanilla's 300 records on XL/Huge. Those arrays are enlarged to the
+/// exact audited worst-case record bound.
 ///
-/// Older Terraria builds used fixed static arrays. Keep the source-derived
-/// legacy resize as a compatibility fallback only when the modern DungeonData
-/// type is absent.
+/// Older Terraria builds used fixed Dungeon arrays. Keep the source-derived
+/// legacy Dungeon resize as a compatibility fallback only when modern
+/// DungeonData is absent.
 /// </summary>
 internal static class ExpandedWorldGenerationCapacity
 {
@@ -33,6 +34,9 @@ internal static class ExpandedWorldGenerationCapacity
         if (!ExpandedWorldState.GenerationArmed || Main.maxTilesX <= ExpandedWorldMath.LargeWidth)
             return;
 
+        Type generationHolder = AccessTools.TypeByName(GenVarsTypeName) ?? typeof(WorldGen);
+        EnsureFloatingIslandStorage(generationHolder);
+
         Type modernDungeonData = AccessTools.TypeByName(ModernDungeonDataTypeName);
         if (modernDungeonData != null)
         {
@@ -40,19 +44,35 @@ internal static class ExpandedWorldGenerationCapacity
             Console.WriteLine(
                 "[Expanded Worlds] Terraria 1.4.5-style DungeonData uses dynamic List<T> storage; " +
                 "no Dungeon scratch-capacity resize is required.");
-            return;
         }
+        else
+        {
+            EnsureLegacyFixedDungeonStorage(generationHolder);
+        }
+    }
 
-        EnsureLegacyFixedDungeonStorage();
+    private static void EnsureFloatingIslandStorage(Type holder)
+    {
+        int required = ExpandedWorldCapacityMath.FloatingIslandScratchCapacity(Main.maxTilesX);
+
+        // Terraria 1.4.5.8 indexes all four arrays by GenVars.numIslandHouses.
+        // The Care Bears clamp occurs after the generation loop, so it cannot
+        // protect these writes. Resize all parallel arrays together.
+        EnsureStaticArray(holder, required, typeof(bool), "skyLake");
+        EnsureStaticArray(holder, required, typeof(int), "floatingIslandHouseX");
+        EnsureStaticArray(holder, required, typeof(int), "floatingIslandHouseY");
+        EnsureStaticArray(holder, required, typeof(int), "floatingIslandStyle");
+
+        Console.WriteLine(
+            "[Expanded Worlds] Floating Island metadata capacity ensured at " +
+            required + " records for width " + Main.maxTilesX + ".");
     }
 
     private static void ValidateModernDynamicDungeonStorage(Type dungeonData)
     {
-        // 1.4.5.6 audited source stores every count-growing Dungeon collection
-        // in List<T>. This is what makes Dual Dungeons and larger dungeons free
-        // of the old 100/500-record ceilings. Exact names are intentional: an
-        // upstream source change must fail closed rather than silently falling
-        // back to obsolete static-array assumptions.
+        // Exact Terraria 1.4.5.8 source stores every count-growing Dungeon
+        // collection in List<T>. This is what lets Dual Dungeons have independent
+        // state without the historical 100/500-record ceilings.
         ValidateInstanceListField(dungeonData, "dungeonRooms");
         ValidateInstanceListField(dungeonData, "dungeonHalls");
         ValidateInstanceListField(dungeonData, "dungeonFeatures");
@@ -102,28 +122,27 @@ internal static class ExpandedWorldGenerationCapacity
         return IsListType(type) && type.GetGenericArguments()[0] == elementType;
     }
 
-    private static void EnsureLegacyFixedDungeonStorage()
+    private static void EnsureLegacyFixedDungeonStorage(Type holder)
     {
-        Type holder = AccessTools.TypeByName(GenVarsTypeName) ?? typeof(WorldGen);
         int requiredRooms = ExpandedWorldCapacityMath.DungeonRoomRecordUpperBound(Main.maxTilesX, Main.maxTilesY);
         int requiredDoors = ExpandedWorldCapacityMath.DungeonDoorRecordUpperBound(Main.maxTilesX, Main.maxTilesY);
         int requiredPlatforms = ExpandedWorldCapacityMath.DungeonPlatformRecordUpperBound(Main.maxTilesX, Main.maxTilesY);
 
-        EnsureLegacyStaticArray(holder, requiredRooms, typeof(int), "dRoomX");
-        EnsureLegacyStaticArray(holder, requiredRooms, typeof(int), "dRoomY");
-        EnsureLegacyStaticArray(holder, requiredRooms, typeof(int), "dRoomSize");
-        EnsureLegacyStaticArray(holder, requiredRooms, typeof(bool), "dRoomTreasure");
-        EnsureLegacyStaticArray(holder, requiredRooms, typeof(int), "dRoomL");
-        EnsureLegacyStaticArray(holder, requiredRooms, typeof(int), "dRoomR");
-        EnsureLegacyStaticArray(holder, requiredRooms, typeof(int), "dRoomT");
-        EnsureLegacyStaticArray(holder, requiredRooms, typeof(int), "dRoomB");
+        EnsureStaticArray(holder, requiredRooms, typeof(int), "dRoomX");
+        EnsureStaticArray(holder, requiredRooms, typeof(int), "dRoomY");
+        EnsureStaticArray(holder, requiredRooms, typeof(int), "dRoomSize");
+        EnsureStaticArray(holder, requiredRooms, typeof(bool), "dRoomTreasure");
+        EnsureStaticArray(holder, requiredRooms, typeof(int), "dRoomL");
+        EnsureStaticArray(holder, requiredRooms, typeof(int), "dRoomR");
+        EnsureStaticArray(holder, requiredRooms, typeof(int), "dRoomT");
+        EnsureStaticArray(holder, requiredRooms, typeof(int), "dRoomB");
 
-        EnsureLegacyStaticArray(holder, requiredDoors, typeof(int), "DDoorX");
-        EnsureLegacyStaticArray(holder, requiredDoors, typeof(int), "DDoorY");
-        EnsureLegacyStaticArray(holder, requiredDoors, typeof(int), "DDoorPos");
+        EnsureStaticArray(holder, requiredDoors, typeof(int), "DDoorX");
+        EnsureStaticArray(holder, requiredDoors, typeof(int), "DDoorY");
+        EnsureStaticArray(holder, requiredDoors, typeof(int), "DDoorPos");
 
-        EnsureLegacyStaticArray(holder, requiredPlatforms, typeof(int), "dungeonPlatformX", "DPlatX");
-        EnsureLegacyStaticArray(holder, requiredPlatforms, typeof(int), "dungeonPlatformY", "DPlatY");
+        EnsureStaticArray(holder, requiredPlatforms, typeof(int), "dungeonPlatformX", "DPlatX");
+        EnsureStaticArray(holder, requiredPlatforms, typeof(int), "dungeonPlatformY", "DPlatY");
 
         Console.WriteLine(
             "[Expanded Worlds] Legacy Dungeon scratch capacity: rooms=" + requiredRooms +
@@ -131,7 +150,7 @@ internal static class ExpandedWorldGenerationCapacity
             ", platforms=" + requiredPlatforms + ".");
     }
 
-    private static void EnsureLegacyStaticArray(
+    private static void EnsureStaticArray(
         Type holder,
         int requiredLength,
         Type elementType,
@@ -151,7 +170,7 @@ internal static class ExpandedWorldGenerationCapacity
         if (!field.IsStatic || !field.FieldType.IsArray || field.FieldType.GetElementType() != elementType)
         {
             throw new InvalidOperationException(
-                "[Expanded Worlds] Legacy Dungeon capacity field " + holder.FullName + "." + field.Name +
+                "[Expanded Worlds] Capacity field " + holder.FullName + "." + field.Name +
                 " no longer has the expected static " + elementType.Name + "[] shape. Refusing to guess.");
         }
 
@@ -159,7 +178,7 @@ internal static class ExpandedWorldGenerationCapacity
         if (current == null)
         {
             throw new InvalidOperationException(
-                "[Expanded Worlds] Legacy Dungeon capacity field " + holder.FullName + "." + field.Name +
+                "[Expanded Worlds] Capacity field " + holder.FullName + "." + field.Name +
                 " is null. Refusing to guess.");
         }
 
@@ -173,10 +192,8 @@ internal static class ExpandedWorldGenerationCapacity
 }
 
 /// <summary>
-/// clearWorld is late enough that the selected expanded dimensions are active.
-/// For modern 1.4.5 Terraria this hook validates the dynamic Dungeon storage
-/// contract. For legacy layouts it also runs after worldgen bookkeeping resets,
-/// so any required fixed-array enlargement survives into the generation passes.
+/// clearWorld is late enough that selected expanded dimensions are active and
+/// early enough that worldgen passes have not consumed their scratch storage.
 /// Ordinary world loading is untouched because the generation-only guard is off.
 /// </summary>
 [HarmonyPatch]
