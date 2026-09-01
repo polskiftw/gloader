@@ -1,0 +1,89 @@
+name: Expanded Worlds official server contract audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/expanded-world-sizes
+    paths:
+      - .github/workflows/expanded-worlds-server-contract-audit.yml
+      - gmods/ExpandedWorlds/**
+      - tests/ExpandedWorldServerContractFixture/**
+
+jobs:
+  audit-shared-server-contracts:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Download official Terraria 1.4.5.8 dedicated server
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archiveVersion = '1458'
+          $zip = Join-Path $env:RUNNER_TEMP "terraria-server-$archiveVersion.zip"
+          $root = Join-Path $env:RUNNER_TEMP 'terraria-server'
+          $url = "https://terraria.org/api/download/pc-dedicated-server/terraria-server-$archiveVersion.zip"
+
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $root -Force
+
+          $server = Join-Path $root "$archiveVersion/Windows/TerrariaServer.exe"
+          if (-not (Test-Path $server)) {
+            throw "TerrariaServer.exe not found at expected path: $server"
+          }
+
+          $hash = (Get-FileHash $server -Algorithm SHA256).Hash
+          Write-Host "Official TerrariaServer.exe SHA256: $hash"
+          "TERRARIA_SERVER=$server" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "TERRARIA_SERVER_SHA256=$hash" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build server metadata contract fixture
+        shell: pwsh
+        run: |
+          dotnet build tests/ExpandedWorldServerContractFixture/ExpandedWorldServerContractFixture.csproj -c Release
+
+      - name: Verify shared Terraria metadata and managed method bodies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $fixture = Join-Path $PWD 'tests/ExpandedWorldServerContractFixture/bin/Release/net8.0/ExpandedWorldServerContractFixture.dll'
+          if (-not (Test-Path $fixture)) {
+            throw "Server contract fixture not found: $fixture"
+          }
+
+          $reportDir = Join-Path $PWD 'server-contract-audit-output'
+          New-Item -ItemType Directory -Force $reportDir | Out-Null
+          $report = Join-Path $reportDir 'terraria-1.4.5.8-shared-contracts.txt'
+
+          @(
+            'Expanded Worlds official-server shared contract audit',
+            "Terraria version: 1.4.5.8",
+            "TerrariaServer.exe SHA256: $env:TERRARIA_SERVER_SHA256",
+            '',
+            'This lane intentionally does NOT claim retail-client Harmony/UI compatibility.',
+            'It verifies only server-shared managed metadata/method-body contracts used by worldgen auditing.',
+            ''
+          ) | Set-Content -Encoding UTF8 $report
+
+          & dotnet $fixture $env:TERRARIA_SERVER 2>&1 | Tee-Object -FilePath $report -Append
+          if ($LASTEXITCODE -ne 0) {
+            throw "Expanded Worlds official-server contract fixture exited with code $LASTEXITCODE"
+          }
+
+      - name: Upload server contract report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: expanded-worlds-terraria-1.4.5.8-server-contract-audit
+          path: server-contract-audit-output/
+          if-no-files-found: warn
+          retention-days: 7
