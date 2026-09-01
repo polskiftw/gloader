@@ -33,14 +33,15 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $version = '1.4.5.8'
-          $zip = Join-Path $env:RUNNER_TEMP "terraria-server-$version.zip"
+          $archiveVersion = '1458'
+          $zip = Join-Path $env:RUNNER_TEMP "terraria-server-$archiveVersion.zip"
           $root = Join-Path $env:RUNNER_TEMP 'terraria-server'
-          $url = "https://terraria.org/api/download/pc-dedicated-server/terraria-server-$version.zip"
+          $url = "https://terraria.org/api/download/pc-dedicated-server/terraria-server-$archiveVersion.zip"
 
           Invoke-WebRequest -Uri $url -OutFile $zip
           Expand-Archive -Path $zip -DestinationPath $root -Force
 
-          $server = Join-Path $root "$version/Windows/TerrariaServer.exe"
+          $server = Join-Path $root "$archiveVersion/Windows/TerrariaServer.exe"
           if (-not (Test-Path $server)) {
             throw "TerrariaServer.exe not found at expected path: $server"
           }
