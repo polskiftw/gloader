@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <Compile Include="../../gmods/ExpandedWorlds/GenerationMath.cs" Link="GenerationMath.cs" />
+    <Compile Include="../../gmods/ExpandedWorlds/GenerationCapacityMath.cs" Link="GenerationCapacityMath.cs" />
     <Compile Include="Program.cs" />
   </ItemGroup>
 
