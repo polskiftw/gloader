@@ -11,67 +11,91 @@ The height deliberately stays at vanilla Large's `2,400` tiles. The goal is **mo
 
 > Scale territory, preserve geography, preserve vanilla seed semantics.
 
-Expanded Worlds does **not** replace Terraria's world generator. It changes the canvas size immediately before vanilla allocates the world, then lets Terraria run its normal generation pipeline.
+Expanded Worlds does **not** define worldgen by feel. XL and Huge are mathematical continuations of Terraria's existing Small / Medium / Large rules.
 
-That matters for compatibility:
+Terraria does not have one universal "world size multiplier." Different generators scale from different physical quantities:
 
-- Terraria still categorizes XL/Huge as **Large** anywhere vanilla asks for the Small/Medium/Large tier.
-- The real `Main.maxTilesX` is `12000` or `16800` during generation, so passes that scale from actual width/area naturally see the expanded canvas.
-- Special and secret seed logic is not bypassed or reimplemented. Vanilla applies its seed-specific pass changes normally.
-- Existing Small/Medium/Large behavior is untouched when one of the vanilla buttons is selected.
+- world **width**;
+- world **tile area** (`width x height`);
+- world **height**;
+- a discrete Small / Medium / Large rule.
 
-This is intentional. We do **not** invent a fourth/fifth value inside Terraria's private world-size enum because unrelated vanilla systems may assume the only valid categorical sizes are Small, Medium, and Large.
+Expanded Worlds preserves that distinction. `GenerationMath.cs` contains pure dimension-aware formulas, and CI first requires each extrapolated family to reproduce the known vanilla Small / Medium / Large outputs. A formula that cannot reproduce vanilla is not accepted as the definition of XL / Huge behavior.
 
-## Expected worldgen feel
+This is also why the mod does **not** invent a fake Terraria world-size enum value such as 3 or 4. Gameplay code that expects Small / Medium / Large continues to see **Large**. During world generation, systems that correctly scale from `Main.maxTilesX`, `Main.maxTilesY`, or their product see the real expanded dimensions.
 
-The target is a normal Terraria world that got steroids:
+## Geography
 
-- one main Jungle becomes a much larger Jungle territory rather than creating `Jungle #2`;
-- one Snow biome remains the Snow side/zone;
-- the main Desert / Underground Desert remains geographically meaningful;
-- unique landmarks remain unique unless a special/secret seed explicitly says otherwise;
-- repeatable content should scale wherever vanilla derives its count/placement attempts from actual world width or area.
+The intended geography follows from extending vanilla's generator, not from manually painting extra biomes:
 
-Because this mod deliberately leaves vanilla worldgen in control, the first runtime test pass is also an audit: any feature whose vanilla code caps itself at the Large tier rather than scaling from `Main.maxTilesX` can be identified and supplemented surgically instead of replacing the generator wholesale.
+- one main Jungle remains **the Jungle** and receives the larger territory implied by the generator's dimension math;
+- one Snow/Ice region remains the Snow side/zone;
+- the main Desert / Underground Desert remains one geographic region;
+- unique landmarks remain unique unless vanilla seed logic explicitly changes that;
+- repeatable structures and micro-biomes use their own vanilla scaling family.
+
+There is no subjective post-generation density tuning. If an XL/Huge result disagrees with the mathematically extended vanilla rule, that is a bug in the mod or a still-unpatched vanilla Large-tier cap.
+
+## Validated scaling matrix
+
+The following formulas reproduce the existing Small / Medium / Large rows before extrapolating XL / Huge:
+
+| Feature | Scaling family | Small | Medium | Large | XL | Huge |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Life Crystals | tile area | 100 | 230 | 403 | **576** | **806** |
+| Surface Chests | width | 21 | 32 | 42 | **60** | **84** |
+| Floating Islands | width | 3 | 5 | 6 | **9** | **13** |
+| Floating Lakes | width-density continuation | 1 | 2 | 3 | **4** | **6** |
+| Marble caves | tile area | 4–8 | 9–18 | 16–32 | **22–45** | **32–64** |
+| Granite caves | width | 4–8 | 6–12 | 8–16 | **11–22** | **16–32** |
+| Underground Cabins | tile area | 35–40 | 80–91 | 140–160 | **200–228** | **280–320** |
+| Cave Chests | tile area | 35–40 | 80–91 | 140–160 | **200–228** | **280–320** |
+| Dead Man's Chests | width | 10–20 | 15–30 | 20–40 | **28–57** | **40–80** |
+| Extra Desert Cabins | tile area | 2 | 4 | 8 | **11** | **16** |
+| Living Tree micro-biomes | width | 6–11 | 9–16 | 12–22 | **17–31** | **24–44** |
+| Long minecart tracks (count) | width | 1–2 | 1–3 | 2–4 | **2–5** | **4–8** |
+| Bee Hives | width | 6–8 | 8–12 | 11–16 | **15–22** | **21–32** |
+
+The integer boundaries are intentional. Terraria's worldgen scaling commonly multiplies the Small-world base by a width/area ratio and truncates to an integer; Expanded Worlds preserves that behavior instead of rounding to prettier values.
+
+Features not in this table are **not guessed**. They remain vanilla until their actual scaling rule is established. For example, if public/current data for a feature cannot reproduce all three vanilla tiers with the proposed formula, that formula stays out of the mod until the discrepancy is resolved.
+
+## Native scalers vs Large-tier caps
+
+Many vanilla passes already consume physical dimensions directly. Once XL/Huge set `Main.maxTilesX` before generation, those passes mathematically extrapolate on their own and should not be replaced.
+
+The mod only needs an explicit patch where vanilla expresses the same Small / Medium / Large progression as a hard cap or tier branch. Floating Lakes are the clearest example: vanilla's 1 / 2 / 3 sequence can be represented by `floor(worldWidth / 2800)`, which exactly reproduces all three existing sizes and continues to 4 / 6 for XL / Huge.
+
+That is the patching policy throughout this mod: **generalize the existing rule, do not supplement content after the fact.**
 
 ## Special / secret seeds
 
 The compatibility policy is simple: **the seed wins**.
 
-Expanded Worlds only supplies the larger dimensions. Terraria's own seed processing still decides terrain/pass behavior, so seeds that intentionally replace or radically reshape normal geography should remain weird rather than being normalized back into a standard world.
+Expanded Worlds supplies dimensions and generalized size math. Terraria's own special/secret-seed processing still decides which generation passes run and how they are transformed. A seed that deliberately makes the world all Snow, adds a second Dungeon, changes Jungle placement, shrinks/enlarges Hives, or otherwise violates normal geography remains authoritative.
 
-The important torture tests are:
-
-1. normal XL
-2. normal Huge
-3. Drunk Huge
-4. Remix / Don't Dig Up Huge
-5. Not the Bees Huge
-6. For the Worthy Huge
-7. Get Fixed Boi / Zenith Huge
-8. representative 1.4.5 secret-seed combinations
+Expanded Worlds must scale the seed's world; it must not normalize the seed back into an ordinary one.
 
 ## Multiplayer
 
-`16,800` is below the signed 16-bit coordinate ceiling (`32,767`) used by important parts of Terraria's networking protocol. Host & Play should therefore remain representable without inventing a new network format.
+`16,800` is below the signed 16-bit coordinate ceiling (`32,767`) used by important parts of Terraria's networking protocol. No custom world-file or network format is introduced.
 
-Both the host and server should still be launched through gLoader as usual. Joining-player requirements depend on whether later revisions add client-visible behavior beyond vanilla world data; the current implementation only changes world creation/generation.
+## Implementation
 
-## Current implementation
-
-`Main.cs` does four things:
+`Main.cs` currently:
 
 1. extends the New World size row from three choices to five;
-2. keeps Terraria's internal categorical selection at vanilla **Large** when XL/Huge is selected;
-3. applies the real dimensions at `WorldGen.CreateNewWorld`;
-4. reapplies them at `WorldGen.clearWorld` immediately before world storage is allocated.
+2. keeps Terraria's categorical Small / Medium / Large state at vanilla **Large** for XL/Huge;
+3. arms the chosen expanded dimensions only for the active world-generation job;
+4. applies those dimensions at `WorldGen.CreateNewWorld` and again immediately before `WorldGen.clearWorld` allocates world storage;
+5. disarms the custom dimensions in a `GenerateWorld` finalizer even if generation throws, so later ordinary world loads cannot inherit them.
 
-No world file format is patched. Terraria already saves the real tile dimensions in the world header.
+`GenerationMath.cs` is Terraria-independent and defines the verified scaling math. `tests/ExpandedWorldMathCompile` runs the vanilla-parity and XL/Huge target matrix in CI.
 
-## Testing status
+No world file format is patched. Terraria already stores the real tile dimensions in the world header.
 
-The source is written against the current 1.4.5-era UI/worldgen shape and uses reflection for private Terraria UI members so visibility changes are less likely to break compilation.
+## Verification policy
 
-gLoader compiles raw mods against the exact installed `Terraria.exe` at launch, so the decisive test is launching the branch build against the current game and generating the matrix above. The repository's ordinary CI validates gLoader itself but does not possess a retail Terraria executable with which to compile every raw gmod.
+The user should not have to inspect a generated map and decide whether it "looks right." Mathematical worldgen behavior is regression-tested in CI.
 
-If the first generated Huge map reveals a Large-tier density cap (for example too few of a specific micro-biome or structure), fix that feature specifically. Do not solve it by duplicating the whole vanilla generator or by blindly multiplying every unique structure.
+A retail Terraria launch is still useful for **runtime compatibility** — e.g. confirming that a Harmony target still exists in the exact installed build and that vanilla does not contain an unrelated fixed-size buffer that rejects the larger canvas. That is different from using playtesting to decide the intended numbers: the intended numbers are determined before runtime from the vanilla scaling rules.
