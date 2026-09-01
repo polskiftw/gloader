@@ -129,10 +129,12 @@ internal static class Program
         CheckRange("Long Tracks Huge", 4, 8, ExpandedWorldMath.LongMinecartTrackCount(hugeW));
         CheckRange("Bee Hives XL", 16, 24, ExpandedWorldMath.BeeHives(xlW));
         CheckRange("Bee Hives Huge", 21, 32, ExpandedWorldMath.BeeHives(hugeW));
+        CheckCount("Drunk successful Hive upper bound XL", 17, ExpandedWorldMath.BeeHiveGenerationUpperBound(xlW, true));
+        CheckCount("Drunk successful Hive upper bound Huge", 22, ExpandedWorldMath.BeeHiveGenerationUpperBound(hugeW, true));
         CheckDouble("Drunk Hive XL", 2d, ExpandedWorldMath.DrunkHiveLinearScale(xlW));
         CheckDouble("Drunk Hive Huge", 2.5d, ExpandedWorldMath.DrunkHiveLinearScale(hugeW));
-        CheckCount("Drunk larva upper bound XL", 48, ExpandedWorldMath.MaximumLarvaRecordsFromBeeHives(xlW, true));
-        CheckCount("Drunk larva upper bound Huge", 64, ExpandedWorldMath.MaximumLarvaRecordsFromBeeHives(hugeW, true));
+        CheckCount("Drunk larva upper bound XL", 34, ExpandedWorldMath.MaximumLarvaRecordsFromBeeHives(xlW, true));
+        CheckCount("Drunk larva upper bound Huge", 44, ExpandedWorldMath.MaximumLarvaRecordsFromBeeHives(hugeW, true));
         CheckTrue("Huge larva fits vanilla 100-slot buffer", ExpandedWorldMath.MaximumLarvaRecordsFromBeeHives(hugeW, true) < 100);
 
         CheckCount("Underground Desert width XL", 960, ExpandedWorldMath.UndergroundDesertWidth(xlW));
@@ -188,12 +190,59 @@ internal static class Program
         CheckTrue("Huge Remix Mountain Caves fit vanilla 30 slots",
             ExpandedWorldCapacityMath.MountainCaveRecordUpperBound(hugeW, true) <= 30);
 
+        CheckCount("XL Jungle Shrine chest records", 33,
+            ExpandedWorldCapacityMath.JungleShrineChestRecordUpperBound(xlW));
+        CheckCount("Huge Jungle Shrine chest records", 44,
+            ExpandedWorldCapacityMath.JungleShrineChestRecordUpperBound(hugeW));
+        CheckTrue("Huge Jungle Shrine chests fit vanilla 100 slots",
+            ExpandedWorldCapacityMath.JungleShrineChestRecordUpperBound(hugeW) < 100);
+
+        CheckCount("XL Remix tunnel records", 27,
+            ExpandedWorldCapacityMath.SurfaceTunnelRecordUpperBound(xlW, true));
+        CheckCount("Huge Remix tunnel records", 37,
+            ExpandedWorldCapacityMath.SurfaceTunnelRecordUpperBound(hugeW, true));
+        CheckTrue("Huge Remix tunnels fit vanilla 50 slots",
+            ExpandedWorldCapacityMath.SurfaceTunnelRecordUpperBound(hugeW, true) < 50);
+
+        CheckCount("XL Mushroom biome records", 18,
+            ExpandedWorldCapacityMath.MushroomBiomeRecordUpperBound(xlW));
+        CheckCount("Huge Mushroom biome records", 24,
+            ExpandedWorldCapacityMath.MushroomBiomeRecordUpperBound(hugeW));
+        CheckTrue("Huge Mushroom biomes fit vanilla 50 slots",
+            ExpandedWorldCapacityMath.MushroomBiomeRecordUpperBound(hugeW) < 50);
+
+        CheckCount("XL surface ore-patch records", 29,
+            ExpandedWorldCapacityMath.SurfaceOrePatchRecordUpperBound(xlW));
+        CheckCount("Huge surface ore-patch records", 39,
+            ExpandedWorldCapacityMath.SurfaceOrePatchRecordUpperBound(hugeW));
+        CheckTrue("Huge surface ore patches fit vanilla effective 49-slot ceiling",
+            ExpandedWorldCapacityMath.SurfaceOrePatchRecordUpperBound(hugeW) < 49);
+
+        CheckCount("XL Oasis records", 7, ExpandedWorldCapacityMath.OasisRecordUpperBound(xlW));
+        CheckCount("Huge Oasis records", 9, ExpandedWorldCapacityMath.OasisRecordUpperBound(hugeW));
+        CheckTrue("Huge Oases fit vanilla 20 slots", ExpandedWorldCapacityMath.OasisRecordUpperBound(hugeW) < 20);
+
         CheckCount("XL ordinary Lake attempt upper bound", 17,
             ExpandedWorldCapacityMath.OrdinaryLakeAttemptUpperBound(xlW));
         CheckCount("Huge ordinary Lake attempt upper bound", 23,
             ExpandedWorldCapacityMath.OrdinaryLakeAttemptUpperBound(hugeW));
         CheckTrue("Huge ordinary Lakes stay below vanilla 50-slot buffer",
             ExpandedWorldCapacityMath.OrdinaryLakeAttemptUpperBound(hugeW) < 50);
+
+        CheckCount("Large Remix Crimson heart records", 64,
+            ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(8400, true, false));
+        CheckCount("XL Remix Crimson heart records", 96,
+            ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(xlW, true, false));
+        CheckCount("Huge normal Crimson heart records", 64,
+            ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(hugeW, false, false));
+        CheckCount("Huge Remix Crimson heart records", 128,
+            ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(hugeW, true, false));
+        CheckCount("Huge Remix+Drunk Crimson heart records", 64,
+            ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(hugeW, true, true));
+        CheckTrue("XL Remix Crimson hearts fit vanilla 100 slots",
+            ExpandedWorldCapacityMath.CrimsonHeartScratchCapacity(xlW) <= 100);
+        CheckTrue("Huge Remix Crimson hearts exceed vanilla 100 slots",
+            ExpandedWorldCapacityMath.CrimsonHeartScratchCapacity(hugeW) > 100);
 
         CheckCount("XL Dungeon main-loop iterations", 279, ExpandedWorldCapacityMath.DungeonMainLoopMaxIterations(xlW));
         CheckCount("Huge Dungeon main-loop iterations", 372, ExpandedWorldCapacityMath.DungeonMainLoopMaxIterations(hugeW));
