@@ -109,6 +109,18 @@ internal static class ExpandedWorldMath
         return vanillaLargeValue * IsotropicLinearRelativeToLarge(width, height);
     }
 
+    public static int HardmodeRunnerStrength(int randomBase, int width, int height)
+    {
+        if (randomBase < 200 || randomBase >= 250)
+            throw new ArgumentOutOfRangeException(nameof(randomBase));
+
+        // GERunner's source random base is linear geometry. Vanilla multiplies it
+        // by maxTilesX/4200 because ordinary world axes co-grow. For arbitrary
+        // aspect ratios the axis-neutral continuation is the area-equivalent
+        // linear scale sqrt(area / SmallArea), retaining vanilla truncation.
+        return (int)(randomBase * IsotropicLinearScale(width, height));
+    }
+
     // Mirrors Terraria's WorldGenRange scaling behavior: multiply the Small-world
     // base value by the selected physical scale, then truncate toward zero.
     public static int ScaleByWidth(int smallWorldValue, int width)
