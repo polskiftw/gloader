@@ -33,13 +33,116 @@ internal static class ExpandedWorldDiscreteTierGenerationPatch
 
     private static MethodBase TargetMethod()
     {
-        MethodBase method = AccessTools.GetDeclaredMethods(typeof(WorldGen))
-            .FirstOrDefault(candidate => candidate.Name == "GenerateWorld" && candidate.IsStatic);
+        // In decompiled C# the FinalCleanup pass is textually inside GenerateWorld,
+        // but the runtime IL normally stores anonymous delegates in compiler-
+        // generated methods/types. Do not hardcode a compiler-generated name.
+        // Instead locate the one implementation body that actually calls
+        // GetWorldSize and contains the audited 3/6/9 Dirtiest Block switch.
+        List<MethodBase> matches = EnumerateImplementationMethods(typeof(WorldGen))
+            .Where(ContainsDirtiestBlockSwitchShape)
+            .ToList();
 
-        if (method == null)
-            throw new MissingMethodException(typeof(WorldGen).FullName, "GenerateWorld");
+        if (matches.Count != 1)
+        {
+            throw new InvalidOperationException(
+                "[Expanded Worlds] Could not uniquely resolve the FinalCleanup Dirtiest Block delegate: " +
+                "expected one WorldGen implementation method containing GetWorldSize + 3/6/9, found " +
+                matches.Count + ". Refusing to guess against this Terraria build.");
+        }
 
-        return method;
+        return matches[0];
+    }
+
+    private static IEnumerable<MethodBase> EnumerateImplementationMethods(Type root)
+    {
+        const BindingFlags methodFlags =
+            BindingFlags.Public | BindingFlags.NonPublic |
+            BindingFlags.Static | BindingFlags.Instance |
+            BindingFlags.DeclaredOnly;
+
+        foreach (MethodInfo method in root.GetMethods(methodFlags))
+            yield return method;
+
+        const BindingFlags nestedFlags = BindingFlags.Public | BindingFlags.NonPublic;
+        foreach (Type nested in root.GetNestedTypes(nestedFlags))
+        {
+            foreach (MethodBase method in EnumerateImplementationMethods(nested))
+                yield return method;
+        }
+    }
+
+    private static bool ContainsDirtiestBlockSwitchShape(MethodBase method)
+    {
+        MethodBody body;
+        byte[] il;
+        try
+        {
+            body = method.GetMethodBody();
+            il = body?.GetILAsByteArray();
+        }
+        catch
+        {
+            return false;
+        }
+
+        if (il == null || il.Length == 0)
+            return false;
+
+        int callOffset = FindCallToGetWorldSize(il);
+        if (callOffset < 0)
+            return false;
+
+        // All switch arms occur very close to the call in the audited 1.4.5-era
+        // method. Limit the fingerprint window so unrelated constants elsewhere
+        // in a large generated method cannot make a false candidate.
+        int end = Math.Min(il.Length, callOffset + 160);
+        return ContainsIntConstant(il, callOffset, end, 3) &&
+               ContainsIntConstant(il, callOffset, end, 6) &&
+               ContainsIntConstant(il, callOffset, end, 9);
+    }
+
+    private static int FindCallToGetWorldSize(byte[] il)
+    {
+        int token = GetWorldSizeMethod.MetadataToken;
+        for (int i = 0; i + 4 < il.Length; i++)
+        {
+            // call = 0x28, callvirt = 0x6f. GetWorldSize is static, but accepting
+            // both makes the resolver resilient to harmless compiler changes.
+            if (il[i] != 0x28 && il[i] != 0x6f)
+                continue;
+
+            if (BitConverter.ToInt32(il, i + 1) == token)
+                return i;
+        }
+
+        return -1;
+    }
+
+    private static bool ContainsIntConstant(byte[] il, int start, int end, int value)
+    {
+        // ldc.i4.0 .. ldc.i4.8 = 0x16 .. 0x1e
+        if (value >= 0 && value <= 8)
+        {
+            byte shortOpcode = (byte)(0x16 + value);
+            for (int i = start; i < end; i++)
+            {
+                if (il[i] == shortOpcode)
+                    return true;
+            }
+        }
+
+        for (int i = start; i < end; i++)
+        {
+            // ldc.i4.s
+            if (il[i] == 0x1f && i + 1 < end && unchecked((sbyte)il[i + 1]) == value)
+                return true;
+
+            // ldc.i4
+            if (il[i] == 0x20 && i + 4 < end && BitConverter.ToInt32(il, i + 1) == value)
+                return true;
+        }
+
+        return false;
     }
 
     [HarmonyTranspiler]
@@ -61,13 +164,9 @@ internal static class ExpandedWorldDiscreteTierGenerationPatch
         //   if (tenthAnniversaryWorldGen)
         //       target *= 5;
         //
-        // We inject directly before the switch result is stored. At that point
-        // the int result is already on the evaluation stack, so the helper can
+        // Inject directly before the switch result is stored. At that point the
+        // int result is already on the evaluation stack, so the helper can
         // transform it without reconstructing compiler locals by index.
-        //
-        // Any labels/exception blocks attached to the store are moved onto our
-        // call. Switch branches may target the join/store instruction; leaving
-        // labels there would allow a branch to skip the adjustment entirely.
         for (int callIndex = 0; callIndex < code.Count; callIndex++)
         {
             if (!Calls(code[callIndex], GetWorldSizeMethod))
@@ -88,6 +187,10 @@ internal static class ExpandedWorldDiscreteTierGenerationPatch
                     continue;
 
                 var adjust = new CodeInstruction(OpCodes.Call, AdjustDirtiestBlockCountMethod);
+
+                // Switch branches may target the join/store instruction. Move
+                // branch labels and EH boundaries to our injected call so every
+                // incoming path is adjusted before the original store executes.
                 adjust.labels.AddRange(code[i].labels);
                 code[i].labels.Clear();
                 adjust.blocks.AddRange(code[i].blocks);
@@ -103,9 +206,9 @@ internal static class ExpandedWorldDiscreteTierGenerationPatch
         if (patched != 1)
         {
             throw new InvalidOperationException(
-                "[Expanded Worlds] GenerateWorld discrete-tier source shape changed in " +
+                "[Expanded Worlds] FinalCleanup discrete-tier source shape changed in " +
                 (__originalMethod?.DeclaringType?.FullName ?? "WorldGen") + "." +
-                (__originalMethod?.Name ?? "GenerateWorld") +
+                (__originalMethod?.Name ?? "<generated>") +
                 ": expected exactly one GetWorldSize switch with 3/6/9 Dirtiest Block counts, found " +
                 patched + ". Refusing to guess against this Terraria build.");
         }
