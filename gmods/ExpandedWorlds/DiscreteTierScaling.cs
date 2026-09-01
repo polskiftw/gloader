@@ -1,5 +1,6 @@
-#if GLOADER_CLIENT
 using System;
+
+#if GLOADER_CLIENT
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -65,9 +66,8 @@ internal static class ExpandedWorldDiscreteTierGenerationPatch
         // transform it without reconstructing compiler locals by index.
         //
         // Any labels/exception blocks attached to the store are moved onto our
-        // call. That is important: switch branches may target the join/store
-        // instruction, and leaving labels there would allow a branch to skip the
-        // adjustment entirely.
+        // call. Switch branches may target the join/store instruction; leaving
+        // labels there would allow a branch to skip the adjustment entirely.
         for (int callIndex = 0; callIndex < code.Count; callIndex++)
         {
             if (!Calls(code[callIndex], GetWorldSizeMethod))
