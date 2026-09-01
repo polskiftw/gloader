@@ -69,6 +69,74 @@ internal static class ExpandedWorldCapacityMath
     }
 
     /// <summary>
+    /// Jungle Shrines rolls Next(7, 12), multiplies the result by
+    /// maxTilesX / 4200.0, then compares an integer loop index against that
+    /// double. The maximum roll is 11, so fractional expanded counts round up by
+    /// control-flow semantics rather than normal integer truncation.
+    /// </summary>
+    public static int JungleShrineChestRecordUpperBound(int width)
+    {
+        if (width <= 0)
+            throw new ArgumentOutOfRangeException(nameof(width));
+
+        return (int)Math.Ceiling(11d * width / ExpandedWorldMath.SmallWidth);
+    }
+
+    /// <summary>
+    /// Surface Tunnels uses floor(maxTilesX * 0.0015), then Remix multiplies that
+    /// integer by 1.5 and truncates. Each successful tunnel can consume one entry
+    /// from the 50-record tunnel metadata arrays.
+    /// </summary>
+    public static int SurfaceTunnelRecordUpperBound(int width, bool remixWorld)
+    {
+        if (width <= 0)
+            throw new ArgumentOutOfRangeException(nameof(width));
+
+        int count = (int)(width * 0.0015d);
+        if (remixWorld)
+            count = (int)(count * 1.5d);
+        return count;
+    }
+
+    /// <summary>
+    /// Glowing Mushroom patches use maxTilesX / 700.0, capped at the source
+    /// maxMushroomBiomes value of 50, with an integer index compared to a double.
+    /// </summary>
+    public static int MushroomBiomeRecordUpperBound(int width)
+    {
+        if (width <= 0)
+            throw new ArgumentOutOfRangeException(nameof(width));
+
+        return Math.Min(50, (int)Math.Ceiling(width / 700d));
+    }
+
+    /// <summary>
+    /// Surface ore patches roll Next(maxTilesX*5/4200, maxTilesX*10/4200).
+    /// Random.Next's upper bound is exclusive, and each outer iteration can add
+    /// at most one metadata record.
+    /// </summary>
+    public static int SurfaceOrePatchRecordUpperBound(int width)
+    {
+        if (width <= 0)
+            throw new ArgumentOutOfRangeException(nameof(width));
+
+        int exclusiveMaximum = width * 10 / ExpandedWorldMath.SmallWidth;
+        return Math.Max(0, exclusiveMaximum - 1);
+    }
+
+    /// <summary>
+    /// Oasis generation attempts maxTilesX / 2100 plus Next(2) placements. Each
+    /// successful placement records at most one oasis metadata entry.
+    /// </summary>
+    public static int OasisRecordUpperBound(int width)
+    {
+        if (width <= 0)
+            throw new ArgumentOutOfRangeException(nameof(width));
+
+        return width / 2100 + 1;
+    }
+
+    /// <summary>
     /// Current ordinary Lakes rolls Next((int)(3*scale), (int)(6*scale)), where
     /// scale = maxTilesX / 4200. Random.Next's upper bound is exclusive.
     /// This is an attempt bound; the pass also explicitly stops before its
@@ -106,21 +174,20 @@ internal static class ExpandedWorldCapacityMath
     }
 
     /// <summary>
-    /// Every CrimStart rolls Next(5, 9) and calls CrimVein once per result, so
-    /// there can be eight CrimVein records. CrimStart then unconditionally calls
-    /// CrimEnt once more, and CrimEnt appends one additional heartPos record.
-    /// Nine records per Crimson region is therefore the hard source bound.
+    /// Every CrimStart rolls Next(5, 9) and calls CrimVein once per result. Each
+    /// CrimVein appends exactly one position to WorldGen.heartPos with no bounds
+    /// guard. CrimEnt does not touch heartPos. Eight records per Crimson region
+    /// is therefore the hard source bound.
     /// </summary>
     public static int CrimsonHeartRecordUpperBound(int width, bool remixWorld, bool drunkWorld)
     {
-        return checked(CrimsonRegionAttemptUpperBound(width, remixWorld, drunkWorld) * 9);
+        return checked(CrimsonRegionAttemptUpperBound(width, remixWorld, drunkWorld) * 8);
     }
 
     /// <summary>
     /// Remix without Drunk is the maximum 1.4.5.8 Crimson-heart producer. Large
-    /// remains within vanilla's 100-slot heartPos array, while XL can require 108
-    /// records and Huge can require 144. Both expanded widths therefore need a
-    /// non-behavioral scratch resize.
+    /// and XL remain within vanilla's 100-slot heartPos array; Huge can require
+    /// 128 records and therefore needs a non-behavioral scratch resize.
     /// </summary>
     public static int CrimsonHeartScratchCapacity(int width)
     {
