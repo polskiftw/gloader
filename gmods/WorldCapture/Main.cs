@@ -29,11 +29,13 @@ internal static class WorldCaptureRuntime
     private static WorldCaptureStore _store;
     private static bool[,] _captured;
     private static bool[,] _sessionSeen;
+    private static bool[,] _dirty;
     private static int _sectionsX;
     private static int _sectionsY;
     private static int _capturedCount;
     private static int _sessionNewCount;
     private static int _scanFrame;
+    private static int _dirtyFrame;
     private static string _worldKey;
     private static bool _ready;
     private static bool _disabled;
@@ -59,6 +61,8 @@ internal static class WorldCaptureRuntime
     internal static void Load()
     {
         MessageBuffer.OnTileChangeReceived += OnTileChangeReceived;
+        Netplay.OnDisconnect += OnDisconnect;
+
         Console.WriteLine("[World Capture] Enabled. Multiplayer world sections will be cached as Terraria native compressed tile blocks.");
         Console.WriteLine("[World Capture] Press F8 in a multiplayer world to toggle the coverage overlay.");
     }
@@ -91,6 +95,17 @@ internal static class WorldCaptureRuntime
                 ScanForLoadedSections();
             }
 
+            // Received tile changes mark sections dirty immediately, but repeated
+            // changes are deliberately coalesced. At most once per second we enqueue
+            // dirty sections for a fresh full snapshot instead of recompressing a
+            // 30,000-tile section for every pickaxe swing.
+            _dirtyFrame++;
+            if (_dirtyFrame >= 60)
+            {
+                _dirtyFrame = 0;
+                QueueDirtySections();
+            }
+
             CaptureOnePendingSection();
         }
         catch (Exception ex)
@@ -108,9 +123,11 @@ internal static class WorldCaptureRuntime
         _sectionsY = DivideRoundUp(Main.maxTilesY, SectionHeight);
         _captured = new bool[_sectionsX, _sectionsY];
         _sessionSeen = new bool[_sectionsX, _sectionsY];
+        _dirty = new bool[_sectionsX, _sectionsY];
         _capturedCount = 0;
         _sessionNewCount = 0;
         _scanFrame = 0;
+        _dirtyFrame = 0;
         Pending.Clear();
         Queued.Clear();
 
@@ -150,13 +167,26 @@ internal static class WorldCaptureRuntime
         _store = null;
         _captured = null;
         _sessionSeen = null;
+        _dirty = null;
         _sectionsX = 0;
         _sectionsY = 0;
         _capturedCount = 0;
         _sessionNewCount = 0;
         _scanFrame = 0;
+        _dirtyFrame = 0;
         Pending.Clear();
         Queued.Clear();
+    }
+
+    private static void OnDisconnect()
+    {
+        try
+        {
+            EndSession();
+        }
+        catch
+        {
+        }
     }
 
     private static void ScanForLoadedSections()
@@ -179,6 +209,26 @@ internal static class WorldCaptureRuntime
                 // Refresh every section once per session even if it was already cached
                 // on an earlier visit. This makes revisiting an area repair stale data
                 // without changing the persistent coverage percentage.
+                QueueSection(sx, sy);
+            }
+        }
+    }
+
+    private static void QueueDirtySections()
+    {
+        if (!_ready || _dirty == null || Main.sectionManager == null)
+            return;
+
+        for (int sx = 0; sx < _sectionsX; sx++)
+        {
+            for (int sy = 0; sy < _sectionsY; sy++)
+            {
+                if (!_dirty[sx, sy])
+                    continue;
+
+                if (!Main.sectionManager.SectionLoaded(sx, sy))
+                    continue;
+
                 QueueSection(sx, sy);
             }
         }
@@ -210,6 +260,9 @@ internal static class WorldCaptureRuntime
         if (Main.sectionManager == null || !Main.sectionManager.SectionLoaded(section.X, section.Y))
             return;
 
+        if (_dirty != null)
+            _dirty[section.X, section.Y] = false;
+
         int startX = section.X * SectionWidth;
         int startY = section.Y * SectionHeight;
         int width = Math.Min(SectionWidth, Main.maxTilesX - startX);
@@ -239,16 +292,17 @@ internal static class WorldCaptureRuntime
             Console.WriteLine(
                 "[World Capture] " + _capturedCount + "/" + TotalSections +
                 " sections (" + CoveragePercent.ToString("0.00", CultureInfo.InvariantCulture) + "%).");
-        }
 
-        _store.WriteManifest(_capturedCount, TotalSections, _sessionNewCount);
+            _store.WriteManifest(_capturedCount, TotalSections, _sessionNewCount);
+        }
     }
 
     private static void OnTileChangeReceived(int x, int y, int count, TileChangeType type)
     {
         try
         {
-            if (!_ready || _disabled || Main.netMode != NetmodeID.MultiplayerClient || Main.sectionManager == null)
+            if (!_ready || _disabled || _dirty == null ||
+                Main.netMode != NetmodeID.MultiplayerClient || Main.sectionManager == null)
                 return;
 
             // Vanilla supplies a count/size with received tile changes. Treat it as a
@@ -273,7 +327,7 @@ internal static class WorldCaptureRuntime
                         Main.sectionManager.SectionLoaded(sx, sy))
                     {
                         _sessionSeen[sx, sy] = true;
-                        QueueSection(sx, sy);
+                        _dirty[sx, sy] = true;
                     }
                 }
             }
