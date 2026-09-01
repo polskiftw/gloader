@@ -1,0 +1,127 @@
+name: Expanded Worlds core size source audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/expanded-world-sizes
+    paths:
+      - .github/workflows/expanded-worlds-core-size-source-audit.yml
+      - gmods/ExpandedWorlds/**
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/expanded-worlds-core-size-source-audit.yml
+      - gmods/ExpandedWorlds/**
+
+jobs:
+  audit-core-size-semantics:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install ILSpy command line
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .audit-tools | Out-Null
+          dotnet tool install ilspycmd --tool-path .audit-tools
+
+      - name: Inspect exact Terraria 1.4.5.8 core size semantics
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archiveVersion = '1458'
+          $zip = Join-Path $env:RUNNER_TEMP "terraria-server-$archiveVersion.zip"
+          $root = Join-Path $env:RUNNER_TEMP 'terraria-server'
+          $url = "https://terraria.org/api/download/pc-dedicated-server/terraria-server-$archiveVersion.zip"
+
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $root -Force
+
+          $server = Join-Path $root "$archiveVersion/Windows/TerrariaServer.exe"
+          if (-not (Test-Path $server)) {
+            throw "TerrariaServer.exe not found at expected path: $server"
+          }
+
+          $hash = (Get-FileHash $server -Algorithm SHA256).Hash
+          $ilspy = Join-Path $PWD '.audit-tools/ilspycmd.exe'
+          $auditDir = Join-Path $PWD 'core-size-audit-output'
+          New-Item -ItemType Directory -Force $auditDir | Out-Null
+
+          $worldGen = Join-Path $auditDir 'WorldGen.cs'
+          & $ilspy -t Terraria.WorldGen $server | Set-Content -Encoding UTF8 $worldGen
+          if (-not (Test-Path $worldGen) -or (Get-Item $worldGen).Length -eq 0) {
+            throw 'ILSpy did not produce Terraria.WorldGen source.'
+          }
+
+          $report = Join-Path $auditDir 'terraria-1.4.5.8-core-size-semantics.txt'
+          @(
+            'Expanded Worlds exact-source core size audit',
+            'Terraria version: 1.4.5.8',
+            "TerrariaServer.exe SHA256: $hash",
+            '',
+            'Purpose: determine whether wider-than-Large canvases remain categorically Large and what setWorldSize() mutates.',
+            'This is shared-server source evidence only; it is not retail-client Harmony/UI proof.',
+            ''
+          ) | Set-Content -Encoding UTF8 $report
+
+          function Add-Context {
+            param(
+              [string]$Title,
+              [string]$Pattern,
+              [int]$Before = 20,
+              [int]$After = 60
+            )
+
+            Add-Content -Encoding UTF8 $report "=== $Title ==="
+            $matches = Select-String -Path $worldGen -Pattern $Pattern -Context $Before,$After
+            if (-not $matches) {
+              Add-Content -Encoding UTF8 $report '[NO MATCH]'
+              Add-Content -Encoding UTF8 $report ''
+              return $false
+            }
+
+            foreach ($match in $matches) {
+              Add-Content -Encoding UTF8 $report "[line $($match.LineNumber)]"
+              foreach ($line in $match.Context.PreContext) { Add-Content -Encoding UTF8 $report $line }
+              Add-Content -Encoding UTF8 $report $match.Line
+              foreach ($line in $match.Context.PostContext) { Add-Content -Encoding UTF8 $report $line }
+              Add-Content -Encoding UTF8 $report '...'
+            }
+            Add-Content -Encoding UTF8 $report ''
+            return $true
+          }
+
+          $foundGetWorldSize = Add-Context 'GetWorldSize declaration/reference context' '\bGetWorldSize\s*\(' 30 90
+          $foundSetWorldSize = Add-Context 'setWorldSize declaration/reference context' '\bsetWorldSize\s*\(' 30 120
+          Add-Context 'Vanilla width thresholds near core size logic' '4200|6400|8400' 8 18 | Out-Null
+          Add-Context 'Derived-size state touched near world setup' 'maxSectionsX|rightWorld|bottomWorld|worldSurface|rockLayer' 5 12 | Out-Null
+
+          Write-Host '--- BEGIN EXPANDED WORLDS CORE SIZE SOURCE AUDIT ---'
+          Get-Content $report
+          Write-Host '--- END EXPANDED WORLDS CORE SIZE SOURCE AUDIT ---'
+
+          if (-not $foundGetWorldSize) {
+            throw 'Could not locate GetWorldSize() in exact Terraria 1.4.5.8 WorldGen source.'
+          }
+          if (-not $foundSetWorldSize) {
+            throw 'Could not locate setWorldSize() in exact Terraria 1.4.5.8 WorldGen source.'
+          }
+
+      - name: Upload exact core size audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: expanded-worlds-terraria-1.4.5.8-core-size-source-audit
+          path: core-size-audit-output/
+          if-no-files-found: warn
+          retention-days: 7
