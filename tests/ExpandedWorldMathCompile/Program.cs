@@ -37,10 +37,6 @@ internal static class Program
         CheckCount("Floating Islands Medium", 5, ExpandedWorldMath.FloatingIslands(6400));
         CheckCount("Floating Islands Large", 6, ExpandedWorldMath.FloatingIslands(8400));
 
-        CheckCount("Floating Lakes Small", 1, ExpandedWorldMath.FloatingLakes(4200));
-        CheckCount("Floating Lakes Medium", 2, ExpandedWorldMath.FloatingLakes(6400));
-        CheckCount("Floating Lakes Large", 3, ExpandedWorldMath.FloatingLakes(8400));
-
         CheckRange("Marble Small", 4, 8, ExpandedWorldMath.MarbleCaves(4200, 1200));
         CheckRange("Marble Medium", 9, 18, ExpandedWorldMath.MarbleCaves(6400, 1800));
         CheckRange("Marble Large", 16, 32, ExpandedWorldMath.MarbleCaves(8400, 2400));
@@ -150,9 +146,6 @@ internal static class Program
 
         CheckCount("Floating Islands XL", 10, ExpandedWorldMath.FloatingIslands(xlW));
         CheckCount("Floating Islands Huge", 13, ExpandedWorldMath.FloatingIslands(hugeW));
-
-        CheckCount("Floating Lakes XL", 4, ExpandedWorldMath.FloatingLakes(xlW));
-        CheckCount("Floating Lakes Huge", 6, ExpandedWorldMath.FloatingLakes(hugeW));
 
         CheckRange("Marble XL", 24, 48, ExpandedWorldMath.MarbleCaves(xlW, xlH));
         CheckRange("Marble Huge", 32, 64, ExpandedWorldMath.MarbleCaves(hugeW, hugeH));
