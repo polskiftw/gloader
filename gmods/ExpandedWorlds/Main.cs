@@ -15,7 +15,7 @@ public static class Mod
 {
     public static void Load()
     {
-        Console.WriteLine("[Expanded Worlds] XL (12000x2400) and Huge (16800x2400) world sizes enabled.");
+        Console.WriteLine("[Expanded Worlds] XL (12600x2400) and Huge (16800x2400) world sizes enabled.");
         Console.WriteLine("[Expanded Worlds] Vanilla still categorizes both custom sizes as Large for compatibility.");
     }
 }
@@ -31,7 +31,7 @@ internal static class ExpandedWorldState
 {
     public const int VanillaLargeWidth = 8400;
     public const int VanillaLargeHeight = 2400;
-    public const int XLWidth = 12000;
+    public const int XLWidth = 12600;
     public const int HugeWidth = 16800;
 
     public static ExpandedWorldPreset Selected { get; private set; }
@@ -235,7 +235,7 @@ internal static class ExpandedWorldCreationSizeRowPatch
         button.OnMouseOver += delegate
         {
             SetDescription(owner, preset == ExpandedWorldPreset.XL
-                ? "XL world: 12,000 x 2,400 tiles. Wider than Large; vanilla vertical progression is preserved."
+                ? "XL world: 12,600 x 2,400 tiles. The next exact 4,200-tile horizontal size quantum after Large."
                 : "Huge world: 16,800 x 2,400 tiles. Twice the width and tile area of vanilla Large.");
         };
 
