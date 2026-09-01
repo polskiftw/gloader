@@ -1,6 +1,5 @@
 #if GLOADER_CLIENT
 using System;
-using System.Collections;
 using System.Linq;
 using System.Reflection;
 using HarmonyLib;
@@ -36,57 +35,63 @@ internal static class ExpandedWorldState
     public const int HugeWidth = 16800;
 
     public static ExpandedWorldPreset Selected { get; private set; }
+    public static ExpandedWorldPreset GenerationPreset { get; private set; }
 
-    public static bool IsCustom => Selected != ExpandedWorldPreset.None;
-
-    public static int Width
-    {
-        get
-        {
-            switch (Selected)
-            {
-                case ExpandedWorldPreset.XL:
-                    return XLWidth;
-                case ExpandedWorldPreset.Huge:
-                    return HugeWidth;
-                default:
-                    return Main.maxTilesX;
-            }
-        }
-    }
-
-    public static string Label
-    {
-        get
-        {
-            switch (Selected)
-            {
-                case ExpandedWorldPreset.XL:
-                    return "XL";
-                case ExpandedWorldPreset.Huge:
-                    return "Huge";
-                default:
-                    return "Vanilla";
-            }
-        }
-    }
+    public static bool IsCustomSelected => Selected != ExpandedWorldPreset.None;
+    public static bool GenerationArmed => GenerationPreset != ExpandedWorldPreset.None;
 
     public static void Select(ExpandedWorldPreset preset)
     {
         Selected = preset;
     }
 
-    public static void Clear()
+    public static void ClearSelection()
     {
         Selected = ExpandedWorldPreset.None;
     }
 
-    public static void ApplyExactDimensions(string stage)
+    public static void ArmGeneration()
     {
-        if (!IsCustom)
+        GenerationPreset = Selected;
+    }
+
+    public static void EndGeneration()
+    {
+        GenerationPreset = ExpandedWorldPreset.None;
+    }
+
+    public static int WidthFor(ExpandedWorldPreset preset)
+    {
+        switch (preset)
+        {
+            case ExpandedWorldPreset.XL:
+                return XLWidth;
+            case ExpandedWorldPreset.Huge:
+                return HugeWidth;
+            default:
+                return VanillaLargeWidth;
+        }
+    }
+
+    public static string LabelFor(ExpandedWorldPreset preset)
+    {
+        switch (preset)
+        {
+            case ExpandedWorldPreset.XL:
+                return "XL";
+            case ExpandedWorldPreset.Huge:
+                return "Huge";
+            default:
+                return "Vanilla";
+        }
+    }
+
+    public static void ApplyGenerationDimensions(string stage)
+    {
+        if (!GenerationArmed)
             return;
 
-        int width = Width;
+        int width = WidthFor(GenerationPreset);
         Main.maxTilesX = width;
         Main.maxTilesY = VanillaLargeHeight;
 
@@ -97,8 +102,7 @@ internal static class ExpandedWorldState
         Main.maxSectionsY = VanillaLargeHeight / 150;
 
         // Let Terraria recalculate any additional derived size state it owns.
-        // This is deliberately reflection-based so a visibility change does not
-        // make the source mod fail to compile against a future Terraria build.
+        // Reflection keeps a visibility change from turning this into a compile-time break.
         MethodInfo setWorldSizeDerived = AccessTools.Method(typeof(WorldGen), "setWorldSize", Type.EmptyTypes);
         if (setWorldSizeDerived != null)
         {
@@ -112,7 +116,10 @@ internal static class ExpandedWorldState
             }
         }
 
-        Console.WriteLine("[Expanded Worlds] " + stage + ": using " + Label + " " + width + "x" + VanillaLargeHeight + ".");
+        Console.WriteLine(
+            "[Expanded Worlds] " + stage + ": using " + LabelFor(GenerationPreset) +
+            " " + width + "x" + VanillaLargeHeight +
+            " (vanilla tier " + WorldGen.GetWorldSize() + ").");
     }
 }
 
@@ -245,7 +252,7 @@ internal static class ExpandedWorldCreationSizeRowPatch
         ExpandedWorldState.Select(preset);
 
         // Keep Terraria's own categorical state at vanilla Large. The true width
-        // is applied immediately before generation begins.
+        // is armed only when CreateNewWorld actually begins.
         WorldGen.SetWorldSize(2);
         DeselectVanillaButtons(owner);
         RefreshVisuals(owner);
@@ -260,12 +267,12 @@ internal static class ExpandedWorldCreationSizeRowPatch
         }
 
         SoundEngine.PlaySound(SoundID.MenuTick);
-        Console.WriteLine("[Expanded Worlds] Selected " + ExpandedWorldState.Label + ".");
+        Console.WriteLine("[Expanded Worlds] Selected " + ExpandedWorldState.LabelFor(preset) + ".");
     }
 
     internal static void ClearCustomSelection(UIWorldCreation owner)
     {
-        ExpandedWorldState.Clear();
+        ExpandedWorldState.ClearSelection();
         RefreshVisuals(owner);
     }
 
@@ -275,7 +282,7 @@ internal static class ExpandedWorldCreationSizeRowPatch
         SetButtonVisual(_xlButton, sameOwner && ExpandedWorldState.Selected == ExpandedWorldPreset.XL);
         SetButtonVisual(_hugeButton, sameOwner && ExpandedWorldState.Selected == ExpandedWorldPreset.Huge);
 
-        if (sameOwner && ExpandedWorldState.IsCustom)
+        if (sameOwner && ExpandedWorldState.IsCustomSelected)
             DeselectVanillaButtons(owner);
     }
 
@@ -413,8 +420,8 @@ internal static class ExpandedWorldSliderRefreshPatch
 }
 
 /// <summary>
-/// Apply the real dimensions at the last safe moment before vanilla begins its
-/// asynchronous world-generation pipeline.
+/// Arm this one generation job and apply the real dimensions at the last safe
+/// moment before vanilla begins its asynchronous world-generation pipeline.
 /// </summary>
 [HarmonyPatch]
 internal static class ExpandedWorldCreatePatch
@@ -431,14 +438,18 @@ internal static class ExpandedWorldCreatePatch
     [HarmonyPrefix]
     private static void Prefix()
     {
-        ExpandedWorldState.ApplyExactDimensions("CreateNewWorld");
+        if (!ExpandedWorldState.IsCustomSelected)
+            return;
+
+        ExpandedWorldState.ArmGeneration();
+        ExpandedWorldState.ApplyGenerationDimensions("CreateNewWorld");
     }
 }
 
 /// <summary>
 /// Safety net: clearWorld is where Terraria allocates/clears world storage.
-/// Reapply the requested dimensions before that allocation, then let every
-/// vanilla generation pass (including special/secret-seed changes) run normally.
+/// Reapply the requested dimensions before that allocation. The generation-only
+/// guard is critical because clearWorld is also used while loading existing worlds.
 /// </summary>
 [HarmonyPatch]
 internal static class ExpandedWorldClearPatch
@@ -455,7 +466,45 @@ internal static class ExpandedWorldClearPatch
     [HarmonyPrefix]
     private static void Prefix()
     {
-        ExpandedWorldState.ApplyExactDimensions("clearWorld");
+        ExpandedWorldState.ApplyGenerationDimensions("clearWorld");
+    }
+}
+
+/// <summary>
+/// Disarm the custom dimensions no matter whether generation succeeds or throws.
+/// This prevents later world loads in the same process from inheriting a creation preset.
+/// </summary>
+[HarmonyPatch]
+internal static class ExpandedWorldGenerateWorldLifetimePatch
+{
+    private static MethodBase TargetMethod()
+    {
+        MethodBase method = AccessTools.GetDeclaredMethods(typeof(WorldGen))
+            .FirstOrDefault(candidate => candidate.Name == "GenerateWorld" && candidate.IsStatic);
+        if (method == null)
+            throw new MissingMethodException(typeof(WorldGen).FullName, "GenerateWorld");
+        return method;
+    }
+
+    [HarmonyFinalizer]
+    private static Exception Finalizer(Exception __exception)
+    {
+        if (ExpandedWorldState.GenerationArmed)
+        {
+            if (__exception == null)
+            {
+                Console.WriteLine(
+                    "[Expanded Worlds] Generation finished at " + Main.maxTilesX + "x" + Main.maxTilesY + ".");
+            }
+            else
+            {
+                Console.WriteLine("[Expanded Worlds] Generation failed: " + __exception);
+            }
+
+            ExpandedWorldState.EndGeneration();
+        }
+
+        return __exception;
     }
 }
 #endif
