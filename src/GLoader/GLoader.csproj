@@ -11,15 +11,21 @@
     <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
     <GenerateBindingRedirectsOutputType>false</GenerateBindingRedirectsOutputType>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
-    <AssemblyVersion>0.1.19.0</AssemblyVersion>
-    <FileVersion>0.1.19.0</FileVersion>
-    <Version>0.1.19-alpha</Version>
-    <InformationalVersion>0.1.19-alpha</InformationalVersion>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyVersion>0.1.20.0</AssemblyVersion>
+    <FileVersion>0.1.20.0</FileVersion>
+    <Version>0.1.20-alpha</Version>
+    <InformationalVersion>0.1.20-alpha</InformationalVersion>
     <Company>gloader</Company>
     <Product>gloader</Product>
     <Description>Raw C# source mod loader for vanilla Terraria</Description>
     <Deterministic>true</Deterministic>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Windows.Forms" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Lib.Harmony" Version="2.4.2" />

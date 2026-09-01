@@ -11,6 +11,7 @@ namespace GLoader
         public bool DedicatedServer { get; private set; }
         public bool DisableMods { get; private set; }
         public bool ShowHelp { get; private set; }
+        public bool DirectRun { get; private set; }
         public List<string> GameArguments { get; } = new List<string>();
 
         public static LoaderOptions Parse(string[] args)
@@ -39,6 +40,12 @@ namespace GLoader
                     arg.Equals("/?", StringComparison.OrdinalIgnoreCase))
                 {
                     result.ShowHelp = true;
+                    continue;
+                }
+
+                if (arg.Equals("--run", StringComparison.OrdinalIgnoreCase))
+                {
+                    result.DirectRun = true;
                     continue;
                 }
 
@@ -80,12 +87,18 @@ namespace GLoader
             return result;
         }
 
+        public void DisableModsForRun()
+        {
+            DisableMods = true;
+        }
+
         public static void PrintHelp()
         {
             Console.WriteLine("gloader - raw C# source mod loader for vanilla Terraria");
             Console.WriteLine();
             Console.WriteLine("Usage:");
-            Console.WriteLine("  gloader.exe");
+            Console.WriteLine("  gloader.exe                         Open the mod launcher GUI");
+            Console.WriteLine("  gloader.exe --run                   Launch directly without the GUI");
             Console.WriteLine("  gloader.exe --target \"C:\\...\\Terraria.exe\"");
             Console.WriteLine("  gloader.exe --server");
             Console.WriteLine("  gloader.exe --mods \"C:\\...\\gmods\"");

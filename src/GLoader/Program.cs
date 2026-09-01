@@ -13,76 +13,48 @@ namespace GLoader
             var loaderDirectory = Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory);
             var defaultModsDirectory = Path.Combine(loaderDirectory, "gmods");
             var dependenciesDirectory = Path.Combine(loaderDirectory, "gdeps");
+            var logsDirectory = Path.Combine(dependenciesDirectory, "logs");
             var startupResolver = new ManagedAssemblyResolver(dependenciesDirectory);
-            var options = LoaderOptions.Parse(args);
-
-            if (options.ShowHelp)
-            {
-                LoaderOptions.PrintHelp();
-                return 0;
-            }
+            var launchedFromGui = false;
 
             try
             {
-                var targetPath = TargetLocator.Find(loaderDirectory, options);
-                var gameDirectory = Path.GetDirectoryName(targetPath);
-                var modsDirectory = string.IsNullOrWhiteSpace(options.ModsPath)
-                    ? defaultModsDirectory
-                    : Path.GetFullPath(options.ModsPath);
-                var isServerTarget = string.Equals(
-                    Path.GetFileName(targetPath),
-                    "TerrariaServer.exe",
-                    StringComparison.OrdinalIgnoreCase);
+                var options = LoaderOptions.Parse(args);
 
-                Log.Initialize(
-                    Path.Combine(dependenciesDirectory, "logs"),
-                    isServerTarget ? "server" : "client");
-                Log.Info("gloader " + GetLoaderVersion());
-                Log.Info("Target: " + targetPath);
-                Log.Info("Target version: " + GetFileVersion(targetPath));
-                Log.Info("Mode: " + (isServerTarget ? "server" : "client"));
-                Log.Info("Mods: " + modsDirectory);
-                Log.Info("Dependencies: " + dependenciesDirectory);
-
-                Directory.SetCurrentDirectory(gameDirectory);
-                NativeLibrarySearch.UseDirectory(gameDirectory);
-
-                var gameAssembly = GameBootstrap.Load(targetPath);
-                var gameArguments = options.GameArguments.ToArray();
-
-                using (var resolver = new ManagedAssemblyResolver(
-                    gameAssembly,
-                    gameDirectory,
-                    dependenciesDirectory,
-                    modsDirectory))
+                if (args.Length == 0)
                 {
-                    if (!options.DisableMods)
-                    {
-                        TerrariaStartupState.Prepare(gameAssembly, gameArguments);
+                    ConsoleManager.DetachForGui();
 
-                        if (!isServerTarget)
-                        {
-                            HostPlayServerRedirect.Install(
-                                gameAssembly,
-                                Assembly.GetExecutingAssembly().Location,
-                                modsDirectory);
-                        }
-
-                        ModRuntime.LoadAll(
-                            modsDirectory,
-                            gameAssembly,
-                            gameDirectory,
-                            dependenciesDirectory,
-                            isServerTarget);
-                    }
-                    else
+                    var launch = LauncherForm.ShowLauncher(defaultModsDirectory, logsDirectory);
+                    if (launch.Action == LauncherAction.Cancel)
                     {
-                        Log.Info("Mods disabled by --no-mods.");
+                        return 0;
                     }
 
-                    Log.Info("Starting Terraria.");
-                    return GameBootstrap.InvokeEntryPoint(gameAssembly, gameArguments);
+                    launchedFromGui = true;
+                    if (launch.ShowConsole)
+                    {
+                        ConsoleManager.EnsureConsole();
+                    }
+
+                    if (launch.Action == LauncherAction.Vanilla)
+                    {
+                        options.DisableModsForRun();
+                    }
                 }
+
+                if (options.ShowHelp)
+                {
+                    LoaderOptions.PrintHelp();
+                    return 0;
+                }
+
+                return RunLoader(
+                    loaderDirectory,
+                    defaultModsDirectory,
+                    dependenciesDirectory,
+                    logsDirectory,
+                    options);
             }
             catch (Exception ex)
             {
@@ -95,17 +67,91 @@ namespace GLoader
                     // Logging must never hide the original startup error.
                 }
 
-                Console.Error.WriteLine();
-                Console.Error.WriteLine("gloader failed:");
-                Console.Error.WriteLine(ex);
-                Console.Error.WriteLine();
-                Console.Error.WriteLine("See gdeps\\logs\\gloader-client.log or gdeps\\logs\\gloader-server.log for details.");
+                if (launchedFromGui)
+                {
+                    LauncherForm.ShowStartupFailure(logsDirectory, ex);
+                }
+                else
+                {
+                    Console.Error.WriteLine();
+                    Console.Error.WriteLine("gloader failed:");
+                    Console.Error.WriteLine(ex);
+                    Console.Error.WriteLine();
+                    Console.Error.WriteLine("See gdeps\\logs\\gloader-client.log or gdeps\\logs\\gloader-server.log for details.");
+                }
+
                 return 1;
             }
             finally
             {
                 Log.Dispose();
                 startupResolver.Dispose();
+            }
+        }
+
+        private static int RunLoader(
+            string loaderDirectory,
+            string defaultModsDirectory,
+            string dependenciesDirectory,
+            string logsDirectory,
+            LoaderOptions options)
+        {
+            var targetPath = TargetLocator.Find(loaderDirectory, options);
+            var gameDirectory = Path.GetDirectoryName(targetPath);
+            var modsDirectory = string.IsNullOrWhiteSpace(options.ModsPath)
+                ? defaultModsDirectory
+                : Path.GetFullPath(options.ModsPath);
+            var isServerTarget = string.Equals(
+                Path.GetFileName(targetPath),
+                "TerrariaServer.exe",
+                StringComparison.OrdinalIgnoreCase);
+
+            Log.Initialize(logsDirectory, isServerTarget ? "server" : "client");
+            Log.Info("gloader " + GetLoaderVersion());
+            Log.Info("Target: " + targetPath);
+            Log.Info("Target version: " + GetFileVersion(targetPath));
+            Log.Info("Mode: " + (isServerTarget ? "server" : "client"));
+            Log.Info("Mods: " + modsDirectory);
+            Log.Info("Dependencies: " + dependenciesDirectory);
+
+            Directory.SetCurrentDirectory(gameDirectory);
+            NativeLibrarySearch.UseDirectory(gameDirectory);
+
+            var gameAssembly = GameBootstrap.Load(targetPath);
+            var gameArguments = options.GameArguments.ToArray();
+
+            using (var resolver = new ManagedAssemblyResolver(
+                gameAssembly,
+                gameDirectory,
+                dependenciesDirectory,
+                modsDirectory))
+            {
+                if (!options.DisableMods)
+                {
+                    TerrariaStartupState.Prepare(gameAssembly, gameArguments);
+
+                    if (!isServerTarget)
+                    {
+                        HostPlayServerRedirect.Install(
+                            gameAssembly,
+                            Assembly.GetExecutingAssembly().Location,
+                            modsDirectory);
+                    }
+
+                    ModRuntime.LoadAll(
+                        modsDirectory,
+                        gameAssembly,
+                        gameDirectory,
+                        dependenciesDirectory,
+                        isServerTarget);
+                }
+                else
+                {
+                    Log.Info("Mods disabled by --no-mods or the launcher.");
+                }
+
+                Log.Info("Starting Terraria.");
+                return GameBootstrap.InvokeEntryPoint(gameAssembly, gameArguments);
             }
         }
 
