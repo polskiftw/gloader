@@ -1,0 +1,109 @@
+name: Expanded Worlds bee source audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/expanded-world-sizes
+    paths:
+      - .github/workflows/expanded-worlds-bee-source-audit.yml
+      - gmods/ExpandedWorlds/BeeScaling.cs
+      - gmods/ExpandedWorlds/BeeCapacityMath.cs
+      - tests/ExpandedWorldCompile/BeeRegression.cs
+
+jobs:
+  audit-bee-worldgen:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install ILSpy command line
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .audit-tools | Out-Null
+          dotnet tool install ilspycmd --tool-path .audit-tools
+
+      - name: Audit Terraria 1.4.5.8 Hive and larva contracts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archiveVersion = '1458'
+          $zip = Join-Path $env:RUNNER_TEMP "terraria-server-$archiveVersion.zip"
+          $root = Join-Path $env:RUNNER_TEMP 'terraria-server'
+          $url = "https://terraria.org/api/download/pc-dedicated-server/terraria-server-$archiveVersion.zip"
+
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $root -Force
+          $server = Join-Path $root "$archiveVersion/Windows/TerrariaServer.exe"
+          if (-not (Test-Path $server)) { throw "TerrariaServer.exe not found: $server" }
+
+          $ilspy = Join-Path $PWD '.audit-tools/ilspycmd.exe'
+          $auditDir = Join-Path $PWD 'bee-source-audit-output'
+          New-Item -ItemType Directory -Force $auditDir | Out-Null
+          $worldGenPath = Join-Path $auditDir 'WorldGen.cs'
+          $hivePath = Join-Path $auditDir 'HiveBiome.cs'
+          $genVarsPath = Join-Path $auditDir 'GenVars.cs'
+
+          & $ilspy -t Terraria.WorldGen $server | Set-Content -Encoding UTF8 $worldGenPath
+          & $ilspy -t Terraria.GameContent.Biomes.HiveBiome $server | Set-Content -Encoding UTF8 $hivePath
+          & $ilspy -t Terraria.WorldBuilding.GenVars $server | Set-Content -Encoding UTF8 $genVarsPath
+
+          $worldGen = Get-Content -Raw $worldGenPath
+          $hive = Get-Content -Raw $hivePath
+          $genVars = Get-Content -Raw $genVarsPath
+          $failures = New-Object System.Collections.Generic.List[string]
+
+          function Assert-Contract {
+            param([string]$Name, [string]$Source, [string]$Pattern)
+            $ok = [regex]::IsMatch($Source, $Pattern, [System.Text.RegularExpressions.RegexOptions]::Multiline)
+            Write-Host "$($(if ($ok) {'PASS'} else {'FAIL'})) - $Name"
+            if (-not $ok) { $failures.Add($Name) }
+          }
+
+          # Not the Bees is a full physical-canvas transformation, not a
+          # fixed-Large postprocess. Its nested loops must continue to use the
+          # actual maxTilesX/maxTilesY bounds.
+          Assert-Contract 'NotTheBees scans physical world width' $worldGen '(?s)private static void NotTheBees\(\).*?for \(int i = 5; i < Main\.maxTilesX - 5; i\+\+\)'
+          Assert-Contract 'NotTheBees scans physical world height' $worldGen '(?s)private static void NotTheBees\(\).*?for \(int j = 5; j < Main\.maxTilesY - 180; j\+\+\)'
+          Assert-Contract 'NotTheBees preserves Dual Dungeon tiles through SkipOnDualDungeons' $worldGen '(?s)private static void NotTheBees\(\).*?SkipOnDualDungeons\(i, j\)'
+
+          # Hive count source: 1 + Next(5*widthScale, 8*widthScale), with Drunk
+          # multiplying the resulting double by 0.667.
+          Assert-Contract 'Hive count uses physical width/4200 scale' $worldGen '(?s)GenPassNameID\.Beehives.*?double num = \(double\)Main\.maxTilesX / 4200\.0;'
+          Assert-Contract 'Hive count source range remains 5x through 8x' $worldGen '(?s)GenPassNameID\.Beehives.*?1 \+ genRand\.Next\(\(int\)\(5\.0 \* num\), \(int\)\(8\.0 \* num\)\)'
+          Assert-Contract 'Drunk Hive count multiplier remains 0.667' $worldGen '(?s)GenPassNameID\.Beehives.*?if \(drunkWorldGen\).*?num2 \*= 0\.667;'
+
+          # GenVars larva storage remains fixed, making the mathematical bound
+          # meaningful and reviewable.
+          Assert-Contract 'Larva X storage remains 100 slots' $genVars 'larvaX\s*=\s*new int\[100\]'
+          Assert-Contract 'Larva Y storage remains 100 slots' $genVars 'larvaY\s*=\s*new int\[100\]'
+
+          # HiveBiome creates one stand normally and at most one extra in Drunk.
+          Assert-Contract 'Hive always creates the primary larva stand' $hive 'CreateStandForLarva\(val\);'
+          Assert-Contract 'Drunk Hive has one bounded extra-larva search' $hive '(?s)if \(WorldGen\.drunkWorldGen\).*?for \(int l = 0; l < 1000; l\+\+\).*?CreateStandForLarva\(val3\);.*?break;'
+          Assert-Contract 'Larva bookkeeping clamps before exceeding its array length' $hive '(?s)GenVars\.numLarva\+\+;.*?if \(GenVars\.numLarva >= GenVars\.larvaX\.Length\).*?GenVars\.numLarva = GenVars\.larvaX\.Length - 1;'
+
+          # The only Drunk Hive tunnel geometry proxy repaired by Expanded Worlds.
+          Assert-Contract 'Drunk Hive tunnel source uses width/4200' $hive '(?s)CreateHiveTunnel\(int i, int j, UnifiedRandom random\).*?if \(WorldGen\.drunkWorldGen\).*?double num3 = \(double\)Main\.maxTilesX / 4200\.0;'
+          Assert-Contract 'Drunk Hive tunnel source applies (scale+1)/2' $hive '(?s)CreateHiveTunnel\(int i, int j, UnifiedRandom random\).*?num3 = \(num3 \+ 1\.0\) / 2\.0;.*?num \*= num3;.*?num2 \*= num3;'
+
+          if ($failures.Count -gt 0) {
+            throw "Terraria 1.4.5.8 bee source audit failed: $($failures -join '; ')"
+          }
+
+      - name: Upload exact audited bee sources
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: expanded-worlds-bee-source-audit
+          path: bee-source-audit-output/
+          if-no-files-found: warn
+          retention-days: 7
