@@ -106,19 +106,21 @@ internal static class ExpandedWorldCapacityMath
     }
 
     /// <summary>
-    /// Every CrimStart rolls Next(5, 9) and calls CrimVein once per result. Each
-    /// CrimVein appends exactly one position to WorldGen.heartPos with no bounds
-    /// guard. Eight records per Crimson region is therefore the hard source bound.
+    /// Every CrimStart rolls Next(5, 9) and calls CrimVein once per result, so
+    /// there can be eight CrimVein records. CrimStart then unconditionally calls
+    /// CrimEnt once more, and CrimEnt appends one additional heartPos record.
+    /// Nine records per Crimson region is therefore the hard source bound.
     /// </summary>
     public static int CrimsonHeartRecordUpperBound(int width, bool remixWorld, bool drunkWorld)
     {
-        return checked(CrimsonRegionAttemptUpperBound(width, remixWorld, drunkWorld) * 8);
+        return checked(CrimsonRegionAttemptUpperBound(width, remixWorld, drunkWorld) * 9);
     }
 
     /// <summary>
     /// Remix without Drunk is the maximum 1.4.5.8 Crimson-heart producer. Large
-    /// and XL remain within vanilla's 100-slot heartPos array; Huge can require
-    /// 128 records and therefore needs a non-behavioral scratch resize.
+    /// remains within vanilla's 100-slot heartPos array, while XL can require 108
+    /// records and Huge can require 144. Both expanded widths therefore need a
+    /// non-behavioral scratch resize.
     /// </summary>
     public static int CrimsonHeartScratchCapacity(int width)
     {
