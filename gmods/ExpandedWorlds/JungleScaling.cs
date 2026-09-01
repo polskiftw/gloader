@@ -7,7 +7,6 @@ using System.Reflection.Emit;
 using HarmonyLib;
 using Terraria;
 using Terraria.GameContent.Biomes;
-using Terraria.IO;
 using Terraria.WorldBuilding;
 
 /// <summary>
@@ -20,8 +19,14 @@ using Terraria.WorldBuilding;
 ///   X displacement / horizontal margins -> width relative to Large
 ///   Y displacement                       -> height relative to Large
 ///   round TileRunner body strength       -> sqrt(area relative to Large)
-///   repeated macro/detail passes         -> Jungle area (width here, because
-///                                           expanded presets retain Large height)
+///   single repeated pass counts          -> horizontal territory
+///   nested repeated pass counts          -> horizontal * vertical = area
+///
+/// The sqrt(area) rule is used only for truly isotropic linear geometry. It is
+/// the unique symmetric linear factor whose square preserves area and which
+/// collapses to vanilla's ordinary linear scale when X and Y scale together.
+/// Counts are never scaled with sqrt(area): their dimensional factors are kept
+/// explicit so total generated detail follows territory area exactly.
 ///
 /// The original pass still runs. We only replace the overloaded scale where its
 /// dimensional meaning becomes ambiguous. Vanilla Small/Medium/Large are never
@@ -62,17 +67,12 @@ internal static class ExpandedWorldJungleScales
         return (float)ExpandedWorldMath.ScaleLargeLinearByHeight(large, Main.maxTilesY);
     }
 
-    public static float Isotropic(JunglePass instance)
-    {
-        return ReadIsotropicScale(instance);
-    }
-
-    // Macro/detail pass counts are proportional to the Jungle territory added by
-    // the wider canvas. Since XL/Huge retain Large height, this is exactly the
-    // width ratio to Large. Keep the source's Large anchor value so its existing
-    // count constants remain meaningful.
     public static float Density(JunglePass instance)
     {
+        // For our width-only presets, one top-level pass count follows the
+        // horizontal territory factor. When vanilla nests another scale-driven
+        // count inside it, that inner count uses Vertical(), so the product is
+        // horizontal * vertical = area.
         return Horizontal(instance);
     }
 
@@ -144,8 +144,6 @@ internal static class ExpandedWorldJungleApplyPassPatch
         int worldScaleStores = 0;
         int scaleLocal = -1;
 
-        // 1) Terraria computes _worldScale from world size. Convert that one
-        // float before it is stored. This makes round/local geometry isotropic.
         for (int i = 0; i < code.Count; i++)
         {
             if (code[i].opcode != OpCodes.Stfld || !Equals(code[i].operand, WorldScaleField))
@@ -162,8 +160,6 @@ internal static class ExpandedWorldJungleApplyPassPatch
                 "expected exactly one JunglePass._worldScale assignment, found " + worldScaleStores);
         }
 
-        // 2) ApplyPass copies _worldScale to a float local. Find that local from
-        // ldfld -> stloc rather than assuming a compiler-specific slot number.
         for (int i = 0; i < code.Count - 4 && scaleLocal < 0; i++)
         {
             if (code[i].opcode != OpCodes.Ldfld || !Equals(code[i].operand, WorldScaleField))
@@ -183,8 +179,6 @@ internal static class ExpandedWorldJungleApplyPassPatch
         if (scaleLocal < 0)
             throw Changed(__originalMethod, "could not identify the local copy of JunglePass._worldScale");
 
-        // 3) The 25*scale expression is a horizontal clamp margin, not round
-        // geometry. Convert only that local load back to horizontal scale.
         int horizontalMargins = 0;
         for (int i = 0; i < code.Count; i++)
         {
@@ -291,11 +285,6 @@ internal static class ExpandedWorldJungleApplyPassPatch
     }
 }
 
-/// <summary>
-/// Vanilla multiplies both xRange and yRange by the same Jungle scale. For an
-/// expanded aspect ratio, preserve the exact random-movement algorithm but feed
-/// each axis its own physical continuation.
-/// </summary>
 [HarmonyPatch]
 internal static class ExpandedWorldJungleRandomMovementPatch
 {
@@ -327,10 +316,6 @@ internal static class ExpandedWorldJungleRandomMovementPatch
     }
 }
 
-/// <summary>
-/// Gem-pass count follows the horizontally enlarged Jungle territory while the
-/// placement envelope is axis-aware. The gem TileRunner itself remains vanilla.
-/// </summary>
 [HarmonyPatch]
 internal static class ExpandedWorldJungleGemPatch
 {
@@ -371,12 +356,6 @@ internal static class ExpandedWorldJungleGemPatch
     }
 }
 
-/// <summary>
-/// Re-express JunglePass.GenerateFinishingTouches with the same vanilla random
-/// operations, constants and TileRunner calls, but with explicit dimensional
-/// scales. This method is private implementation detail in Terraria, so the patch
-/// targets it by name and only replaces it for an armed expanded generation.
-/// </summary>
 [HarmonyPatch]
 internal static class ExpandedWorldJungleFinishingTouchesPatch
 {
@@ -396,7 +375,6 @@ internal static class ExpandedWorldJungleFinishingTouchesPatch
 
         float horizontal = ExpandedWorldJungleScales.Horizontal(__instance);
         float vertical = ExpandedWorldJungleScales.Vertical(__instance);
-        float isotropic = ExpandedWorldJungleScales.Isotropic(__instance);
         float density = ExpandedWorldJungleScales.Density(__instance);
 
         int walkX = oldX;
@@ -444,7 +422,11 @@ internal static class ExpandedWorldJungleFinishingTouchesPatch
                     (int)(200d * vertical));
             }
 
-            for (int detail = 0; detail < 8d * isotropic; detail++)
+            // Vanilla multiplies both this outer count and the nested detail
+            // count by one linear world scale. When X and Y diverge, splitting
+            // those two factors into horizontal and vertical preserves their
+            // product exactly as an area-density rule.
+            for (int detail = 0; detail < 8d * vertical; detail++)
             {
                 i += WorldGen.genRand.Next(-30, 31);
                 j += WorldGen.genRand.Next(-30, 31);
