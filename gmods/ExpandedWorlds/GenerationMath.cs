@@ -3,13 +3,17 @@ using System;
 /// <summary>
 /// Pure, Terraria-independent scaling rules for Expanded Worlds.
 ///
-/// The point of this file is not to invent a "world size 4" or "world size 5".
-/// Terraria scales different generators by different physical dimensions. These
-/// helpers preserve that distinction and use the same truncation behavior as
-/// vanilla WorldGenRange-style scaling.
+/// Vanilla worlds grow in both axes, so Terraria can sometimes use width as a
+/// proxy for overall world size. Expanded Worlds intentionally breaks that
+/// relationship: XL/Huge are wider while remaining 2400 tiles tall. The correct
+/// generalization is therefore dimension-aware:
 ///
-/// CI exercises the Small / Medium / Large rows first. A formula is only used as
-/// an XL / Huge extrapolation when it reproduces the known vanilla tiers.
+///   horizontal geometry/counts -> width / 4200
+///   vertical geometry          -> height / 1200
+///   area-density counts        -> (width * height) / (4200 * 1200)
+///
+/// Small/Medium/Large are never rewritten by the runtime patches. For formulas
+/// we extrapolate, CI first proves the rule reproduces known vanilla outputs.
 /// </summary>
 internal static class ExpandedWorldMath
 {
@@ -24,16 +28,28 @@ internal static class ExpandedWorldMath
     public const int HugeWidth = 16800;
     public const int HugeHeight = 2400;
 
-    public const long SmallArea = (long)SmallWidth * SmallHeight; // 5,040,000
+    public const long SmallArea = (long)SmallWidth * SmallHeight;
 
     public static long TileArea(int width, int height)
     {
         return (long)width * height;
     }
 
-    public static double WidthScale(int width)
+    public static double HorizontalScale(int width)
     {
         return width / (double)SmallWidth;
+    }
+
+    public static double VerticalScale(int height)
+    {
+        return height / (double)SmallHeight;
+    }
+
+    // Kept as an alias because many vanilla configuration families explicitly
+    // call their scaling mode WorldWidth.
+    public static double WidthScale(int width)
+    {
+        return HorizontalScale(width);
     }
 
     public static double AreaScale(int width, int height)
@@ -45,7 +61,12 @@ internal static class ExpandedWorldMath
     // base value by the selected physical scale, then truncate toward zero.
     public static int ScaleByWidth(int smallWorldValue, int width)
     {
-        return (int)(smallWorldValue * WidthScale(width));
+        return (int)(smallWorldValue * HorizontalScale(width));
+    }
+
+    public static int ScaleByHeight(int smallWorldValue, int height)
+    {
+        return (int)(smallWorldValue * VerticalScale(height));
     }
 
     public static int ScaleByArea(int smallWorldValue, int width, int height)
@@ -92,15 +113,68 @@ internal static class ExpandedWorldMath
 
     public static int FloatingLakes(int width)
     {
-        // Vanilla currently exposes the sequence 1 / 2 / 3 for
-        // 4200 / 6400 / 8400-wide worlds via discrete thresholds.
-        // floor(width / 2800) is the simplest width-density continuation that
-        // reproduces all three existing tiers exactly, yielding XL=4, Huge=6.
+        // Vanilla currently exposes 1 / 2 / 3 for 4200 / 6400 / 8400 via
+        // thresholds. floor(width / 2800) is the width-density continuation that
+        // reproduces all three and yields XL=4, Huge=6.
         return Math.Max(1, width / 2800);
     }
 
+    // ---- Underground Desert geometry ---------------------------------------
+    // Current vanilla derives one scalar from maxTilesX and uses it for both X
+    // and Y because normal world width/height grow together. With a custom aspect
+    // ratio that is dimensionally wrong: Huge's width scalar (4x Small) would
+    // also try to make the desert 4x Small's height inside a world only 2x Small
+    // height. We preserve the exact source arithmetic but feed each axis its own
+    // physical scale.
+
+    public static int UndergroundDesertBlockColumns(int width)
+    {
+        // Vanilla: (int)(80 * widthScale).
+        return (int)(80d * HorizontalScale(width));
+    }
+
+    public static int UndergroundDesertWidth(int width)
+    {
+        // DefaultBlockScale.X = 4.
+        return UndergroundDesertBlockColumns(width) * 4;
+    }
+
+    public static int UndergroundDesertBlockRows(double nextDouble, int height)
+    {
+        if (nextDouble < 0d || nextDouble >= 1d)
+            throw new ArgumentOutOfRangeException(nameof(nextDouble));
+
+        // Vanilla normal seed:
+        // (int)((NextDouble() * 0.5 + 1.5) * 170 * overallScale).
+        // Only the scale source changes for expanded aspect ratios.
+        return (int)((nextDouble * 0.5d + 1.5d) * 170d * VerticalScale(height));
+    }
+
+    public static int UndergroundDesertBlockRowsRemix(int height)
+    {
+        // Vanilla Remix: (int)(340 * overallScale).
+        return (int)(340d * VerticalScale(height));
+    }
+
+    public static int UndergroundDesertHeight(double nextDouble, int height)
+    {
+        // DefaultBlockScale.Y = 2.
+        return UndergroundDesertBlockRows(nextDouble, height) * 2;
+    }
+
+    public static int UndergroundDesertHeightRemix(int height)
+    {
+        return UndergroundDesertBlockRowsRemix(height) * 2;
+    }
+
+    public static int UndergroundDesertTenthAnniversaryYOffset(int height)
+    {
+        // Vanilla: (int)(20 * overallScale).
+        return (int)(20d * VerticalScale(height));
+    }
+
     // WorldGenRange-backed families. Their base ranges are the Small-world
-    // configuration; Terraria's own scaler distinguishes WorldArea vs WorldWidth.
+    // configuration; Terraria's scaler distinguishes WorldArea vs WorldWidth.
     public static IntRange MarbleCaves(int width, int height)
     {
         return ScaleRangeByArea(4, 8, width, height);
@@ -143,12 +217,11 @@ internal static class ExpandedWorldMath
 
     public static IntRange BeeHives(int width)
     {
-        // The modern S/M/L sequence 6-8 / 8-12 / 11-16 is reproduced exactly by
-        // the source-family formula:
+        // Source-family formula:
         //   1 + Next((int)(5 * widthScale), (int)(8 * widthScale))
-        // Random.Next's upper bound is exclusive, so the resulting inclusive
-        // maximum is floor(8*scale).
-        double scale = WidthScale(width);
+        // Random.Next's upper bound is exclusive, so inclusive maximum is
+        // floor(8*scale).
+        double scale = HorizontalScale(width);
         int minimum = 1 + (int)(5d * scale);
         int maximum = (int)(8d * scale);
         return new IntRange(minimum, maximum);
