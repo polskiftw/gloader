@@ -1,3 +1,4 @@
-[submodule "tools/patchreviewer"]
-	path = tools/patchreviewer
-	url = https://github.com/Chicken-Bones/PatchReviewer.git
+[submodule "tools/tmodloader-dev"]
+	path = tools/tmodloader-dev
+	url = https://github.com/tModLoader/tModLoader.git
+	branch = 1.4.5

@@ -1,0 +1,89 @@
+name: tModLoader Dev Tools
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.gitmodules'
+      - 'tools/tmodloader-dev'
+      - 'tools/tmodloader-dev.README.md'
+      - '.github/workflows/tmodloader-dev.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout gloader + tModLoader dev workspace
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Record pinned tModLoader revision
+        shell: pwsh
+        run: |
+          $pin = (git -C tools/tmodloader-dev rev-parse HEAD).Trim()
+          "TML_PIN=$pin" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Pinned tModLoader revision: $pin"
+
+      - name: Publish Setup GUI self-contained
+        shell: pwsh
+        working-directory: tools/tmodloader-dev
+        run: |
+          dotnet publish setup/GUI/Setup.GUI.csproj `
+            --configuration Release `
+            --framework net10.0-windows `
+            --runtime win-x64 `
+            --self-contained true `
+            --output setup/prebuilt/win-x64 `
+            '-p:WarningLevel=0;Platform='
+
+      - name: Stage portable dev workspace
+        shell: pwsh
+        run: |
+          $source = Join-Path $env:GITHUB_WORKSPACE 'tools\tmodloader-dev'
+          $stage = Join-Path $env:GITHUB_WORKSPACE 'artifacts\tmodloader-dev'
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+
+          robocopy $source $stage /E /COPY:DAT /R:2 /W:1 /XD .git /XF .git
+          if ($LASTEXITCODE -ge 8) {
+            exit $LASTEXITCODE
+          }
+          $global:LASTEXITCODE = 0
+
+          $launcher = @"
+          @echo off
+          cd /d "%~dp0"
+          set "GITHUB_HEAD_REF=1.4.5"
+          set "HEAD_SHA=$env:TML_PIN"
+          start "" "setup\prebuilt\win-x64\setup-gui.exe"
+          "@
+          Set-Content -Path (Join-Path $stage 'RUN-SETUP.bat') -Value $launcher -Encoding ASCII
+
+          $info = @"
+          tModLoader developer workspace bundled by gloader
+          Branch: 1.4.5
+          Pinned commit: $env:TML_PIN
+
+          Run RUN-SETUP.bat from this directory.
+          The Setup GUI includes the full decompile / patch / diff workflow.
+          "@
+          Set-Content -Path (Join-Path $stage 'GLOADER-BUNDLE.txt') -Value $info -Encoding UTF8
+
+      - name: Upload portable workspace
+        uses: actions/upload-artifact@v4
+        with:
+          name: tModLoader-dev-workspace-win-x64
+          path: artifacts/tmodloader-dev/**
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
