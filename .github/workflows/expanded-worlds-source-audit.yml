@@ -51,15 +51,17 @@ jobs:
           $auditDir = Join-Path $PWD 'audit-output'
           New-Item -ItemType Directory -Force $auditDir | Out-Null
 
-          $worldGen = Join-Path $env:RUNNER_TEMP 'WorldGen.cs'
-          $genVars = Join-Path $env:RUNNER_TEMP 'GenVars.cs'
-          $dungeonData = Join-Path $env:RUNNER_TEMP 'DungeonData.cs'
-          $types = Join-Path $env:RUNNER_TEMP 'types.txt'
+          $worldGen = Join-Path $auditDir 'WorldGen.cs'
+          $genVars = Join-Path $auditDir 'GenVars.cs'
+          $dungeonData = Join-Path $auditDir 'DungeonData.cs'
+          $hiveBiome = Join-Path $auditDir 'HiveBiome.cs'
+          $types = Join-Path $auditDir 'types.txt'
 
           & $ilspy -l c $server | Set-Content -Encoding UTF8 $types
           & $ilspy -t Terraria.WorldGen $server | Set-Content -Encoding UTF8 $worldGen
           & $ilspy -t Terraria.WorldBuilding.GenVars $server | Set-Content -Encoding UTF8 $genVars
           & $ilspy -t Terraria.GameContent.Generation.Dungeon.DungeonData $server | Set-Content -Encoding UTF8 $dungeonData
+          & $ilspy -t Terraria.GameContent.Biomes.HiveBiome $server | Set-Content -Encoding UTF8 $hiveBiome
 
           $report = Join-Path $auditDir 'terraria-1.4.5.8-worldgen-audit.txt'
           @(
@@ -70,7 +72,7 @@ jobs:
             '=== Relevant type names ==='
           ) | Set-Content -Encoding UTF8 $report
 
-          Select-String -Path $types -Pattern 'WorldGen.*SecretSeed|DungeonData|DungeonGenVars|WorldBuilding.GenVars' |
+          Select-String -Path $types -Pattern 'WorldGen.*SecretSeed|DungeonData|DungeonGenVars|WorldBuilding.GenVars|HiveBiome' |
             ForEach-Object { $_.Line } | Add-Content -Encoding UTF8 $report
 
           function Add-MatchesWithContext {
@@ -108,17 +110,18 @@ jobs:
           }
 
           Add-MatchesWithContext -Title 'GenVars fixed-capacity declarations' -Path $genVars -Patterns @(
+            'skyLakes',
             'floatingIslandHouseX',
             'larvaX',
             'JChestX',
             'mCaveX',
             'LakeX',
-            'mushroomX',
-            'oases',
-            'orePatch',
+            'mushroomBiomesPosition',
+            'oasisPosition',
+            'orePatchX',
             'tunnelX',
             'dungeonGenVars'
-          ) -Before 2 -After 5
+          ) -Before 3 -After 7
 
           Add-MatchesWithContext -Title 'DungeonData dynamic collections' -Path $dungeonData -Patterns @(
             'dungeonRooms',
@@ -128,7 +131,17 @@ jobs:
             'protectedDungeonBounds'
           ) -Before 2 -After 3
 
+          Add-MatchesWithContext -Title 'HiveBiome larva producers and seed branches' -Path $hiveBiome -Patterns @(
+            'larvaX',
+            'numLarva',
+            'CreateStandForLarva',
+            'drunkWorldGen',
+            'remixWorldGen',
+            'notTheBees'
+          ) -Before 12 -After 24
+
           Add-MatchesWithContext -Title 'WorldGen reads and writes of fixed-capacity records' -Path $worldGen -Patterns @(
+            'skyLakes',
             'floatingIslandHouseX',
             'numIslandHouses',
             'larvaX',
@@ -139,36 +152,49 @@ jobs:
             'numMCaves',
             'LakeX',
             'numLakes',
-            'mushroomX',
-            'numMushrooms',
-            'oases',
+            'mushroomBiomesPosition',
+            'numMushroomBiomes',
+            'oasisPosition',
             'numOasis',
-            'orePatch',
+            'orePatchX',
             'numOrePatch',
             'tunnelX',
             'numTunnels'
-          ) -Before 8 -After 12
+          ) -Before 16 -After 24
 
           Add-MatchesWithContext -Title 'Secret-seed worldgen switches touching high-risk generation' -Path $worldGen -Patterns @(
             'extraFloatingIslands',
             'extraFloatingIslandsReducedAmount',
+            'errorWorldAdjustment',
             'dualDungeons',
             'extraLivingTrees',
+            'extraLivingTreesReducedAmount',
+            'addTeleporters',
             'notTheBees',
             'NotTheBees',
             'drunkWorldGen',
             'remixWorldGen',
             'getGoodWorldGen'
-          ) -Before 8 -After 14
+          ) -Before 12 -After 24
+
+          Add-MatchesWithContext -Title 'Hard-coded world-size and width-tier assumptions' -Path $worldGen -Patterns @(
+            '8400',
+            '6400',
+            '4200',
+            'maxTilesX ==',
+            'maxTilesX / 4200',
+            'maxTilesX > 8400',
+            'maxTilesX < 8400'
+          ) -Before 5 -After 8
 
           Write-Host '--- BEGIN EXPANDED WORLDS SOURCE AUDIT ---'
           Get-Content $report
           Write-Host '--- END EXPANDED WORLDS SOURCE AUDIT ---'
 
-      - name: Upload audit report
+      - name: Upload audit report and exact decompile inputs
         uses: actions/upload-artifact@v4
         with:
           name: expanded-worlds-terraria-1.4.5.8-source-audit
-          path: audit-output/terraria-1.4.5.8-worldgen-audit.txt
+          path: audit-output/
           if-no-files-found: error
           retention-days: 7
