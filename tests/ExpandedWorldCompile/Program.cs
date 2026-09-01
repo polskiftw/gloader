@@ -46,24 +46,44 @@ internal static class Program
             }
         }
 
-        if (ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(8400, true, false) != 64 ||
-            ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(ExpandedWorldMath.XLWidth, true, false) != 96 ||
-            ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(ExpandedWorldMath.HugeWidth, false, false) != 64 ||
-            ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(ExpandedWorldMath.HugeWidth, true, false) != 128 ||
-            ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(ExpandedWorldMath.HugeWidth, true, true) != 64)
+        if (ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(8400, true, false) != 72 ||
+            ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(ExpandedWorldMath.XLWidth, true, false) != 108 ||
+            ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(ExpandedWorldMath.HugeWidth, false, false) != 72 ||
+            ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(ExpandedWorldMath.HugeWidth, true, false) != 144 ||
+            ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(ExpandedWorldMath.HugeWidth, true, true) != 72)
         {
             Console.Error.WriteLine("Expanded Worlds compile fixture: Crimson heart capacity regression changed unexpectedly.");
             return 1;
         }
 
-        if (ExpandedWorldCapacityMath.CrimsonHeartScratchCapacity(ExpandedWorldMath.XLWidth) > 100 ||
-            ExpandedWorldCapacityMath.CrimsonHeartScratchCapacity(ExpandedWorldMath.HugeWidth) != 128)
+        if (ExpandedWorldCapacityMath.CrimsonHeartScratchCapacity(ExpandedWorldMath.XLWidth) != 108 ||
+            ExpandedWorldCapacityMath.CrimsonHeartScratchCapacity(ExpandedWorldMath.XLWidth) <= 100 ||
+            ExpandedWorldCapacityMath.CrimsonHeartScratchCapacity(ExpandedWorldMath.HugeWidth) != 144 ||
+            ExpandedWorldCapacityMath.CrimsonHeartScratchCapacity(ExpandedWorldMath.HugeWidth) <= 100)
         {
-            Console.Error.WriteLine("Expanded Worlds compile fixture: Huge Remix Crimson heart overflow guard is not preserved.");
+            Console.Error.WriteLine("Expanded Worlds compile fixture: XL/Huge Remix Crimson heart overflow guards are not preserved.");
             return 1;
         }
 
-        Console.WriteLine("PASS: Expanded Worlds raw source compile fixture and discrete/capacity regressions.");
+        if (ExpandedWorldSecretSeedMath.DontStarveWavyCaveBaseCount(4200, 1200) != 35 ||
+            ExpandedWorldSecretSeedMath.DontStarveWavyCaveBaseCount(6400, 1800) != 81 ||
+            ExpandedWorldSecretSeedMath.DontStarveWavyCaveBaseCount(8400, 2400) != 140)
+        {
+            Console.Error.WriteLine(
+                "Expanded Worlds compile fixture: Don't Starve Wavy Caves no longer reproduce Terraria's Small/Medium/Large source counts.");
+            return 1;
+        }
+
+        if (ExpandedWorldSecretSeedMath.DontStarveWavyCaveBaseCount(12600, 2400) != 210 ||
+            ExpandedWorldSecretSeedMath.DontStarveWavyCaveBaseCount(16800, 2400) != 280 ||
+            ExpandedWorldSecretSeedMath.DontStarveWavyCaveCount(16800, 2400, true) != 93)
+        {
+            Console.Error.WriteLine(
+                "Expanded Worlds compile fixture: expanded Don't Starve Wavy Cave area continuation changed unexpectedly.");
+            return 1;
+        }
+
+        Console.WriteLine("PASS: Expanded Worlds raw source compile fixture, discrete/capacity regressions, and secret-seed scaling regressions.");
         return 0;
     }
 }
