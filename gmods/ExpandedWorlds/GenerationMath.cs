@@ -20,7 +20,8 @@ using System;
 ///
 /// Small/Medium/Large are never rewritten by runtime patches. For count/range
 /// formulas that we extrapolate, CI first proves the rule reproduces known
-/// vanilla Small / Medium / Large outputs.
+/// vanilla Small / Medium / Large outputs. Discrete tier-only sequences are not
+/// extrapolated merely because a curve can be fitted through three points.
 /// </summary>
 internal static class ExpandedWorldMath
 {
@@ -162,13 +163,10 @@ internal static class ExpandedWorldMath
         return (int)(width * 0.0008d);
     }
 
-    public static int FloatingLakes(int width)
-    {
-        // Vanilla exposes 1 / 2 / 3 for 4200 / 6400 / 8400 through discrete
-        // thresholds. floor(width / 2800) reproduces all three existing tiers
-        // and is the width-density continuation used for expanded tiers.
-        return Math.Max(1, width / 2800);
-    }
+    // Floating Lakes are deliberately absent. Vanilla exposes a discrete
+    // Small/Medium/Large threshold sequence (1/2/3), but that does not uniquely
+    // define a continuation beyond Large. Until a source-backed rule is found,
+    // Expanded Worlds does not pretend that fitting a convenient curve is proof.
 
     // ---- Underground Desert geometry ---------------------------------------
     // Current vanilla derives one scalar from maxTilesX and uses it for both X
