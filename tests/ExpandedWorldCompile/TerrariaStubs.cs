@@ -206,7 +206,18 @@ namespace Terraria.GameContent.Biomes.Desert
 
 namespace Terraria.IO
 {
-    public sealed class Placeholder { }
+    public sealed class WorldFileData
+    {
+        public int WorldSizeX { get; set; }
+        public int WorldSizeY { get; set; }
+        public string WorldSizeName => string.Empty;
+        public string GetFullSeedText() => "0.stub";
+        public void SetWorldSize(int width, int height)
+        {
+            WorldSizeX = width;
+            WorldSizeY = height;
+        }
+    }
 }
 
 namespace Terraria.WorldBuilding
