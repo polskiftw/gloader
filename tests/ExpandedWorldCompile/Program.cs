@@ -46,7 +46,24 @@ internal static class Program
             }
         }
 
-        Console.WriteLine("PASS: Expanded Worlds raw source compile fixture and discrete-tier regressions.");
+        if (ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(8400, true, false) != 64 ||
+            ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(ExpandedWorldMath.XLWidth, true, false) != 96 ||
+            ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(ExpandedWorldMath.HugeWidth, false, false) != 64 ||
+            ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(ExpandedWorldMath.HugeWidth, true, false) != 128 ||
+            ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(ExpandedWorldMath.HugeWidth, true, true) != 64)
+        {
+            Console.Error.WriteLine("Expanded Worlds compile fixture: Crimson heart capacity regression changed unexpectedly.");
+            return 1;
+        }
+
+        if (ExpandedWorldCapacityMath.CrimsonHeartScratchCapacity(ExpandedWorldMath.XLWidth) > 100 ||
+            ExpandedWorldCapacityMath.CrimsonHeartScratchCapacity(ExpandedWorldMath.HugeWidth) != 128)
+        {
+            Console.Error.WriteLine("Expanded Worlds compile fixture: Huge Remix Crimson heart overflow guard is not preserved.");
+            return 1;
+        }
+
+        Console.WriteLine("PASS: Expanded Worlds raw source compile fixture and discrete/capacity regressions.");
         return 0;
     }
 }
