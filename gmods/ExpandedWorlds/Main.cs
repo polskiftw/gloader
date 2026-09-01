@@ -116,6 +116,28 @@ internal static class ExpandedWorldState
             }
         }
 
+        // WorldFile.CreateMetadata does not itself stamp the live dimensions in
+        // the audited vanilla creation path. Keep the in-memory world metadata in
+        // lock-step with the actual world immediately rather than waiting for a
+        // later save/reload to reconstruct it from the .wld header.
+        object worldFileData = Main.ActiveWorldFileData;
+        if (worldFileData != null)
+        {
+            MethodInfo setMetadataSize = AccessTools.Method(
+                worldFileData.GetType(),
+                "SetWorldSize",
+                new[] { typeof(int), typeof(int) });
+
+            if (setMetadataSize == null)
+            {
+                throw new MissingMethodException(
+                    worldFileData.GetType().FullName,
+                    "SetWorldSize(int,int)");
+            }
+
+            setMetadataSize.Invoke(worldFileData, new object[] { width, VanillaLargeHeight });
+        }
+
         Console.WriteLine(
             "[Expanded Worlds] " + stage + ": using " + LabelFor(GenerationPreset) +
             " " + width + "x" + VanillaLargeHeight +
