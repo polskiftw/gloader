@@ -181,7 +181,11 @@ jobs:
             'LakeX',
             'numLakes',
             'oasisPosition',
-            'numOasis'
+            'numOasis',
+            'heartPos',
+            'heartCount',
+            'CrimStart',
+            'CrimVein'
           ) -Before 16 -After 24
 
           Add-MatchesWithContext -Title 'Secret-seed worldgen switches touching high-risk generation' -Path $worldGen -Patterns @(
@@ -196,11 +200,13 @@ jobs:
             'NotTheBees',
             'drunkWorldGen',
             'remixWorldGen',
-            'getGoodWorldGen'
+            'getGoodWorldGen',
+            '0.00045'
           ) -Before 12 -After 24
 
           Add-MatchesWithContext -Title 'Hard-coded world-size and width-tier assumptions' -Path $worldGen -Patterns @(
             '0.0008',
+            '0.00045',
             '8400',
             '6400',
             '4200',
@@ -247,6 +253,11 @@ jobs:
           Assert-SourcePattern 'Lake storage maximum is 50' $genVars 'maxLakes\s*=\s*50'
           Assert-SourcePattern 'Oasis storage maximum is 20' $genVars 'maxOasis\s*=\s*20'
           Assert-SourcePattern 'Per-dungeon generation state is a dynamic list' $genVars 'List<DungeonGenVars>\s+dungeonGenVars'
+
+          Assert-SourcePattern 'Crimson heart scratch capacity is 100' $worldGen 'heartPos\s*=.*new Point\[100\]'
+          Assert-SourcePattern 'Crimson region count derives from physical width' $worldGen 'Main\.maxTilesX\s*\*\s*0\.00045'
+          Assert-SourcePattern 'Crimson vein count remains five through eight' $worldGen 'genRand\.Next\(5,\s*9\)'
+          Assert-SourcePattern 'Crimson vein appends directly by heartCount' $worldGen 'heartPos\[heartCount\]\s*='
 
           Assert-SourcePattern 'Dungeon rooms use List<T>' $dungeonData 'List<DungeonRoom>\s+dungeonRooms'
           Assert-SourcePattern 'Dungeon halls use List<T>' $dungeonData 'List<DungeonHall>\s+dungeonHalls'
