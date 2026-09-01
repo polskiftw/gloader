@@ -13,8 +13,9 @@ using Terraria;
 /// Dungeon state, so those are validation-only. Floating Island metadata remains
 /// fixed arrays, however, and the 1.4.5.8 Error World + Care Bears combination
 /// can exceed vanilla's 300 records on XL/Huge. WorldGen's private Crimson-heart
-/// position array is also fixed at 100; Huge + Remix can require 128 records.
-/// Those arrays are enlarged to their exact audited worst-case record bounds.
+/// position array is also fixed at 100; Remix can require 108 records on XL and
+/// 144 on Huge. Those arrays are enlarged to their exact audited worst-case
+/// record bounds.
 ///
 /// Older Terraria builds used fixed Dungeon arrays. Keep the source-derived
 /// legacy Dungeon resize as a compatibility fallback only when modern
@@ -74,10 +75,11 @@ internal static class ExpandedWorldGenerationCapacity
     {
         int required = ExpandedWorldCapacityMath.CrimsonHeartScratchCapacity(Main.maxTilesX);
 
-        // Terraria 1.4.5.8's CrimVein writes directly to the private static
-        // WorldGen.heartPos array and increments heartCount without a bounds
-        // check. Huge + Remix can produce 16 CrimStart calls * 8 veins = 128
-        // records. Resize only the scratch array; generation/RNG stay untouched.
+        // Terraria 1.4.5.8 writes heartPos once per CrimVein (up to eight) and
+        // once more from CrimEnt at the end of every CrimStart, with no bounds
+        // check. Remix can therefore require 12 * 9 = 108 records on XL and
+        // 16 * 9 = 144 on Huge. Resize only the scratch array; generation/RNG
+        // stay untouched.
         EnsureStaticArray(
             typeof(WorldGen),
             required,
