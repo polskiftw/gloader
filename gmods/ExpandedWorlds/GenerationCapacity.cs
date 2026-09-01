@@ -12,8 +12,9 @@ using Terraria;
 /// Current Terraria 1.4.5 uses dynamic per-DungeonData List<T> collections for
 /// Dungeon state, so those are validation-only. Floating Island metadata remains
 /// fixed arrays, however, and the 1.4.5.8 Error World + Care Bears combination
-/// can exceed vanilla's 300 records on XL/Huge. Those arrays are enlarged to the
-/// exact audited worst-case record bound.
+/// can exceed vanilla's 300 records on XL/Huge. WorldGen's private Crimson-heart
+/// position array is also fixed at 100; Huge + Remix can require 128 records.
+/// Those arrays are enlarged to their exact audited worst-case record bounds.
 ///
 /// Older Terraria builds used fixed Dungeon arrays. Keep the source-derived
 /// legacy Dungeon resize as a compatibility fallback only when modern
@@ -36,6 +37,7 @@ internal static class ExpandedWorldGenerationCapacity
 
         Type generationHolder = AccessTools.TypeByName(GenVarsTypeName) ?? typeof(WorldGen);
         EnsureFloatingIslandStorage(generationHolder);
+        EnsureCrimsonHeartStorage();
 
         Type modernDungeonData = AccessTools.TypeByName(ModernDungeonDataTypeName);
         if (modernDungeonData != null)
@@ -65,6 +67,25 @@ internal static class ExpandedWorldGenerationCapacity
 
         Console.WriteLine(
             "[Expanded Worlds] Floating Island metadata capacity ensured at " +
+            required + " records for width " + Main.maxTilesX + ".");
+    }
+
+    private static void EnsureCrimsonHeartStorage()
+    {
+        int required = ExpandedWorldCapacityMath.CrimsonHeartScratchCapacity(Main.maxTilesX);
+
+        // Terraria 1.4.5.8's CrimVein writes directly to the private static
+        // WorldGen.heartPos array and increments heartCount without a bounds
+        // check. Huge + Remix can produce 16 CrimStart calls * 8 veins = 128
+        // records. Resize only the scratch array; generation/RNG stay untouched.
+        EnsureStaticArray(
+            typeof(WorldGen),
+            required,
+            typeof(Microsoft.Xna.Framework.Point),
+            "heartPos");
+
+        Console.WriteLine(
+            "[Expanded Worlds] Crimson-heart metadata capacity ensured at " +
             required + " records for width " + Main.maxTilesX + ".");
     }
 
