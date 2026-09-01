@@ -9,16 +9,17 @@ using Microsoft.Xna.Framework;
 using Terraria;
 
 /// <summary>
-/// makeTemple's room-count formula already continues cleanly through the exact
-/// 4,200-tile width tiers used by Expanded Worlds. Older audited source used a
-/// local Rectangle[40] room buffer, which is only large enough for vanilla
-/// Large's 20-31 room range.
+/// Validates Jungle Temple room scratch storage without changing current
+/// Terraria 1.4.5 generation behavior.
 ///
-/// This transpiler changes only that scratch-array length. It deliberately does
-/// not require the current Terraria build to still use the literal 40: if
-/// Re-Logic has independently increased the one constant-sized Rectangle[] room
-/// buffer, that larger vanilla value is preserved. We only fail when the method
-/// no longer has exactly one unambiguous constant-sized Rectangle[] allocation.
+/// Terraria 1.4.5.8 sizes both Temple room arrays dynamically from the rolled
+/// room count (numRooms + 10), including Drunk/For-the-Worthy/Remix seed
+/// multipliers. That layout needs no Expanded Worlds capacity patch and must be
+/// left untouched.
+///
+/// Older audited Terraria builds used one constant-sized Rectangle[] room
+/// buffer. Keep the source-derived resize as a legacy compatibility fallback,
+/// but only when the IL still exposes that exact unambiguous fixed allocation.
 /// </summary>
 [HarmonyPatch]
 internal static class ExpandedWorldTempleScratchCapacityPatch
@@ -31,15 +32,41 @@ internal static class ExpandedWorldTempleScratchCapacityPatch
 
     private static MethodBase TargetMethod()
     {
-        MethodBase method = AccessTools.Method(
-            typeof(WorldGen),
-            "makeTemple",
-            new[] { typeof(int), typeof(int) });
+        var candidates = typeof(WorldGen)
+            .GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
+            .Where(method => method.Name == "makeTemple")
+            .Where(IsSupportedMakeTempleSignature)
+            .Cast<MethodBase>()
+            .ToList();
 
-        if (method == null)
-            throw new MissingMethodException(typeof(WorldGen).FullName, "makeTemple(int,int)");
+        if (candidates.Count != 1)
+        {
+            throw new MissingMethodException(
+                typeof(WorldGen).FullName,
+                "makeTemple(int,int[,GenerationProgress]) - expected exactly one audited overload, found " +
+                candidates.Count);
+        }
 
-        return method;
+        return candidates[0];
+    }
+
+    private static bool IsSupportedMakeTempleSignature(MethodInfo method)
+    {
+        ParameterInfo[] parameters = method.GetParameters();
+        if (parameters.Length != 2 && parameters.Length != 3)
+            return false;
+        if (parameters[0].ParameterType != typeof(int) || parameters[1].ParameterType != typeof(int))
+            return false;
+
+        if (parameters.Length == 3)
+        {
+            return string.Equals(
+                parameters[2].ParameterType.FullName,
+                "Terraria.WorldBuilding.GenerationProgress",
+                StringComparison.Ordinal);
+        }
+
+        return true;
     }
 
     [HarmonyTranspiler]
@@ -48,34 +75,76 @@ internal static class ExpandedWorldTempleScratchCapacityPatch
         MethodBase __originalMethod)
     {
         var code = instructions.ToList();
-        int replacements = 0;
+        int rectangleAllocations = 0;
+        int legacyFixedAllocations = 0;
+        int modernDynamicAllocations = 0;
 
         for (int i = 1; i < code.Count; i++)
         {
             if (code[i].opcode != OpCodes.Newarr || !Equals(code[i].operand, typeof(Rectangle)))
                 continue;
 
-            if (!TryReadIntegerConstant(code[i - 1], out int vanillaCapacity) || vanillaCapacity <= 0)
-                continue;
+            rectangleAllocations++;
 
-            // Keep the vanilla capacity on the stack and transform it at runtime
-            // only when the expanded width actually requires more room records.
-            code.Insert(i, new CodeInstruction(OpCodes.Call, CapacityMethod));
-            replacements++;
-            i++;
+            if (TryReadIntegerConstant(code[i - 1], out int vanillaCapacity) && vanillaCapacity > 0)
+            {
+                // Legacy layout: preserve vanilla's constant on the stack and
+                // enlarge it only for an armed Expanded Worlds generation.
+                code.Insert(i, new CodeInstruction(OpCodes.Call, CapacityMethod));
+                legacyFixedAllocations++;
+                i++;
+                continue;
+            }
+
+            if (IsAuditedModernDynamicAllocation(code, i))
+            {
+                // Terraria 1.4.5.8: roomRects = new Rectangle[numRooms + 10].
+                // Dynamic storage already follows every seed multiplier and must
+                // not be rewritten.
+                modernDynamicAllocations++;
+                continue;
+            }
+
+            throw new InvalidOperationException(
+                "[Expanded Worlds] makeTemple Rectangle[] allocation no longer matches either the " +
+                "audited legacy fixed-capacity shape or Terraria 1.4.5.8's numRooms+10 dynamic shape. " +
+                "Refusing to guess against this Terraria build.");
         }
 
-        if (replacements != 1)
+        if (rectangleAllocations != 1 || legacyFixedAllocations + modernDynamicAllocations != 1)
         {
             throw new InvalidOperationException(
                 "[Expanded Worlds] makeTemple source shape changed in " +
                 (__originalMethod?.DeclaringType?.FullName ?? "WorldGen") + "." +
                 (__originalMethod?.Name ?? "makeTemple") +
-                ": expected exactly one constant-sized Rectangle[] room scratch allocation, found " +
-                replacements + ". Refusing to guess against this Terraria build.");
+                ": expected exactly one audited Rectangle[] room allocation, found " +
+                rectangleAllocations + ". Refusing to guess against this Terraria build.");
+        }
+
+        if (modernDynamicAllocations == 1)
+        {
+            Console.WriteLine(
+                "[Expanded Worlds] Terraria 1.4.5-style Temple room storage is dynamic; " +
+                "no Temple scratch-capacity resize is required.");
         }
 
         return code;
+    }
+
+    private static bool IsAuditedModernDynamicAllocation(List<CodeInstruction> code, int newarrIndex)
+    {
+        // C# `new Rectangle[numRooms + 10]` compiles as:
+        //   ldloc.* numRooms
+        //   ldc.i4.s 10
+        //   add
+        //   newarr Rectangle
+        // We intentionally do not care which local contains numRooms, but do
+        // require the +10 slack and arithmetic shape that the 1.4.5.8 source
+        // audit enforces independently.
+        if (newarrIndex < 3 || code[newarrIndex - 1].opcode != OpCodes.Add)
+            return false;
+
+        return TryReadIntegerConstant(code[newarrIndex - 2], out int slack) && slack == 10;
     }
 
     private static int CapacityFromVanilla(int vanillaCapacity)
