@@ -270,6 +270,27 @@ internal static class ExpandedWorldMath
         int maximum = (int)(8d * scale);
         return new IntRange(minimum, maximum);
     }
+
+    public static double DrunkHiveLinearScale(int width)
+    {
+        // HiveBiome's Drunk-world tunnel/radius scale is intentionally discrete:
+        //   ((Main.maxTilesX / 4200) + 1) / 2
+        // where maxTilesX / 4200 is integer division in the audited source.
+        // Exact 4200-tile width quanta therefore preserve the source's intended
+        // step sequence instead of replacing a special-seed rule with our normal
+        // isotropic geometry policy.
+        int widthTier = width / SmallWidth;
+        return (widthTier + 1) / 2d;
+    }
+
+    public static int MaximumLarvaRecordsFromBeeHives(int width, bool drunkWorld)
+    {
+        // Normal HiveBiome places one larva stand per generated Hive; the Drunk
+        // branch attempts one additional stand. This is a capacity upper bound,
+        // not a claim that every placement attempt succeeds.
+        int perHive = drunkWorld ? 2 : 1;
+        return BeeHives(width).Maximum * perHive;
+    }
 }
 
 internal readonly struct IntRange : IEquatable<IntRange>
