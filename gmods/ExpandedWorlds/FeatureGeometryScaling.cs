@@ -182,4 +182,34 @@ internal static class ExpandedWorldShroomPatchGeometryPatch
             "ShroomPatch");
     }
 }
+
+/// <summary>
+/// PlantAlch uses 15 * (maxTilesX/4200) as both the X and Y radius of its nearby
+/// herb scan. Generation attempts remain width-derived, but one exclusion body's
+/// two-dimensional radius must not double vertically just because Huge is wider.
+/// This patch also applies to post-generation herb growth in expanded worlds;
+/// vanilla dimensions still reproduce the exact original scalar.
+/// </summary>
+[HarmonyPatch]
+internal static class ExpandedWorldAlchemyHerbSpacingPatch
+{
+    private static MethodBase TargetMethod()
+    {
+        MethodBase method = AccessTools.Method(typeof(WorldGen), "PlantAlch", Type.EmptyTypes);
+        if (method == null)
+            throw new MissingMethodException(typeof(WorldGen).FullName, "PlantAlch");
+        return method;
+    }
+
+    [HarmonyTranspiler]
+    private static IEnumerable<CodeInstruction> Transpiler(
+        IEnumerable<CodeInstruction> instructions,
+        MethodBase __originalMethod)
+    {
+        return ExpandedWorldFeatureGeometryPatchUtil.ReplaceWidthScale(
+            instructions,
+            __originalMethod,
+            "PlantAlch herb-spacing radius");
+    }
+}
 #endif
