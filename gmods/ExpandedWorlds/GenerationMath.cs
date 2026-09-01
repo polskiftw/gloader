@@ -271,6 +271,18 @@ internal static class ExpandedWorldMath
         return new IntRange(minimum, maximum);
     }
 
+    public static int BeeHiveGenerationUpperBound(int width, bool drunkWorld)
+    {
+        int target = BeeHives(width).Maximum;
+        if (!drunkWorld)
+            return target;
+
+        // Terraria 1.4.5.8 multiplies the double target by the literal 0.667,
+        // then decrements it by 1 for each successful HiveBiome placement while
+        // target > 0. A fractional remainder therefore permits one final hive.
+        return (int)Math.Ceiling(target * 0.667d);
+    }
+
     public static double DrunkHiveLinearScale(int width)
     {
         // HiveBiome's Drunk-world tunnel/radius scale is intentionally discrete:
@@ -285,11 +297,11 @@ internal static class ExpandedWorldMath
 
     public static int MaximumLarvaRecordsFromBeeHives(int width, bool drunkWorld)
     {
-        // Normal HiveBiome places one larva stand per generated Hive; the Drunk
-        // branch attempts one additional stand. This is a capacity upper bound,
-        // not a claim that every placement attempt succeeds.
+        // HiveBiome places one larva stand per generated Hive. The Drunk branch
+        // can place one additional stand, so combine that per-hive maximum with
+        // the source-exact successful-hive upper bound above.
         int perHive = drunkWorld ? 2 : 1;
-        return BeeHives(width).Maximum * perHive;
+        return checked(BeeHiveGenerationUpperBound(width, drunkWorld) * perHive);
     }
 }
 
