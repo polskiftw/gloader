@@ -63,15 +63,16 @@ internal static class HardcoreSavePlayerPatch
 }
 
 // Opening character select is the clean boundary at which the protected file is no
-// longer associated with a live dead/ghost Player instance. Clear protection here so
-// normal saves, the difficulty cycler, and intentional Delete all work normally.
+// longer associated with a live dead/ghost Player instance. Keep protection armed
+// throughout the UI transition, then clear it afterward so normal saves, the
+// difficulty cycler, and intentional Delete all work normally.
 [HarmonyPatch]
 internal static class HardcoreCharacterSelectPatch
 {
     private static MethodBase TargetMethod() => HardcoreSaveProtectionRuntime.OpenCharacterSelectMethod;
 
-    [HarmonyPrefix]
-    private static void Prefix()
+    [HarmonyPostfix]
+    private static void Postfix()
     {
         HardcoreSaveProtectionRuntime.ClearAtCharacterSelect();
     }
