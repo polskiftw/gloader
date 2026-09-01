@@ -83,7 +83,21 @@ internal static class Program
             return 1;
         }
 
-        Console.WriteLine("PASS: Expanded Worlds raw source compile fixture, discrete/capacity regressions, and secret-seed scaling regressions.");
+        double vanillaMediumLinear = 6400d / 4200d;
+        double xlLinear = ExpandedWorldFeatureGeometryMath.AxisNeutralLinearScale(12600, 2400);
+        double hugeLinear = ExpandedWorldFeatureGeometryMath.AxisNeutralLinearScale(16800, 2400);
+        if (Math.Abs(ExpandedWorldFeatureGeometryMath.AxisNeutralLinearScale(4200, 1200) - 1d) > 1e-12 ||
+            Math.Abs(ExpandedWorldFeatureGeometryMath.AxisNeutralLinearScale(6400, 1800) - vanillaMediumLinear) > 1e-12 ||
+            Math.Abs(ExpandedWorldFeatureGeometryMath.AxisNeutralLinearScale(8400, 2400) - 2d) > 1e-12 ||
+            Math.Abs(xlLinear - Math.Sqrt(6d)) > 1e-12 ||
+            Math.Abs(hugeLinear - Math.Sqrt(8d)) > 1e-12)
+        {
+            Console.Error.WriteLine(
+                "Expanded Worlds compile fixture: axis-neutral feature geometry scale changed unexpectedly.");
+            return 1;
+        }
+
+        Console.WriteLine("PASS: Expanded Worlds raw source compile fixture, capacity/seed regressions, and feature geometry regressions.");
         return 0;
     }
 }
