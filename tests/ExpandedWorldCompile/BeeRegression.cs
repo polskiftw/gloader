@@ -35,5 +35,15 @@ internal static class ExpandedWorldBeeRegression
             throw new InvalidOperationException(
                 "Expanded Worlds compile fixture: Drunk Hive source proxy no longer composes with vanilla arithmetic.");
         }
+
+        if (ExpandedWorldBeeCapacityMath.HiveCountUpperBound(16800, drunkWorld: false) != 32 ||
+            ExpandedWorldBeeCapacityMath.LarvaRecordUpperBound(16800, drunkWorld: false) != 32 ||
+            ExpandedWorldBeeCapacityMath.HiveCountUpperBound(16800, drunkWorld: true) != 22 ||
+            ExpandedWorldBeeCapacityMath.LarvaRecordUpperBound(16800, drunkWorld: true) != 44 ||
+            ExpandedWorldBeeCapacityMath.LarvaRecordUpperBound(16800, drunkWorld: true) >= 100)
+        {
+            throw new InvalidOperationException(
+                "Expanded Worlds compile fixture: Huge Hive/larva storage bound changed unexpectedly.");
+        }
     }
 }
