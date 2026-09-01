@@ -85,6 +85,47 @@ internal static class ExpandedWorldCapacityMath
     }
 
     /// <summary>
+    /// Terraria 1.4.5.8 Corruption/Crimson starts from:
+    ///   attempts = maxTilesX * 0.00045
+    /// Remix doubles that value; Drunk then halves it. The source loop compares
+    /// an integer index against the resulting double, so a positive fractional
+    /// attempt count executes ceil(attempts) times.
+    /// </summary>
+    public static int CrimsonRegionAttemptUpperBound(int width, bool remixWorld, bool drunkWorld)
+    {
+        if (width <= 0)
+            throw new ArgumentOutOfRangeException(nameof(width));
+
+        double attempts = width * 0.00045d;
+        if (remixWorld)
+            attempts *= 2d;
+        if (drunkWorld)
+            attempts /= 2d;
+
+        return (int)Math.Ceiling(attempts);
+    }
+
+    /// <summary>
+    /// Every CrimStart rolls Next(5, 9) and calls CrimVein once per result. Each
+    /// CrimVein appends exactly one position to WorldGen.heartPos with no bounds
+    /// guard. Eight records per Crimson region is therefore the hard source bound.
+    /// </summary>
+    public static int CrimsonHeartRecordUpperBound(int width, bool remixWorld, bool drunkWorld)
+    {
+        return checked(CrimsonRegionAttemptUpperBound(width, remixWorld, drunkWorld) * 8);
+    }
+
+    /// <summary>
+    /// Remix without Drunk is the maximum 1.4.5.8 Crimson-heart producer. Large
+    /// and XL remain within vanilla's 100-slot heartPos array; Huge can require
+    /// 128 records and therefore needs a non-behavioral scratch resize.
+    /// </summary>
+    public static int CrimsonHeartScratchCapacity(int width)
+    {
+        return CrimsonHeartRecordUpperBound(width, remixWorld: true, drunkWorld: false);
+    }
+
+    /// <summary>
     /// Historical pre-1.4.5 MakeDungeon initializes:
     ///   base = maxTilesX / 60
     ///   remaining = base + Next(0, base / 3)
