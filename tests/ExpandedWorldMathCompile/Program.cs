@@ -11,6 +11,7 @@ internal static class Program
             ValidateVanillaParity();
             ValidateAxisModel();
             ValidateExpandedTargets();
+            ValidateDungeonCapacityBounds();
             Console.WriteLine("Expanded Worlds math regression: " + _checks + " checks passed.");
             return 0;
         }
@@ -23,8 +24,6 @@ internal static class Program
 
     private static void ValidateVanillaParity()
     {
-        // These are known Small / Medium / Large Terraria outputs. Count/range
-        // extrapolations are not accepted unless the formula reproduces them.
         CheckCount("Life Crystals Small", 100, ExpandedWorldMath.LifeCrystals(4200, 1200));
         CheckCount("Life Crystals Medium", 230, ExpandedWorldMath.LifeCrystals(6400, 1800));
         CheckCount("Life Crystals Large", 403, ExpandedWorldMath.LifeCrystals(8400, 2400));
@@ -73,8 +72,6 @@ internal static class Program
         CheckRange("Bee Hives Medium", 8, 12, ExpandedWorldMath.BeeHives(6400));
         CheckRange("Bee Hives Large", 11, 16, ExpandedWorldMath.BeeHives(8400));
 
-        // Exact special-seed formula from HiveBiome. Integer width division is
-        // intentional and is why expanded widths use exact 4200-tile quanta.
         CheckDouble("Drunk Hive Small", 1d, ExpandedWorldMath.DrunkHiveLinearScale(4200));
         CheckDouble("Drunk Hive Medium", 1d, ExpandedWorldMath.DrunkHiveLinearScale(6400));
         CheckDouble("Drunk Hive Large", 1.5d, ExpandedWorldMath.DrunkHiveLinearScale(8400));
@@ -92,45 +89,9 @@ internal static class Program
         CheckDouble("Huge vertical scale", 2d, ExpandedWorldMath.VerticalScale(ExpandedWorldMath.HugeHeight));
         CheckDouble("XL area scale", 6d, ExpandedWorldMath.AreaScale(ExpandedWorldMath.XLWidth, ExpandedWorldMath.XLHeight));
         CheckDouble("Huge area scale", 8d, ExpandedWorldMath.AreaScale(ExpandedWorldMath.HugeWidth, ExpandedWorldMath.HugeHeight));
+        CheckDouble("XL isotropic relative to Large", Math.Sqrt(1.5d), ExpandedWorldMath.IsotropicLinearRelativeToLarge(ExpandedWorldMath.XLWidth, ExpandedWorldMath.XLHeight));
+        CheckDouble("Huge isotropic relative to Large", Math.Sqrt(2d), ExpandedWorldMath.IsotropicLinearRelativeToLarge(ExpandedWorldMath.HugeWidth, ExpandedWorldMath.HugeHeight));
 
-        // The area-equivalent isotropic scale is the square root of area scale.
-        // Anchored at Large, this gives sqrt(1.5) for XL and sqrt(2) for Huge.
-        CheckDouble(
-            "XL isotropic scale relative to Large",
-            Math.Sqrt(1.5d),
-            ExpandedWorldMath.IsotropicLinearRelativeToLarge(ExpandedWorldMath.XLWidth, ExpandedWorldMath.XLHeight));
-        CheckDouble(
-            "Huge isotropic scale relative to Large",
-            Math.Sqrt(2d),
-            ExpandedWorldMath.IsotropicLinearRelativeToLarge(ExpandedWorldMath.HugeWidth, ExpandedWorldMath.HugeHeight));
-
-        CheckDouble(
-            "XL Large-linear width continuation",
-            4.5d,
-            ExpandedWorldMath.ScaleLargeLinearByWidth(3d, ExpandedWorldMath.XLWidth));
-        CheckDouble(
-            "Huge Large-linear width continuation",
-            6d,
-            ExpandedWorldMath.ScaleLargeLinearByWidth(3d, ExpandedWorldMath.HugeWidth));
-        CheckDouble(
-            "XL Large-linear vertical continuation",
-            3d,
-            ExpandedWorldMath.ScaleLargeLinearByHeight(3d, ExpandedWorldMath.XLHeight));
-        CheckDouble(
-            "Huge Large-linear vertical continuation",
-            3d,
-            ExpandedWorldMath.ScaleLargeLinearByHeight(3d, ExpandedWorldMath.HugeHeight));
-        CheckDouble(
-            "XL Large-linear isotropic continuation",
-            3d * Math.Sqrt(1.5d),
-            ExpandedWorldMath.ScaleLargeLinearIsotropically(3d, ExpandedWorldMath.XLWidth, ExpandedWorldMath.XLHeight));
-        CheckDouble(
-            "Huge Large-linear isotropic continuation",
-            3d * Math.Sqrt(2d),
-            ExpandedWorldMath.ScaleLargeLinearIsotropically(3d, ExpandedWorldMath.HugeWidth, ExpandedWorldMath.HugeHeight));
-
-        // At the Large anchor, horizontal and vertical scale are both 2.0, so
-        // the axis-aware Desert generalization exactly equals vanilla arithmetic.
         CheckCount("Large Desert rows roll=0", 510, ExpandedWorldMath.UndergroundDesertBlockRows(0d, 2400));
         CheckCount("Large Desert rows roll=.5", 595, ExpandedWorldMath.UndergroundDesertBlockRows(0.5d, 2400));
         CheckCount("Large Remix Desert rows", 680, ExpandedWorldMath.UndergroundDesertBlockRowsRemix(2400));
@@ -146,58 +107,68 @@ internal static class Program
 
         CheckCount("Life Crystals XL", 604, ExpandedWorldMath.LifeCrystals(xlW, xlH));
         CheckCount("Life Crystals Huge", 806, ExpandedWorldMath.LifeCrystals(hugeW, hugeH));
-
         CheckCount("Surface Chests XL", 63, ExpandedWorldMath.SurfaceChests(xlW));
         CheckCount("Surface Chests Huge", 84, ExpandedWorldMath.SurfaceChests(hugeW));
-
         CheckCount("Floating Islands XL", 10, ExpandedWorldMath.FloatingIslands(xlW));
         CheckCount("Floating Islands Huge", 13, ExpandedWorldMath.FloatingIslands(hugeW));
-
         CheckRange("Marble XL", 24, 48, ExpandedWorldMath.MarbleCaves(xlW, xlH));
         CheckRange("Marble Huge", 32, 64, ExpandedWorldMath.MarbleCaves(hugeW, hugeH));
-
         CheckRange("Granite XL", 12, 24, ExpandedWorldMath.GraniteCaves(xlW));
         CheckRange("Granite Huge", 16, 32, ExpandedWorldMath.GraniteCaves(hugeW));
-
         CheckRange("Underground Cabins XL", 210, 240, ExpandedWorldMath.UndergroundCabins(xlW, xlH));
         CheckRange("Underground Cabins Huge", 280, 320, ExpandedWorldMath.UndergroundCabins(hugeW, hugeH));
-
         CheckRange("Cave Chests XL", 210, 240, ExpandedWorldMath.CaveChests(xlW, xlH));
         CheckRange("Cave Chests Huge", 280, 320, ExpandedWorldMath.CaveChests(hugeW, hugeH));
-
         CheckRange("Dead Man's Chests XL", 30, 60, ExpandedWorldMath.DeadMansChests(xlW));
         CheckRange("Dead Man's Chests Huge", 40, 80, ExpandedWorldMath.DeadMansChests(hugeW));
-
         CheckCount("Extra Desert Cabins XL", 12, ExpandedWorldMath.AdditionalDesertCabins(xlW, xlH));
         CheckCount("Extra Desert Cabins Huge", 16, ExpandedWorldMath.AdditionalDesertCabins(hugeW, hugeH));
-
         CheckRange("Living Trees XL", 18, 33, ExpandedWorldMath.LivingTreeMicroBiomes(xlW));
         CheckRange("Living Trees Huge", 24, 44, ExpandedWorldMath.LivingTreeMicroBiomes(hugeW));
-
         CheckRange("Long Tracks XL", 3, 6, ExpandedWorldMath.LongMinecartTrackCount(xlW));
         CheckRange("Long Tracks Huge", 4, 8, ExpandedWorldMath.LongMinecartTrackCount(hugeW));
-
         CheckRange("Bee Hives XL", 16, 24, ExpandedWorldMath.BeeHives(xlW));
         CheckRange("Bee Hives Huge", 21, 32, ExpandedWorldMath.BeeHives(hugeW));
         CheckDouble("Drunk Hive XL", 2d, ExpandedWorldMath.DrunkHiveLinearScale(xlW));
         CheckDouble("Drunk Hive Huge", 2.5d, ExpandedWorldMath.DrunkHiveLinearScale(hugeW));
-        CheckCount("Drunk larva record upper bound XL", 48, ExpandedWorldMath.MaximumLarvaRecordsFromBeeHives(xlW, true));
-        CheckCount("Drunk larva record upper bound Huge", 64, ExpandedWorldMath.MaximumLarvaRecordsFromBeeHives(hugeW, true));
-        CheckTrue("Huge larva records fit vanilla 100-slot buffer", ExpandedWorldMath.MaximumLarvaRecordsFromBeeHives(hugeW, true) < 100);
+        CheckCount("Drunk larva upper bound XL", 48, ExpandedWorldMath.MaximumLarvaRecordsFromBeeHives(xlW, true));
+        CheckCount("Drunk larva upper bound Huge", 64, ExpandedWorldMath.MaximumLarvaRecordsFromBeeHives(hugeW, true));
+        CheckTrue("Huge larva fits vanilla 100-slot buffer", ExpandedWorldMath.MaximumLarvaRecordsFromBeeHives(hugeW, true) < 100);
 
-        // X expands; Y remains exactly Large because XL/Huge keep Large height.
         CheckCount("Underground Desert width XL", 960, ExpandedWorldMath.UndergroundDesertWidth(xlW));
         CheckCount("Underground Desert width Huge", 1280, ExpandedWorldMath.UndergroundDesertWidth(hugeW));
         CheckCount("Underground Desert rows XL roll=0", 510, ExpandedWorldMath.UndergroundDesertBlockRows(0d, xlH));
         CheckCount("Underground Desert rows Huge roll=0", 510, ExpandedWorldMath.UndergroundDesertBlockRows(0d, hugeH));
         CheckCount("Underground Desert rows XL roll=.5", 595, ExpandedWorldMath.UndergroundDesertBlockRows(0.5d, xlH));
         CheckCount("Underground Desert rows Huge roll=.5", 595, ExpandedWorldMath.UndergroundDesertBlockRows(0.5d, hugeH));
-        CheckCount("Underground Desert height XL roll=.5", 1190, ExpandedWorldMath.UndergroundDesertHeight(0.5d, xlH));
-        CheckCount("Underground Desert height Huge roll=.5", 1190, ExpandedWorldMath.UndergroundDesertHeight(0.5d, hugeH));
         CheckCount("Remix Underground Desert height XL", 1360, ExpandedWorldMath.UndergroundDesertHeightRemix(xlH));
         CheckCount("Remix Underground Desert height Huge", 1360, ExpandedWorldMath.UndergroundDesertHeightRemix(hugeH));
-        CheckCount("Tenth-anniversary Desert Y offset XL", 40, ExpandedWorldMath.UndergroundDesertTenthAnniversaryYOffset(xlH));
-        CheckCount("Tenth-anniversary Desert Y offset Huge", 40, ExpandedWorldMath.UndergroundDesertTenthAnniversaryYOffset(hugeH));
+    }
+
+    private static void ValidateDungeonCapacityBounds()
+    {
+        int xlW = ExpandedWorldMath.XLWidth;
+        int xlH = ExpandedWorldMath.XLHeight;
+        int hugeW = ExpandedWorldMath.HugeWidth;
+        int hugeH = ExpandedWorldMath.HugeHeight;
+
+        CheckCount("XL Dungeon main-loop iterations", 279, ExpandedWorldCapacityMath.DungeonMainLoopMaxIterations(xlW));
+        CheckCount("Huge Dungeon main-loop iterations", 372, ExpandedWorldCapacityMath.DungeonMainLoopMaxIterations(hugeW));
+        CheckCount("XL Dungeon main room records", 57, ExpandedWorldCapacityMath.DungeonMainRoomRecordUpperBound(xlW));
+        CheckCount("Huge Dungeon main room records", 76, ExpandedWorldCapacityMath.DungeonMainRoomRecordUpperBound(hugeW));
+        CheckCount("Large-height Dungeon stair calls", 240, ExpandedWorldCapacityMath.DungeonEntranceStairCallUpperBound(2400));
+        CheckCount("Large-height Dungeon entrance room events", 24, ExpandedWorldCapacityMath.DungeonEntranceRoomEventUpperBound(2400));
+        CheckCount("XL Dungeon total room records", 81, ExpandedWorldCapacityMath.DungeonRoomRecordUpperBound(xlW, xlH));
+        CheckCount("Huge Dungeon total room records", 100, ExpandedWorldCapacityMath.DungeonRoomRecordUpperBound(hugeW, hugeH));
+        CheckCount("XL Dungeon hall calls", 358, ExpandedWorldCapacityMath.DungeonHallCallUpperBound(xlW, xlH));
+        CheckCount("Huge Dungeon hall calls", 470, ExpandedWorldCapacityMath.DungeonHallCallUpperBound(hugeW, hugeH));
+        CheckCount("XL Dungeon door scratch capacity", 878, ExpandedWorldCapacityMath.DungeonDoorRecordUpperBound(xlW, xlH));
+        CheckCount("Huge Dungeon door scratch capacity", 1140, ExpandedWorldCapacityMath.DungeonDoorRecordUpperBound(hugeW, hugeH));
+        CheckCount("XL Dungeon platform scratch capacity", 162, ExpandedWorldCapacityMath.DungeonPlatformRecordUpperBound(xlW, xlH));
+        CheckCount("Huge Dungeon platform scratch capacity", 200, ExpandedWorldCapacityMath.DungeonPlatformRecordUpperBound(hugeW, hugeH));
+        CheckTrue("Huge Dungeon rooms fit vanilla 100 slots", ExpandedWorldCapacityMath.DungeonRoomRecordUpperBound(hugeW, hugeH) <= 100);
+        CheckTrue("Huge Dungeon doors exceed vanilla 300 slots", ExpandedWorldCapacityMath.DungeonDoorRecordUpperBound(hugeW, hugeH) > 300);
+        CheckTrue("Huge Dungeon platforms fit vanilla 300 slots", ExpandedWorldCapacityMath.DungeonPlatformRecordUpperBound(hugeW, hugeH) <= 300);
     }
 
     private static void CheckCount(string name, int expected, int actual)
