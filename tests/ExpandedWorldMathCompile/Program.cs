@@ -11,7 +11,7 @@ internal static class Program
             ValidateVanillaParity();
             ValidateAxisModel();
             ValidateExpandedTargets();
-            ValidateDungeonCapacityBounds();
+            ValidateStorageBounds();
             Console.WriteLine("Expanded Worlds math regression: " + _checks + " checks passed.");
             return 0;
         }
@@ -145,7 +145,7 @@ internal static class Program
         CheckCount("Remix Underground Desert height Huge", 1360, ExpandedWorldMath.UndergroundDesertHeightRemix(hugeH));
     }
 
-    private static void ValidateDungeonCapacityBounds()
+    private static void ValidateStorageBounds()
     {
         int xlW = ExpandedWorldMath.XLWidth;
         int xlH = ExpandedWorldMath.XLHeight;
@@ -167,8 +167,16 @@ internal static class Program
         CheckCount("XL Dungeon platform scratch capacity", 162, ExpandedWorldCapacityMath.DungeonPlatformRecordUpperBound(xlW, xlH));
         CheckCount("Huge Dungeon platform scratch capacity", 200, ExpandedWorldCapacityMath.DungeonPlatformRecordUpperBound(hugeW, hugeH));
         CheckTrue("Huge Dungeon rooms fit vanilla 100 slots", ExpandedWorldCapacityMath.DungeonRoomRecordUpperBound(hugeW, hugeH) <= 100);
-        CheckTrue("Huge Dungeon doors exceed vanilla 300 slots", ExpandedWorldCapacityMath.DungeonDoorRecordUpperBound(hugeW, hugeH) > 300);
-        CheckTrue("Huge Dungeon platforms fit vanilla 300 slots", ExpandedWorldCapacityMath.DungeonPlatformRecordUpperBound(hugeW, hugeH) <= 300);
+        CheckTrue("XL Dungeon doors exceed current vanilla 500 slots", ExpandedWorldCapacityMath.DungeonDoorRecordUpperBound(xlW, xlH) > 500);
+        CheckTrue("Huge Dungeon doors exceed current vanilla 500 slots", ExpandedWorldCapacityMath.DungeonDoorRecordUpperBound(hugeW, hugeH) > 500);
+        CheckTrue("Huge Dungeon platforms fit current vanilla 500 slots", ExpandedWorldCapacityMath.DungeonPlatformRecordUpperBound(hugeW, hugeH) <= 500);
+
+        CheckRange("Large Temple rooms", 20, 31, ExpandedWorldCapacityMath.JungleTempleRoomCountRange(8400));
+        CheckRange("XL Temple rooms", 30, 47, ExpandedWorldCapacityMath.JungleTempleRoomCountRange(xlW));
+        CheckRange("Huge Temple rooms", 40, 63, ExpandedWorldCapacityMath.JungleTempleRoomCountRange(hugeW));
+        CheckCount("Large Temple scratch capacity", 40, ExpandedWorldCapacityMath.JungleTempleRoomScratchCapacity(8400));
+        CheckCount("XL Temple scratch capacity", 48, ExpandedWorldCapacityMath.JungleTempleRoomScratchCapacity(xlW));
+        CheckCount("Huge Temple scratch capacity", 64, ExpandedWorldCapacityMath.JungleTempleRoomScratchCapacity(hugeW));
     }
 
     private static void CheckCount(string name, int expected, int actual)
