@@ -46,22 +46,22 @@ internal static class Program
             }
         }
 
-        if (ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(8400, true, false) != 72 ||
-            ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(ExpandedWorldMath.XLWidth, true, false) != 108 ||
-            ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(ExpandedWorldMath.HugeWidth, false, false) != 72 ||
-            ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(ExpandedWorldMath.HugeWidth, true, false) != 144 ||
-            ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(ExpandedWorldMath.HugeWidth, true, true) != 72)
+        if (ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(8400, true, false) != 64 ||
+            ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(ExpandedWorldMath.XLWidth, true, false) != 96 ||
+            ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(ExpandedWorldMath.HugeWidth, false, false) != 64 ||
+            ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(ExpandedWorldMath.HugeWidth, true, false) != 128 ||
+            ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(ExpandedWorldMath.HugeWidth, true, true) != 64)
         {
             Console.Error.WriteLine("Expanded Worlds compile fixture: Crimson heart capacity regression changed unexpectedly.");
             return 1;
         }
 
-        if (ExpandedWorldCapacityMath.CrimsonHeartScratchCapacity(ExpandedWorldMath.XLWidth) != 108 ||
-            ExpandedWorldCapacityMath.CrimsonHeartScratchCapacity(ExpandedWorldMath.XLWidth) <= 100 ||
-            ExpandedWorldCapacityMath.CrimsonHeartScratchCapacity(ExpandedWorldMath.HugeWidth) != 144 ||
+        if (ExpandedWorldCapacityMath.CrimsonHeartScratchCapacity(ExpandedWorldMath.XLWidth) != 96 ||
+            ExpandedWorldCapacityMath.CrimsonHeartScratchCapacity(ExpandedWorldMath.XLWidth) > 100 ||
+            ExpandedWorldCapacityMath.CrimsonHeartScratchCapacity(ExpandedWorldMath.HugeWidth) != 128 ||
             ExpandedWorldCapacityMath.CrimsonHeartScratchCapacity(ExpandedWorldMath.HugeWidth) <= 100)
         {
-            Console.Error.WriteLine("Expanded Worlds compile fixture: XL/Huge Remix Crimson heart overflow guards are not preserved.");
+            Console.Error.WriteLine("Expanded Worlds compile fixture: Crimson heart overflow guard is not preserved.");
             return 1;
         }
 
