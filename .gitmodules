@@ -1,0 +1,3 @@
+[submodule "tools/patchreviewer"]
+	path = tools/patchreviewer
+	url = https://github.com/Chicken-Bones/PatchReviewer.git
