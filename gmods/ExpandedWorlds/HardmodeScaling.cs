@@ -39,13 +39,6 @@ internal static class ExpandedWorldHardmodeRunnerScalePatch
         var code = instructions.ToList();
         int replacementCount = 0;
 
-        // Source anchor:
-        //   int num2 = (int)(genRand.Next(200, 250) * (maxTilesX / 4200));
-        //
-        // Find the local store belonging to that expression by requiring the
-        // 200 and 250 random-range constants and the 4200 width quantum in the
-        // same short instruction window. Insert the conversion immediately
-        // before the final int is stored, preserving Terraria's random draw.
         for (int i = 0; i < code.Count; i++)
         {
             int local = GetStoredLocalIndex(code[i]);
@@ -105,16 +98,10 @@ internal static class ExpandedWorldHardmodeRunnerScalePatch
         }
 
         int randomBase = vanillaStrength / widthTier;
-        if (randomBase < 200 || randomBase >= 250)
-        {
-            throw new InvalidOperationException(
-                "[Expanded Worlds] GERunner random base fell outside the audited [200,250) range: " +
-                randomBase + ".");
-        }
-
-        return (int)(randomBase * ExpandedWorldMath.IsotropicLinearScale(
+        return ExpandedWorldMath.HardmodeRunnerStrength(
+            randomBase,
             Main.maxTilesX,
-            Main.maxTilesY));
+            Main.maxTilesY);
     }
 
     private static int GetStoredLocalIndex(CodeInstruction instruction)
