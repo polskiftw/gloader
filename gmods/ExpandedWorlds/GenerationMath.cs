@@ -3,17 +3,24 @@ using System;
 /// <summary>
 /// Pure, Terraria-independent scaling rules for Expanded Worlds.
 ///
-/// Vanilla worlds grow in both axes, so Terraria can sometimes use width as a
-/// proxy for overall world size. Expanded Worlds intentionally breaks that
-/// relationship: XL/Huge are wider while remaining 2400 tiles tall. The correct
-/// generalization is therefore dimension-aware:
+/// Vanilla worlds normally grow both axes together, so some Terraria code can
+/// get away with using one dimension as a proxy for overall size. Expanded
+/// Worlds intentionally changes the aspect ratio. Once that relationship is
+/// broken, quantities are classified by dimensional meaning:
 ///
-///   horizontal geometry/counts -> width / 4200
-///   vertical geometry          -> height / 1200
-///   area-density counts        -> (width * height) / (4200 * 1200)
+///   horizontal geometry/counts -> width
+///   vertical geometry          -> height
+///   area-density counts        -> width * height
+///   isotropic linear geometry  -> sqrt(width * height)
 ///
-/// Small/Medium/Large are never rewritten by the runtime patches. For formulas
-/// we extrapolate, CI first proves the rule reproduces known vanilla outputs.
+/// The isotropic rule is the area-equivalent linear scale: if total relevant
+/// area doubles while no axis is preferred, a radius/diameter grows by sqrt(2),
+/// not 2. It collapses back to the ordinary linear scale when both axes grow by
+/// the same factor.
+///
+/// Small/Medium/Large are never rewritten by runtime patches. For count/range
+/// formulas that we extrapolate, CI first proves the rule reproduces known
+/// vanilla Small / Medium / Large outputs.
 /// </summary>
 internal static class ExpandedWorldMath
 {
@@ -23,12 +30,18 @@ internal static class ExpandedWorldMath
     public const int MediumHeight = 1800;
     public const int LargeWidth = 8400;
     public const int LargeHeight = 2400;
-    public const int XLWidth = 12000;
+
+    // 12,600 is intentional. Terraria has several legacy/current formulas that
+    // use integer division by 4,200 as a coarse horizontal world-size quantum.
+    // 12,000 would still evaluate to the same quotient as Large (2), while
+    // 12,600 is the next exact quantum (3). Huge is the following quantum (4).
+    public const int XLWidth = 12600;
     public const int XLHeight = 2400;
     public const int HugeWidth = 16800;
     public const int HugeHeight = 2400;
 
     public const long SmallArea = (long)SmallWidth * SmallHeight;
+    public const long LargeArea = (long)LargeWidth * LargeHeight;
 
     public static long TileArea(int width, int height)
     {
@@ -45,8 +58,6 @@ internal static class ExpandedWorldMath
         return height / (double)SmallHeight;
     }
 
-    // Kept as an alias because many vanilla configuration families explicitly
-    // call their scaling mode WorldWidth.
     public static double WidthScale(int width)
     {
         return HorizontalScale(width);
@@ -55,6 +66,46 @@ internal static class ExpandedWorldMath
     public static double AreaScale(int width, int height)
     {
         return TileArea(width, height) / (double)SmallArea;
+    }
+
+    public static double IsotropicLinearScale(int width, int height)
+    {
+        return Math.Sqrt(AreaScale(width, height));
+    }
+
+    public static double WidthRelativeToLarge(int width)
+    {
+        return width / (double)LargeWidth;
+    }
+
+    public static double HeightRelativeToLarge(int height)
+    {
+        return height / (double)LargeHeight;
+    }
+
+    public static double AreaRelativeToLarge(int width, int height)
+    {
+        return TileArea(width, height) / (double)LargeArea;
+    }
+
+    public static double IsotropicLinearRelativeToLarge(int width, int height)
+    {
+        return Math.Sqrt(AreaRelativeToLarge(width, height));
+    }
+
+    public static double ScaleLargeLinearByWidth(double vanillaLargeValue, int width)
+    {
+        return vanillaLargeValue * WidthRelativeToLarge(width);
+    }
+
+    public static double ScaleLargeLinearByHeight(double vanillaLargeValue, int height)
+    {
+        return vanillaLargeValue * HeightRelativeToLarge(height);
+    }
+
+    public static double ScaleLargeLinearIsotropically(double vanillaLargeValue, int width, int height)
+    {
+        return vanillaLargeValue * IsotropicLinearRelativeToLarge(width, height);
     }
 
     // Mirrors Terraria's WorldGenRange scaling behavior: multiply the Small-world
@@ -113,23 +164,20 @@ internal static class ExpandedWorldMath
 
     public static int FloatingLakes(int width)
     {
-        // Vanilla currently exposes 1 / 2 / 3 for 4200 / 6400 / 8400 via
-        // thresholds. floor(width / 2800) is the width-density continuation that
-        // reproduces all three and yields XL=4, Huge=6.
+        // Vanilla exposes 1 / 2 / 3 for 4200 / 6400 / 8400 through discrete
+        // thresholds. floor(width / 2800) reproduces all three existing tiers
+        // and is the width-density continuation used for expanded tiers.
         return Math.Max(1, width / 2800);
     }
 
     // ---- Underground Desert geometry ---------------------------------------
     // Current vanilla derives one scalar from maxTilesX and uses it for both X
     // and Y because normal world width/height grow together. With a custom aspect
-    // ratio that is dimensionally wrong: Huge's width scalar (4x Small) would
-    // also try to make the desert 4x Small's height inside a world only 2x Small
-    // height. We preserve the exact source arithmetic but feed each axis its own
-    // physical scale.
+    // ratio that is dimensionally wrong. Preserve the source arithmetic while
+    // feeding each axis its own physical scale.
 
     public static int UndergroundDesertBlockColumns(int width)
     {
-        // Vanilla: (int)(80 * widthScale).
         return (int)(80d * HorizontalScale(width));
     }
 
@@ -146,13 +194,12 @@ internal static class ExpandedWorldMath
 
         // Vanilla normal seed:
         // (int)((NextDouble() * 0.5 + 1.5) * 170 * overallScale).
-        // Only the scale source changes for expanded aspect ratios.
+        // Only the source of the scale changes for expanded aspect ratios.
         return (int)((nextDouble * 0.5d + 1.5d) * 170d * VerticalScale(height));
     }
 
     public static int UndergroundDesertBlockRowsRemix(int height)
     {
-        // Vanilla Remix: (int)(340 * overallScale).
         return (int)(340d * VerticalScale(height));
     }
 
@@ -169,7 +216,6 @@ internal static class ExpandedWorldMath
 
     public static int UndergroundDesertTenthAnniversaryYOffset(int height)
     {
-        // Vanilla: (int)(20 * overallScale).
         return (int)(20d * VerticalScale(height));
     }
 
