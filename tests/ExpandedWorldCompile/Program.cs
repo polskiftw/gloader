@@ -15,6 +15,10 @@ internal static class Program
         int[] expectedDirtiestBase = { 3, 6, 9, 12, 15 };
         int[] expectedDirtiestCelebration = { 15, 30, 45, 60, 75 };
         int[] expectedStatueMultiplier = { 2, 3, 4, 5, 6 };
+        int[] expectedGlowTulips = { 2, 4, 6, 8, 10 };
+        int[] expectedSpikeCaveMinimum = { 3, 5, 7, 9, 11 };
+        int[] expectedSpikeCaveMaximum = { 4, 6, 8, 10, 12 };
+        int[] expectedChilletEggs = { 6, 9, 12, 15, 18 };
 
         for (int tier = 1; tier <= 5; tier++)
         {
@@ -42,6 +46,35 @@ internal static class Program
                 Console.Error.WriteLine(
                     "Expanded Worlds compile fixture: statue multiplier tier " + tier +
                     " expected " + expectedStatueMultiplier[tier - 1] + ", got " + statueMultiplier + ".");
+                return 1;
+            }
+
+            int glowTulips = ExpandedWorldDiscreteCountMath.GlowTulipCount(tier);
+            if (glowTulips != expectedGlowTulips[tier - 1])
+            {
+                Console.Error.WriteLine(
+                    "Expanded Worlds compile fixture: Glow Tulip tier " + tier +
+                    " expected " + expectedGlowTulips[tier - 1] + ", got " + glowTulips + ".");
+                return 1;
+            }
+
+            IntRange spikeCaves = ExpandedWorldDiscreteCountMath.SpikeCaveCountRange(tier);
+            if (spikeCaves.Minimum != expectedSpikeCaveMinimum[tier - 1] ||
+                spikeCaves.Maximum != expectedSpikeCaveMaximum[tier - 1])
+            {
+                Console.Error.WriteLine(
+                    "Expanded Worlds compile fixture: Spike Cave tier " + tier +
+                    " expected " + expectedSpikeCaveMinimum[tier - 1] + "-" + expectedSpikeCaveMaximum[tier - 1] +
+                    ", got " + spikeCaves + ".");
+                return 1;
+            }
+
+            int chilletEggs = ExpandedWorldDiscreteCountMath.ChilletEggCount(tier);
+            if (chilletEggs != expectedChilletEggs[tier - 1])
+            {
+                Console.Error.WriteLine(
+                    "Expanded Worlds compile fixture: Chillet Egg tier " + tier +
+                    " expected " + expectedChilletEggs[tier - 1] + ", got " + chilletEggs + ".");
                 return 1;
             }
         }
@@ -97,7 +130,7 @@ internal static class Program
             return 1;
         }
 
-        Console.WriteLine("PASS: Expanded Worlds raw source compile fixture, capacity/seed regressions, and feature geometry regressions.");
+        Console.WriteLine("PASS: Expanded Worlds raw source compile fixture, capacity/seed/tier regressions, and feature geometry regressions.");
         return 0;
     }
 }
