@@ -9,10 +9,90 @@ using System;
 internal static class ExpandedWorldCapacityMath
 {
     /// <summary>
-    /// MakeDungeon initializes:
+    /// Terraria 1.4.5.8 Floating Islands starts with:
+    ///   islands = floor(maxTilesX * 0.0008)
+    /// Error World can triple that island count. Care Bears can then multiply
+    /// both islands and the existing sky-lake count by either 2 or 10. Each
+    /// outer-loop iteration can record at most one island/lake metadata entry.
+    ///
+    /// Expanded Worlds keeps Terraria's categorical world size at Large, so the
+    /// unmodified Large sky-lake count is 3. This function accepts the base lake
+    /// count explicitly so the source assumption stays visible and testable.
+    /// </summary>
+    public static int FloatingIslandRecordUpperBound(
+        int width,
+        int baseSkyLakes,
+        bool errorWorldTriple,
+        int careBearsMultiplier)
+    {
+        if (width <= 0)
+            throw new ArgumentOutOfRangeException(nameof(width));
+        if (baseSkyLakes < 0)
+            throw new ArgumentOutOfRangeException(nameof(baseSkyLakes));
+        if (careBearsMultiplier != 1 && careBearsMultiplier != 2 && careBearsMultiplier != 10)
+            throw new ArgumentOutOfRangeException(nameof(careBearsMultiplier));
+
+        int islands = (int)(width * 0.0008d);
+        if (errorWorldTriple)
+            islands = checked(islands * 3);
+
+        return checked((islands + baseSkyLakes) * careBearsMultiplier);
+    }
+
+    /// <summary>
+    /// Worst current 1.4.5.8 secret-seed combination for Floating Island record
+    /// storage: Error World's x3 island count followed by Care Bears' full x10
+    /// multiplier. Large-category worlds start with three sky lakes.
+    /// </summary>
+    public static int FloatingIslandScratchCapacity(int width)
+    {
+        return FloatingIslandRecordUpperBound(
+            width,
+            baseSkyLakes: 3,
+            errorWorldTriple: true,
+            careBearsMultiplier: 10);
+    }
+
+    /// <summary>
+    /// Current Mountain Caves uses floor(maxTilesX * 0.001), then Remix multiplies
+    /// the count by 1.5 and truncates. Successful placements are the only records.
+    /// </summary>
+    public static int MountainCaveRecordUpperBound(int width, bool remixWorld)
+    {
+        if (width <= 0)
+            throw new ArgumentOutOfRangeException(nameof(width));
+
+        int count = (int)(width * 0.001d);
+        if (remixWorld)
+            count = (int)(count * 1.5d);
+        return count;
+    }
+
+    /// <summary>
+    /// Current ordinary Lakes rolls Next((int)(3*scale), (int)(6*scale)), where
+    /// scale = maxTilesX / 4200. Random.Next's upper bound is exclusive.
+    /// This is an attempt bound; the pass also explicitly stops before its
+    /// 50-slot LakeX buffer can overflow.
+    /// </summary>
+    public static int OrdinaryLakeAttemptUpperBound(int width)
+    {
+        if (width <= 0)
+            throw new ArgumentOutOfRangeException(nameof(width));
+
+        double scale = width / (double)ExpandedWorldMath.SmallWidth;
+        int exclusiveMaximum = (int)(6d * scale);
+        return Math.Max(0, exclusiveMaximum - 1);
+    }
+
+    /// <summary>
+    /// Historical pre-1.4.5 MakeDungeon initializes:
     ///   base = maxTilesX / 60
     ///   remaining = base + Next(0, base / 3)
     /// Random.Next's upper bound is exclusive.
+    ///
+    /// Terraria 1.4.5 uses dynamic per-DungeonData List&lt;T&gt; storage instead;
+    /// these Dungeon bounds now exist only to support the legacy compatibility
+    /// fallback in GenerationCapacity.cs.
     /// </summary>
     public static int DungeonMainLoopMaxIterations(int width)
     {
@@ -26,8 +106,8 @@ internal static class ExpandedWorldCapacityMath
     }
 
     /// <summary>
-    /// The main loop has a five-iteration room-event cooldown. One initial room
-    /// and one final room are recorded outside that loop.
+    /// The legacy main loop has a five-iteration room-event cooldown. One initial
+    /// room and one final room are recorded outside that loop.
     /// </summary>
     public static int DungeonMainRoomEventUpperBound(int width)
     {
@@ -40,13 +120,11 @@ internal static class ExpandedWorldCapacityMath
     }
 
     /// <summary>
-    /// DungeonStairs starts with Y velocity -1 (or -2) and executes at least ten
-    /// steps per completed call. Once above worldSurface it damps Y by 0.98 per
-    /// step; over the minimum ten steps the continuous displacement remains >9,
-    /// which truncates the next positive integer dungeonY by at least 10 tiles.
-    /// A call that reaches the surface can only terminate the entrance loop
-    /// earlier. Therefore ceil(worldHeight / 10) is a conservative hard bound on
-    /// completed non-terminating stair calls while dungeonY remains in-world.
+    /// Legacy DungeonStairs starts with Y velocity -1 (or -2) and executes at
+    /// least ten steps per completed call. Once above worldSurface it damps Y by
+    /// 0.98 per step; over the minimum ten steps the continuous displacement
+    /// remains >9, which truncates the next positive integer dungeonY by at least
+    /// 10 tiles. Therefore ceil(worldHeight / 10) is a conservative hard bound.
     /// </summary>
     public static int DungeonEntranceStairCallUpperBound(int height)
     {
@@ -57,8 +135,8 @@ internal static class ExpandedWorldCapacityMath
     }
 
     /// <summary>
-    /// Entrance-room cooldown starts at 5, then resets to 10 after every room.
-    /// Maximum successful event indices are 5, 15, 25, ...
+    /// Legacy entrance-room cooldown starts at 5, then resets to 10 after every
+    /// room. Maximum successful event indices are 5, 15, 25, ...
     /// </summary>
     public static int DungeonEntranceRoomEventUpperBound(int height)
     {
@@ -76,10 +154,9 @@ internal static class ExpandedWorldCapacityMath
     }
 
     /// <summary>
-    /// Every non-room main-loop iteration calls DungeonHalls once. A room-event
-    /// iteration can call DungeonHalls twice, so replacing an ordinary iteration
-    /// with the maximum room branch adds at most one hall call. Entrance room
-    /// events add one forced-X hall each.
+    /// Every non-room legacy main-loop iteration calls DungeonHalls once. A
+    /// room-event iteration can call DungeonHalls twice, so replacing an ordinary
+    /// iteration with the maximum room branch adds at most one hall call.
     /// </summary>
     public static int DungeonHallCallUpperBound(int width, int height)
     {
@@ -90,11 +167,9 @@ internal static class ExpandedWorldCapacityMath
     }
 
     /// <summary>
-    /// DungeonHalls can record at most two candidate doors (start/end of a
+    /// Legacy DungeonHalls can record at most two candidate doors (start/end of a
     /// horizontal hall). The later room-boundary scan can record at most two
-    /// additional candidates per room. This deliberately over-approximates
-    /// mutually exclusive orientations; storage may be larger than actual use,
-    /// but output and RNG are unchanged.
+    /// additional candidates per room.
     /// </summary>
     public static int DungeonDoorRecordUpperBound(int width, int height)
     {
@@ -104,8 +179,8 @@ internal static class ExpandedWorldCapacityMath
     }
 
     /// <summary>
-    /// The room-boundary scan records at most one platform candidate at the top
-    /// and one at the bottom of each room.
+    /// The legacy room-boundary scan records at most one platform candidate at
+    /// the top and one at the bottom of each room.
     /// </summary>
     public static int DungeonPlatformRecordUpperBound(int width, int height)
     {
