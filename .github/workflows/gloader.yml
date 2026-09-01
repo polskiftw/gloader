@@ -46,6 +46,7 @@ jobs:
           dotnet restore tests/RadioCompile/RadioCompile.csproj
           dotnet restore tests/RadioPolicyCompile/RadioPolicyCompile.csproj
           dotnet restore tests/ModDiscoveryCompile/ModDiscoveryCompile.csproj
+          dotnet restore tests/ExpandedWorldMathCompile/ExpandedWorldMathCompile.csproj
           dotnet restore tests/HostPlayFixture/Client.csproj
           dotnet restore tests/HostPlayFixture/Server.csproj
 
@@ -59,8 +60,17 @@ jobs:
           dotnet build tests/RadioCompile/RadioCompile.csproj -c Release --no-restore
           dotnet build tests/RadioPolicyCompile/RadioPolicyCompile.csproj -c Release --no-restore
           dotnet build tests/ModDiscoveryCompile/ModDiscoveryCompile.csproj -c Release --no-restore
+          dotnet build tests/ExpandedWorldMathCompile/ExpandedWorldMathCompile.csproj -c Release --no-restore
           dotnet build tests/HostPlayFixture/Client.csproj -c Release --no-restore
           dotnet build tests/HostPlayFixture/Server.csproj -c Release --no-restore
+
+      - name: Expanded Worlds mathematical parity test
+        shell: pwsh
+        run: |
+          & "tests/ExpandedWorldMathCompile/bin/Release/net48/ExpandedWorldMathCompile.exe"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Expanded Worlds mathematical parity regression failed with exit code $LASTEXITCODE"
+          }
 
       - name: Infinite Angler debug quest-fish regression test
         shell: pwsh
