@@ -9,6 +9,7 @@ internal static class Program
         try
         {
             ValidateVanillaParity();
+            ValidateAxisModel();
             ValidateExpandedTargets();
             Console.WriteLine("Expanded Worlds math regression: " + _checks + " checks passed.");
             return 0;
@@ -22,9 +23,8 @@ internal static class Program
 
     private static void ValidateVanillaParity()
     {
-        // These are the known Small / Medium / Large Terraria outputs. If a
-        // proposed mathematical model cannot reproduce these, it is not allowed
-        // to define XL / Huge behavior.
+        // These are known Small / Medium / Large Terraria outputs. Count/range
+        // extrapolations are not accepted unless the formula reproduces them.
         CheckCount("Life Crystals Small", 100, ExpandedWorldMath.LifeCrystals(4200, 1200));
         CheckCount("Life Crystals Medium", 230, ExpandedWorldMath.LifeCrystals(6400, 1800));
         CheckCount("Life Crystals Large", 403, ExpandedWorldMath.LifeCrystals(8400, 2400));
@@ -76,6 +76,28 @@ internal static class Program
         CheckRange("Bee Hives Small", 6, 8, ExpandedWorldMath.BeeHives(4200));
         CheckRange("Bee Hives Medium", 8, 12, ExpandedWorldMath.BeeHives(6400));
         CheckRange("Bee Hives Large", 11, 16, ExpandedWorldMath.BeeHives(8400));
+
+        // Underground Desert horizontal geometry is already genuinely width based.
+        CheckCount("Underground Desert width Small", 320, ExpandedWorldMath.UndergroundDesertWidth(4200));
+        CheckCount("Underground Desert width Medium", 484, ExpandedWorldMath.UndergroundDesertWidth(6400));
+        CheckCount("Underground Desert width Large", 640, ExpandedWorldMath.UndergroundDesertWidth(8400));
+    }
+
+    private static void ValidateAxisModel()
+    {
+        CheckDouble("XL horizontal scale", 20d / 7d, ExpandedWorldMath.HorizontalScale(12000));
+        CheckDouble("Huge horizontal scale", 4d, ExpandedWorldMath.HorizontalScale(16800));
+        CheckDouble("XL vertical scale", 2d, ExpandedWorldMath.VerticalScale(2400));
+        CheckDouble("Huge vertical scale", 2d, ExpandedWorldMath.VerticalScale(2400));
+        CheckDouble("XL area scale", 40d / 7d, ExpandedWorldMath.AreaScale(12000, 2400));
+        CheckDouble("Huge area scale", 8d, ExpandedWorldMath.AreaScale(16800, 2400));
+
+        // At the Large anchor, horizontal and vertical scale are both 2.0, so
+        // the axis-aware generalization exactly equals current vanilla arithmetic.
+        CheckCount("Large Desert rows roll=0", 510, ExpandedWorldMath.UndergroundDesertBlockRows(0d, 2400));
+        CheckCount("Large Desert rows roll=.5", 595, ExpandedWorldMath.UndergroundDesertBlockRows(0.5d, 2400));
+        CheckCount("Large Remix Desert rows", 680, ExpandedWorldMath.UndergroundDesertBlockRowsRemix(2400));
+        CheckCount("Large tenth-anniversary Desert Y offset", 40, ExpandedWorldMath.UndergroundDesertTenthAnniversaryYOffset(2400));
     }
 
     private static void ValidateExpandedTargets()
@@ -118,12 +140,33 @@ internal static class Program
 
         CheckRange("Bee Hives XL", 15, 22, ExpandedWorldMath.BeeHives(12000));
         CheckRange("Bee Hives Huge", 21, 32, ExpandedWorldMath.BeeHives(16800));
+
+        // X expands; Y remains exactly Large because XL/Huge keep Large height.
+        CheckCount("Underground Desert width XL", 912, ExpandedWorldMath.UndergroundDesertWidth(12000));
+        CheckCount("Underground Desert width Huge", 1280, ExpandedWorldMath.UndergroundDesertWidth(16800));
+        CheckCount("Underground Desert rows XL roll=0", 510, ExpandedWorldMath.UndergroundDesertBlockRows(0d, 2400));
+        CheckCount("Underground Desert rows Huge roll=0", 510, ExpandedWorldMath.UndergroundDesertBlockRows(0d, 2400));
+        CheckCount("Underground Desert rows XL roll=.5", 595, ExpandedWorldMath.UndergroundDesertBlockRows(0.5d, 2400));
+        CheckCount("Underground Desert rows Huge roll=.5", 595, ExpandedWorldMath.UndergroundDesertBlockRows(0.5d, 2400));
+        CheckCount("Underground Desert height XL roll=.5", 1190, ExpandedWorldMath.UndergroundDesertHeight(0.5d, 2400));
+        CheckCount("Underground Desert height Huge roll=.5", 1190, ExpandedWorldMath.UndergroundDesertHeight(0.5d, 2400));
+        CheckCount("Remix Underground Desert height XL", 1360, ExpandedWorldMath.UndergroundDesertHeightRemix(2400));
+        CheckCount("Remix Underground Desert height Huge", 1360, ExpandedWorldMath.UndergroundDesertHeightRemix(2400));
+        CheckCount("Tenth-anniversary Desert Y offset XL", 40, ExpandedWorldMath.UndergroundDesertTenthAnniversaryYOffset(2400));
+        CheckCount("Tenth-anniversary Desert Y offset Huge", 40, ExpandedWorldMath.UndergroundDesertTenthAnniversaryYOffset(2400));
     }
 
     private static void CheckCount(string name, int expected, int actual)
     {
         _checks++;
         if (actual != expected)
+            throw new InvalidOperationException(name + ": expected " + expected + ", got " + actual + ".");
+    }
+
+    private static void CheckDouble(string name, double expected, double actual)
+    {
+        _checks++;
+        if (Math.Abs(expected - actual) > 1e-12)
             throw new InvalidOperationException(name + ": expected " + expected + ", got " + actual + ".");
     }
 
