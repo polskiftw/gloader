@@ -73,6 +73,12 @@ internal static class Program
         CheckRange("Bee Hives Medium", 8, 12, ExpandedWorldMath.BeeHives(6400));
         CheckRange("Bee Hives Large", 11, 16, ExpandedWorldMath.BeeHives(8400));
 
+        // Exact special-seed formula from HiveBiome. Integer width division is
+        // intentional and is why expanded widths use exact 4200-tile quanta.
+        CheckDouble("Drunk Hive Small", 1d, ExpandedWorldMath.DrunkHiveLinearScale(4200));
+        CheckDouble("Drunk Hive Medium", 1d, ExpandedWorldMath.DrunkHiveLinearScale(6400));
+        CheckDouble("Drunk Hive Large", 1.5d, ExpandedWorldMath.DrunkHiveLinearScale(8400));
+
         CheckCount("Underground Desert width Small", 320, ExpandedWorldMath.UndergroundDesertWidth(4200));
         CheckCount("Underground Desert width Medium", 484, ExpandedWorldMath.UndergroundDesertWidth(6400));
         CheckCount("Underground Desert width Large", 640, ExpandedWorldMath.UndergroundDesertWidth(8400));
@@ -173,6 +179,11 @@ internal static class Program
 
         CheckRange("Bee Hives XL", 16, 24, ExpandedWorldMath.BeeHives(xlW));
         CheckRange("Bee Hives Huge", 21, 32, ExpandedWorldMath.BeeHives(hugeW));
+        CheckDouble("Drunk Hive XL", 2d, ExpandedWorldMath.DrunkHiveLinearScale(xlW));
+        CheckDouble("Drunk Hive Huge", 2.5d, ExpandedWorldMath.DrunkHiveLinearScale(hugeW));
+        CheckCount("Drunk larva record upper bound XL", 48, ExpandedWorldMath.MaximumLarvaRecordsFromBeeHives(xlW, true));
+        CheckCount("Drunk larva record upper bound Huge", 64, ExpandedWorldMath.MaximumLarvaRecordsFromBeeHives(hugeW, true));
+        CheckTrue("Huge larva records fit vanilla 100-slot buffer", ExpandedWorldMath.MaximumLarvaRecordsFromBeeHives(hugeW, true) < 100);
 
         // X expands; Y remains exactly Large because XL/Huge keep Large height.
         CheckCount("Underground Desert width XL", 960, ExpandedWorldMath.UndergroundDesertWidth(xlW));
@@ -201,6 +212,13 @@ internal static class Program
         _checks++;
         if (Math.Abs(expected - actual) > 1e-12)
             throw new InvalidOperationException(name + ": expected " + expected + ", got " + actual + ".");
+    }
+
+    private static void CheckTrue(string name, bool actual)
+    {
+        _checks++;
+        if (!actual)
+            throw new InvalidOperationException(name + ": expected true.");
     }
 
     private static void CheckRange(string name, int minimum, int maximum, IntRange actual)
