@@ -18,15 +18,17 @@ using Terraria.WorldBuilding;
 ///
 ///   X displacement / horizontal margins -> width relative to Large
 ///   Y displacement                       -> height relative to Large
+///   axis-neutral linear scalar           -> sqrt(area relative to Large)
 ///   round TileRunner body strength       -> sqrt(area relative to Large)
-///   single repeated pass counts          -> horizontal territory
-///   nested repeated pass counts          -> horizontal * vertical = area
 ///
-/// The sqrt(area) rule is used only for truly isotropic linear geometry. It is
-/// the unique symmetric linear factor whose square preserves area and which
-/// collapses to vanilla's ordinary linear scale when X and Y scale together.
-/// Counts are never scaled with sqrt(area): their dimensional factors are kept
-/// explicit so total generated detail follows territory area exactly.
+/// The sqrt(area) rule is the area-equivalent linear scale: it is symmetric in X
+/// and Y, and when both axes grow by the same factor s it collapses exactly to s.
+/// That makes it the mathematically neutral continuation for a vanilla linear
+/// scalar whose source use does not identify one physical axis.
+///
+/// Repeated scalar counts use that same isotropic factor. Where vanilla nests two
+/// scale-driven counts, their product therefore becomes
+/// sqrt(horizontal*vertical)^2 = horizontal*vertical, i.e. exact area scaling.
 ///
 /// The original pass still runs. We only replace the overloaded scale where its
 /// dimensional meaning becomes ambiguous. Vanilla Small/Medium/Large are never
@@ -67,13 +69,9 @@ internal static class ExpandedWorldJungleScales
         return (float)ExpandedWorldMath.ScaleLargeLinearByHeight(large, Main.maxTilesY);
     }
 
-    public static float Density(JunglePass instance)
+    public static float Scalar(JunglePass instance)
     {
-        // For our width-only presets, one top-level pass count follows the
-        // horizontal territory factor. When vanilla nests another scale-driven
-        // count inside it, that inner count uses Vertical(), so the product is
-        // horizontal * vertical = area.
-        return Horizontal(instance);
+        return ReadIsotropicScale(instance);
     }
 
     public static float ConvertVanillaOverallToIsotropic(float vanillaOverallScale)
@@ -335,8 +333,9 @@ internal static class ExpandedWorldJungleGemPatch
 
         float horizontal = ExpandedWorldJungleScales.Horizontal(__instance);
         float vertical = ExpandedWorldJungleScales.Vertical(__instance);
+        float scalar = ExpandedWorldJungleScales.Scalar(__instance);
 
-        for (int index = 0; index < 6d * horizontal; index++)
+        for (int index = 0; index < 6d * scalar; index++)
         {
             WorldGen.TileRunner(
                 x + WorldGen.genRand.Next(-(int)(125d * horizontal), (int)(125d * horizontal)),
@@ -375,14 +374,14 @@ internal static class ExpandedWorldJungleFinishingTouchesPatch
 
         float horizontal = ExpandedWorldJungleScales.Horizontal(__instance);
         float vertical = ExpandedWorldJungleScales.Vertical(__instance);
-        float density = ExpandedWorldJungleScales.Density(__instance);
+        float scalar = ExpandedWorldJungleScales.Scalar(__instance);
 
         int walkX = oldX;
         int walkY = oldY;
 
-        for (int index = 0; index <= 20d * density; index++)
+        for (int index = 0; index <= 20d * scalar; index++)
         {
-            progress.Set((float)((60d + index / (double)density) * 0.01d));
+            progress.Set((float)((60d + index / (double)scalar) * 0.01d));
             walkX += WorldGen.genRand.Next((int)(-5d * horizontal), (int)(6d * horizontal));
             walkY += WorldGen.genRand.Next((int)(-5d * vertical), (int)(6d * vertical));
             WorldGen.TileRunner(
@@ -399,9 +398,9 @@ internal static class ExpandedWorldJungleFinishingTouchesPatch
                 -1);
         }
 
-        for (int index = 0; index <= 10d * density; index++)
+        for (int index = 0; index <= 10d * scalar; index++)
         {
-            progress.Set((float)((80d + index / (double)density * 2d) * 0.01d));
+            progress.Set((float)((80d + index / (double)scalar * 2d) * 0.01d));
 
             int i = oldX + WorldGen.genRand.Next(
                 (int)(-600d * horizontal),
@@ -423,10 +422,9 @@ internal static class ExpandedWorldJungleFinishingTouchesPatch
             }
 
             // Vanilla multiplies both this outer count and the nested detail
-            // count by one linear world scale. When X and Y diverge, splitting
-            // those two factors into horizontal and vertical preserves their
-            // product exactly as an area-density rule.
-            for (int detail = 0; detail < 8d * vertical; detail++)
+            // count by one linear world scale. Using the isotropic factor for
+            // each preserves that algebra exactly: scalar^2 = area factor.
+            for (int detail = 0; detail < 8d * scalar; detail++)
             {
                 i += WorldGen.genRand.Next(-30, 31);
                 j += WorldGen.genRand.Next(-30, 31);
@@ -446,7 +444,7 @@ internal static class ExpandedWorldJungleFinishingTouchesPatch
             }
         }
 
-        for (int index = 0; index <= 300d * density; index++)
+        for (int index = 0; index <= 300d * scalar; index++)
         {
             int i = oldX + WorldGen.genRand.Next(
                 (int)(-600d * horizontal),
