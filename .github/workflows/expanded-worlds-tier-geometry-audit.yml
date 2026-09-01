@@ -1,0 +1,182 @@
+name: Expanded Worlds tier and geometry audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/expanded-world-sizes
+    paths:
+      - .github/workflows/expanded-worlds-tier-geometry-audit.yml
+      - gmods/ExpandedWorlds/DiscreteCountScaling.cs
+      - gmods/ExpandedWorlds/FeatureGeometryScaling.cs
+      - tests/ExpandedWorldCompile/**
+
+jobs:
+  audit-tier-and-geometry-rules:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install ILSpy command line
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .audit-tools | Out-Null
+          dotnet tool install ilspycmd --tool-path .audit-tools
+
+      - name: Audit Terraria 1.4.5.8 tier and geometry source contracts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archiveVersion = '1458'
+          $zip = Join-Path $env:RUNNER_TEMP "terraria-server-$archiveVersion.zip"
+          $root = Join-Path $env:RUNNER_TEMP 'terraria-server'
+          $url = "https://terraria.org/api/download/pc-dedicated-server/terraria-server-$archiveVersion.zip"
+
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $root -Force
+
+          $server = Join-Path $root "$archiveVersion/Windows/TerrariaServer.exe"
+          if (-not (Test-Path $server)) {
+            throw "TerrariaServer.exe not found at expected path: $server"
+          }
+
+          $ilspy = Join-Path $PWD '.audit-tools/ilspycmd.exe'
+          $auditDir = Join-Path $PWD 'tier-geometry-audit-output'
+          New-Item -ItemType Directory -Force $auditDir | Out-Null
+          $worldGenPath = Join-Path $auditDir 'WorldGen.cs'
+          & $ilspy -t Terraria.WorldGen $server | Set-Content -Encoding UTF8 $worldGenPath
+
+          if (-not (Test-Path $worldGenPath) -or (Get-Item $worldGenPath).Length -eq 0) {
+            throw 'ILSpy did not produce WorldGen.cs.'
+          }
+
+          $source = Get-Content -Raw $worldGenPath
+          $failures = New-Object System.Collections.Generic.List[string]
+          $report = Join-Path $auditDir 'terraria-1.4.5.8-tier-geometry-audit.txt'
+
+          @(
+            'Terraria 1.4.5.8 tier and feature-geometry source audit',
+            "TerrariaServer.exe SHA256: $((Get-FileHash $server -Algorithm SHA256).Hash)",
+            ''
+          ) | Set-Content -Encoding UTF8 $report
+
+          function Get-MethodSlice {
+            param(
+              [string]$Name,
+              [string]$StartPattern,
+              [string]$EndPattern
+            )
+
+            $pattern = '(?s)' + $StartPattern + '.*?(?=' + $EndPattern + ')'
+            $match = [regex]::Match($source, $pattern)
+            if (-not $match.Success) {
+              $failures.Add("Could not isolate $Name")
+              Add-Content -Encoding UTF8 $report "FAIL - isolate $Name"
+              Write-Host "FAIL - isolate $Name"
+              return ''
+            }
+
+            Add-Content -Encoding UTF8 $report "PASS - isolate $Name"
+            Write-Host "PASS - isolate $Name"
+            return $match.Value
+          }
+
+          function Assert-InMethod {
+            param(
+              [string]$Name,
+              [string]$MethodSource,
+              [string]$Pattern
+            )
+
+            $ok = -not [string]::IsNullOrEmpty($MethodSource) -and
+              [regex]::IsMatch($MethodSource, $Pattern, [System.Text.RegularExpressions.RegexOptions]::Singleline)
+            $result = if ($ok) { 'PASS' } else { 'FAIL' }
+            Write-Host "$result - $Name"
+            Add-Content -Encoding UTF8 $report "$result - $Name"
+            if (-not $ok) { $failures.Add($Name) }
+          }
+
+          $placeTrap = Get-MethodSlice `
+            'WorldGen.placeTrap' `
+            'public static bool placeTrap\(int x2, int y2, int type = -1\)' `
+            '\r?\n\tpublic static int countWires\('
+
+          $spikeCaves = Get-MethodSlice `
+            'WorldGen.AddSpikeCaves' `
+            'private static void AddSpikeCaves\(GenerationProgress progress\)' `
+            '\r?\n\tprivate static void ShimmerifySideOfWorld\('
+
+          $glowTulips = Get-MethodSlice `
+            'WorldGen.GrowGlowTulips' `
+            'private static void GrowGlowTulips\(\)' `
+            '\r?\n\tprivate static void PlaceChilletEggs\('
+
+          $chilletEggs = Get-MethodSlice `
+            'WorldGen.PlaceChilletEggs' `
+            'private static void PlaceChilletEggs\(\)' `
+            '\r?\n\tprivate static bool NoNearbyChilletEggs\('
+
+          $plantAlch = Get-MethodSlice `
+            'WorldGen.PlantAlch' `
+            'public static void PlantAlch\(\)' `
+            '\r?\n\tpublic static void PlaceSuitableHerbHere\('
+
+          Add-Content -Encoding UTF8 $report ''
+          Add-Content -Encoding UTF8 $report '=== Discrete world-size counts ==='
+
+          Assert-InMethod 'Glow Tulips still classify physical width at 4200/6400' $glowTulips 'Main\.maxTilesX\s*>\s*4200.*Main\.maxTilesX\s*<=\s*6400'
+          Assert-InMethod 'Glow Tulips still use source counts 2/4/6' $glowTulips 'num4\s*=\s*num\s+switch.*1\s*=>\s*4.*2\s*=>\s*6.*_\s*=>\s*2'
+
+          Assert-InMethod 'Spike Caves still read GetWorldSize' $spikeCaves 'switch\s*\(GetWorldSize\(\)\)'
+          Assert-InMethod 'Spike Caves still use base counts 3/5/7' $spikeCaves 'case\s+0:.*num2\s*=\s*3.*case\s+1:.*num2\s*=\s*5.*case\s+2:.*num2\s*=\s*7'
+          Assert-InMethod 'Spike Caves still add vanilla Next(2)' $spikeCaves 'num2\s*\+=\s*genRand\.Next\(2\)'
+
+          Assert-InMethod 'Chillet Eggs still read GetWorldSize' $chilletEggs 'worldSize\s*=\s*GetWorldSize\(\)'
+          Assert-InMethod 'Chillet Eggs still use source counts 6/9/12' $chilletEggs 'num2\s*=\s*worldSize\s+switch.*1\s*=>\s*9.*2\s*=>\s*12.*_\s*=>\s*6'
+
+          Assert-InMethod 'Boulder Pet quota still reads GetWorldSize' $placeTrap 'num20\s*=\s*GetWorldSize\(\)\s+switch'
+          Assert-InMethod 'Boulder Pet base quota remains 2/4/6' $placeTrap 'num20\s*=\s*GetWorldSize\(\)\s+switch.*1\s*=>\s*4.*2\s*=>\s*6.*_\s*=>\s*2'
+          Assert-InMethod 'No Traps still doubles Boulder Pet quota after switch' $placeTrap 'if\s*\(noTrapsWorldGen\).*?num20\s*\*=\s*2'
+          Assert-InMethod 'Boulder Pet placement still compares placed count with quota' $placeTrap 'GenVars\.boulderPetsPlaced\s*<\s*num20'
+
+          Add-Content -Encoding UTF8 $report ''
+          Add-Content -Encoding UTF8 $report '=== Axis-neutral feature geometry ==='
+
+          Assert-InMethod 'PlantAlch base nearby-herb radius remains 15' $plantAlch 'int\s+num3\s*=\s*15'
+          Assert-InMethod 'PlantAlch still derives radius from maxTilesX/4200' $plantAlch 'num3\s*=\s*\(int\)\(\(double\)num3\s*\*\s*\(\(double\)Main\.maxTilesX\s*/\s*4200\.0\)\)'
+          Assert-InMethod 'PlantAlch uses the same radius on X bounds' $plantAlch 'Utils\.Clamp\(num\s*-\s*num3.*Utils\.Clamp\(num\s*\+\s*num3'
+          Assert-InMethod 'PlantAlch uses the same radius on Y bounds' $plantAlch 'Utils\.Clamp\(num2\s*-\s*num3.*Utils\.Clamp\(num2\s*\+\s*num3'
+
+          Add-Content -Encoding UTF8 $report ''
+          Add-Content -Encoding UTF8 $report '=== Exact audited method excerpts ==='
+          foreach ($entry in @(
+            @{ Name = 'placeTrap'; Text = $placeTrap },
+            @{ Name = 'AddSpikeCaves'; Text = $spikeCaves },
+            @{ Name = 'GrowGlowTulips'; Text = $glowTulips },
+            @{ Name = 'PlaceChilletEggs'; Text = $chilletEggs },
+            @{ Name = 'PlantAlch'; Text = $plantAlch }
+          )) {
+            Add-Content -Encoding UTF8 $report "--- $($entry.Name) ---"
+            Add-Content -Encoding UTF8 $report $entry.Text
+          }
+
+          if ($failures.Count -gt 0) {
+            throw "Terraria 1.4.5.8 tier/geometry source audit failed: $($failures -join '; ')"
+          }
+
+      - name: Upload exact audited source and report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: expanded-worlds-tier-geometry-source-audit
+          path: tier-geometry-audit-output/
+          if-no-files-found: warn
+          retention-days: 7
