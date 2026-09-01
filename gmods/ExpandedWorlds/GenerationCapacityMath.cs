@@ -1,10 +1,10 @@
 using System;
 
 /// <summary>
-/// Non-behavioral storage bounds derived from the audited vanilla Dungeon
-/// control flow. These values do not decide how much Dungeon content generates;
-/// they only guarantee that vanilla's scratch arrays cannot truncate or crash a
-/// mathematically valid expanded generation.
+/// Non-behavioral storage bounds derived from audited vanilla worldgen control
+/// flow. These values do not decide how much content generates; they only ensure
+/// that vanilla scratch arrays cannot truncate or crash a mathematically valid
+/// expanded generation.
 /// </summary>
 internal static class ExpandedWorldCapacityMath
 {
@@ -110,5 +110,33 @@ internal static class ExpandedWorldCapacityMath
     public static int DungeonPlatformRecordUpperBound(int width, int height)
     {
         return checked(2 * DungeonRoomRecordUpperBound(width, height));
+    }
+
+    /// <summary>
+    /// The audited makeTemple source computes:
+    ///   tier = maxTilesX / 4200       (integer division)
+    ///   roomCount = Next(10*tier, 16*tier)
+    /// and historically stores those room rectangles in a fixed 40-slot array.
+    /// The exclusive upper bound itself is therefore the exact scratch capacity
+    /// required to represent every possible room-count roll for a width tier.
+    /// </summary>
+    public static int JungleTempleRoomScratchCapacity(int width)
+    {
+        if (width <= 0)
+            throw new ArgumentOutOfRangeException(nameof(width));
+
+        int tier = width / ExpandedWorldMath.SmallWidth;
+        return Math.Max(40, checked(16 * tier));
+    }
+
+    public static IntRange JungleTempleRoomCountRange(int width)
+    {
+        if (width <= 0)
+            throw new ArgumentOutOfRangeException(nameof(width));
+
+        int tier = width / ExpandedWorldMath.SmallWidth;
+        int minimum = 10 * tier;
+        int maximumInclusive = 16 * tier - 1;
+        return new IntRange(minimum, maximumInclusive);
     }
 }
