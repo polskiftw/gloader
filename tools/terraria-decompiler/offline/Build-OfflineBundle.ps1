@@ -168,10 +168,11 @@ Terraria Decompiler - OFFLINE Windows x64 bundle
 NORMAL USE:
 1. Double-click TerrariaDecompiler.exe
 2. Pick Terraria.exe (the normal Steam install is auto-detected when possible)
-3. Pick the output folder
-4. Click DECOMPILE
+3. TerrariaServer.exe is found automatically beside it
+4. Pick the output folder
+5. Click DECOMPILE BOTH
 
-The GUI shows the detected Terraria version and install DLL inventory, progress stages, final audit status, and buttons to open the output or audit. Show Details exposes the captured engine log when needed.
+The client and server file versions must match. The GUI shows both versions, install DLL inventory, target-aware progress, final combined audit status, and buttons to open the output or audit. Show Details exposes the captured engine log when needed.
 
 NO RUNTIME DOWNLOADS.
 This folder already contains:
@@ -182,17 +183,26 @@ This folder already contains:
 - Redistributable Microsoft XNA Framework 4.0 Refresh runtime references
 
 Terraria's own install directory is the FIRST reference source.
-The engine scans DLLs sitting next to Terraria.exe, keeps the managed .NET assemblies, and ignores native DLLs for ILSpy reference resolution. This lets it use the genuine Microsoft.Xna.Framework.Content.Pipeline.dll and any other managed dependencies Re-Logic ships with the game.
+The engine scans DLLs beside the executables, keeps managed .NET assemblies, and ignores native DLLs for ILSpy reference resolution. This lets it use the genuine Microsoft.Xna.Framework.Content.Pipeline.dll and other managed dependencies Re-Logic ships with the game.
 
-The output contains:
-- source\ - decompiled C# tree
-- audit\audit.md and audit.json - reconstruction audit
-- audit\reference-sources.json - reference provenance
-- TerrariaDecomp-<detected-version>-clean.zip - clean source ZIP
+Client and server do NOT share recovered embedded dependencies. Each target starts from the same clean install/framework baseline, gets its own bootstrap recovery pass, and then gets its own clean ILSpy pass.
 
-The bundle itself does not contact the network. Future Terraria versions may introduce new dependencies; if the audit stops being zero, update/rebuild this bundle rather than hiding the diagnostic.
+The selected output folder has three visible top-level outputs:
+- client\
+  - source\ - Terraria.exe decompiled C# tree
+  - TerrariaClientDecomp-<version>-clean.zip
+- server\
+  - source\ - TerrariaServer.exe decompiled C# tree
+  - TerrariaServerDecomp-<version>-clean.zip
+- audit\
+  - audit.md / audit.json - combined client + server result
+  - client\audit.md / audit.json - detailed client audit
+  - server\audit.md / audit.json - detailed server audit
+  - reference-sources.json - reference provenance
 
-Run-TerrariaDecompiler.ps1 remains in the bundle as the internal/debug engine. It is not the normal user interface.
+The bundle itself does not contact the network. Future Terraria versions may introduce new dependencies; if either target's audit stops being zero, update/rebuild this bundle rather than hiding the diagnostic.
+
+Run-TerrariaDecompiler.ps1 remains in the bundle as the internal/debug engine. Its default TargetMode is Pair. CI may use TargetMode Server for public dedicated-server smoke tests.
 "@
     Set-Content -Path (Join-Path $stage 'README-OFFLINE.txt') -Value $readme -Encoding UTF8
 
@@ -222,7 +232,7 @@ Microsoft XNA Framework Redistributable 4.0 Refresh
 Microsoft.Xna.Framework.Content.Pipeline.dll
 - NOT included in this bundle.
 - Current Terraria installations ship the genuine Microsoft assembly alongside Terraria.exe.
-- At runtime the decompiler temporarily uses managed DLLs from the user's own Terraria installation as metadata references. Those DLLs are not added to the generated source ZIP or redistributed by this bundle.
+- At runtime the decompiler temporarily uses managed DLLs from the user's own Terraria installation as metadata references. Those DLLs are not added to the generated source ZIPs or redistributed by this bundle.
 '@
     Set-Content -Path (Join-Path $stage 'THIRD-PARTY-NOTICES.txt') -Value $notices -Encoding UTF8
 
