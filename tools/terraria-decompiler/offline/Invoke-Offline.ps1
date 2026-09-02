@@ -54,9 +54,8 @@ $legacySource = Join-Path $OutputDirectory 'source'
 $legacyVersionFile = Join-Path $OutputDirectory 'version.txt'
 $ownershipMarker = Join-Path $OutputDirectory '.terraria-decompiler-output'
 
-# OutputDirectory is user-selectable in the GUI. Never delete the directory itself,
-# and never delete name-colliding content unless this tool previously marked the
-# directory as one of its output roots.
+# The GUI lets the user select any directory. Never delete that directory itself,
+# and only clean known output names when this tool previously marked the directory.
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 if (-not (Test-Path -LiteralPath $ownershipMarker -PathType Leaf)) {
     $collisions = New-Object System.Collections.Generic.List[string]
@@ -69,7 +68,11 @@ if (-not (Test-Path -LiteralPath $ownershipMarker -PathType Leaf)) {
         $collisions.Add('version.txt')
     }
     Get-ChildItem -LiteralPath $OutputDirectory -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -like 'TerrariaDecomp-*-clean.zip' -or $_.Name -like 'TerrariaClientDecomp-*-clean.zip' -or $_.Name -like 'TerrariaServerDecomp-*-clean.zip' } |
+        Where-Object {
+            $_.Name -like 'TerrariaDecomp-*-clean.zip' -or
+            $_.Name -like 'TerrariaClientDecomp-*-clean.zip' -or
+            $_.Name -like 'TerrariaServerDecomp-*-clean.zip'
+        } |
         ForEach-Object { $collisions.Add($_.Name) }
 
     if ($collisions.Count -gt 0) {
@@ -88,7 +91,11 @@ else {
         Remove-Item -LiteralPath $legacyVersionFile -Force
     }
     Get-ChildItem -LiteralPath $OutputDirectory -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -like 'TerrariaDecomp-*-clean.zip' -or $_.Name -like 'TerrariaClientDecomp-*-clean.zip' -or $_.Name -like 'TerrariaServerDecomp-*-clean.zip' } |
+        Where-Object {
+            $_.Name -like 'TerrariaDecomp-*-clean.zip' -or
+            $_.Name -like 'TerrariaClientDecomp-*-clean.zip' -or
+            $_.Name -like 'TerrariaServerDecomp-*-clean.zip'
+        } |
         Remove-Item -Force
 }
 
@@ -141,6 +148,7 @@ if ($serverRequired -and -not (Test-Path -LiteralPath $serverExePath -PathType L
 
 function Get-FileVersionSafe {
     param([string]$Path)
+
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return '' }
     $value = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($Path).FileVersion
     if ([string]::IsNullOrWhiteSpace($value)) { return 'unknown' }
@@ -185,13 +193,13 @@ $installDllFiles = @(Get-ChildItem -LiteralPath $terrariaRoot -File -Filter '*.d
 foreach ($dllFile in $installDllFiles) {
     try {
         $assembly = [System.Reflection.AssemblyName]::GetAssemblyName($dllFile.FullName)
-        $targetName = $assembly.Name + '.dll'
-        Copy-Item $dllFile.FullName (Join-Path $refsBase $targetName) -Force
+        $referenceFileName = $assembly.Name + '.dll'
+        Copy-Item $dllFile.FullName (Join-Path $refsBase $referenceFileName) -Force
         $managedInstallRefs.Add([pscustomobject]@{
             file = $dllFile.Name
             assembly = $assembly.Name
             version = $assembly.Version.ToString()
-            target = $targetName
+            target = $referenceFileName
             sha256 = (Get-FileHash -LiteralPath $dllFile.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
         })
     }
@@ -220,6 +228,7 @@ else {
 
 function Get-AuditIssueTotal {
     param([object]$AuditResult)
+
     $total = 0
     foreach ($property in $AuditResult.counts.PSObject.Properties) {
         $total += [int]$property.Value
@@ -264,13 +273,15 @@ function Invoke-TargetDecompile {
         try {
             $assembly = [System.Reflection.AssemblyName]::GetAssemblyName($embeddedDll.FullName)
             if ($assembly.Name) {
-                $targetName = $assembly.Name + '.dll'
-                Copy-Item $embeddedDll.FullName (Join-Path $refs $targetName) -Force
+                # Do not call this $targetName: PowerShell variable names are case-insensitive,
+                # so that would overwrite the $TargetName function parameter.
+                $referenceFileName = $assembly.Name + '.dll'
+                Copy-Item $embeddedDll.FullName (Join-Path $refs $referenceFileName) -Force
                 $embeddedRefs.Add([pscustomobject]@{
                     file = $embeddedDll.Name
                     assembly = $assembly.Name
                     version = $assembly.Version.ToString()
-                    target = $targetName
+                    target = $referenceFileName
                 })
             }
         }
@@ -334,13 +345,18 @@ $legacyKeys = @(
 $combinedCounts = [ordered]@{}
 foreach ($key in $countKeys) {
     $sum = 0
-    foreach ($entry in $results) { $sum += [int]$entry.audit.counts.$key }
+    foreach ($entry in $results) {
+        $sum += [int]$entry.audit.counts.$key
+    }
     $combinedCounts[$key] = $sum
 }
+
 $combinedLegacy = [ordered]@{}
 foreach ($key in $legacyKeys) {
     $sum = 0
-    foreach ($entry in $results) { $sum += [int]$entry.audit.legacy_signatures.$key }
+    foreach ($entry in $results) {
+        $sum += [int]$entry.audit.legacy_signatures.$key
+    }
     $combinedLegacy[$key] = $sum
 }
 
@@ -418,6 +434,7 @@ foreach ($entry in $results) {
         embedded_managed_references = @($entry.embedded_managed_references)
     }
 }
+
 $referenceReport = [pscustomobject]@{
     terraria_root = $terrariaRoot
     client_version = $clientVersion
