@@ -9,7 +9,7 @@ on:
       - '.github/workflows/terraria-decompiler-offline.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-offline-bundle:
@@ -31,10 +31,48 @@ jobs:
           ./tools/terraria-decompiler/offline/Build-OfflineBundle.ps1 `
             -OutputDirectory "$env:GITHUB_WORKSPACE\artifacts"
 
-      - name: Upload offline bundle
+      - name: Upload offline bundle artifact
         uses: actions/upload-artifact@v4
         with:
           name: TerrariaDecompilerOffline-win-x64
           path: artifacts/TerrariaDecompilerOffline-win-x64.zip
           if-no-files-found: error
           retention-days: 90
+
+      - name: Publish rolling offline release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = 'terraria-decompiler-offline'
+          $repo = $env:GITHUB_REPOSITORY
+
+          gh release view $tag --repo $repo *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release delete $tag --repo $repo --yes --cleanup-tag
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not replace existing rolling release '$tag'."
+            }
+          }
+          $global:LASTEXITCODE = 0
+
+          $notes = @"
+          Self-contained offline Windows x64 Terraria decompiler.
+
+          Extract the ZIP and drag Terraria.exe onto RUN-DECOMPILER.cmd.
+
+          Runtime dependency downloads: none.
+          Bundled: ILSpyCmd, private .NET runtime, .NET Framework 4.0 reference assemblies, redistributable XNA Framework runtime references, and the gloader metadata-only Content Pipeline compatibility shim.
+
+          Built from gloader commit $env:GITHUB_SHA.
+          "@
+
+          gh release create $tag `
+            artifacts/TerrariaDecompilerOffline-win-x64.zip `
+            --repo $repo `
+            --target $env:GITHUB_SHA `
+            --title 'Terraria Decompiler Offline' `
+            --notes $notes
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not publish rolling release '$tag'."
+          }
