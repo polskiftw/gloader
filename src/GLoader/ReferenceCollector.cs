@@ -21,6 +21,10 @@ namespace GLoader
                 AddAssemblyLocation(paths, assembly, overwrite: false);
             }
 
+            // Source mods are allowed to use loader-provided runtime libraries such as
+            // Harmony. Those assemblies may not have been JIT-loaded yet when Roslyn
+            // reference collection runs, so scan the loader output directory explicitly.
+            AddManagedFiles(paths, AppDomain.CurrentDomain.BaseDirectory, overwrite: false);
             AddManagedFiles(paths, supportDirectory, overwrite: false);
             AddManagedFiles(paths, gameDirectory, overwrite: false);
 
