@@ -37,7 +37,7 @@ if (-not (Test-Path -LiteralPath $baseRefs -PathType Container)) {
 if (-not (Test-Path -LiteralPath $auditScript -PathType Leaf)) {
     throw "Bundled audit script is missing: $auditScript"
 }
-if (-not (Test-Path -LiteralPath $TerrariaInput -PathType Leaf)) {
+if (-not (Test-Path -LiteralPath $TerrariaInput)) {
     throw "Terraria input not found: $TerrariaInput"
 }
 
@@ -54,15 +54,29 @@ if (Test-Path -LiteralPath $OutputDirectory) {
 New-Item -ItemType Directory -Force -Path $OutputDirectory, $work, $bootstrap, $refs, $inputStage, $source, $audit | Out-Null
 Copy-Item -Path (Join-Path $baseRefs '*') -Destination $refs -Recurse -Force
 
-if ([System.IO.Path]::GetExtension($TerrariaInput).Equals('.zip', [System.StringComparison]::OrdinalIgnoreCase)) {
-    Expand-Archive -Path $TerrariaInput -DestinationPath $inputStage -Force
+$inputItem = Get-Item -LiteralPath $TerrariaInput
+if ($inputItem.PSIsContainer) {
+    $terrariaRoot = $inputItem.FullName
+    $terrariaExePath = Join-Path $terrariaRoot 'Terraria.exe'
+    if (-not (Test-Path -LiteralPath $terrariaExePath -PathType Leaf)) {
+        throw "Terraria.exe was not found directly inside: $terrariaRoot"
+    }
+    $terrariaExe = Get-Item -LiteralPath $terrariaExePath
+}
+elseif ([System.IO.Path]::GetExtension($inputItem.FullName).Equals('.zip', [System.StringComparison]::OrdinalIgnoreCase)) {
+    Expand-Archive -Path $inputItem.FullName -DestinationPath $inputStage -Force
     $terrariaExe = Get-ChildItem -Path $inputStage -Recurse -File -Filter 'Terraria.exe' | Select-Object -First 1
     if (-not $terrariaExe) {
         throw 'The input ZIP did not contain Terraria.exe.'
     }
+    $terrariaRoot = $terrariaExe.Directory.FullName
 }
 else {
-    $terrariaExe = Get-Item -LiteralPath $TerrariaInput
+    if ($inputItem.Name -ne 'Terraria.exe') {
+        Write-Warning "Input file is not named Terraria.exe: $($inputItem.FullName)"
+    }
+    $terrariaExe = $inputItem
+    $terrariaRoot = $terrariaExe.Directory.FullName
 }
 
 $fileVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($terrariaExe.FullName).FileVersion
@@ -71,6 +85,7 @@ if ([string]::IsNullOrWhiteSpace($fileVersion)) {
 }
 Set-Content -Path (Join-Path $OutputDirectory 'version.txt') -Value $fileVersion -Encoding ASCII
 Write-Host "Terraria file version: $fileVersion"
+Write-Host "Terraria install/reference root: $terrariaRoot"
 Write-Host 'Offline bundle mode: no dependency downloads will be performed.'
 
 if ($ExpectedVersion -and -not $fileVersion.StartsWith($ExpectedVersion, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -86,31 +101,79 @@ function Invoke-Ilspy {
     }
 }
 
+# Terraria's install directory is the preferred source for game-specific managed
+# references. This picks up the genuine Content Pipeline assembly (and any future
+# managed sibling DLLs) without redistributing those files in this bundle.
+$managedInstallRefs = New-Object System.Collections.Generic.List[object]
+$nativeInstallDlls = New-Object System.Collections.Generic.List[object]
+Get-ChildItem -LiteralPath $terrariaRoot -File -Filter '*.dll' | Sort-Object Name | ForEach-Object {
+    try {
+        $assembly = [System.Reflection.AssemblyName]::GetAssemblyName($_.FullName)
+        $targetName = $assembly.Name + '.dll'
+        Copy-Item $_.FullName (Join-Path $refs $targetName) -Force
+        $managedInstallRefs.Add([pscustomobject]@{
+            file = $_.Name
+            assembly = $assembly.Name
+            version = $assembly.Version.ToString()
+            target = $targetName
+            sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        })
+    }
+    catch {
+        $nativeInstallDlls.Add([pscustomobject]@{
+            file = $_.Name
+            bytes = $_.Length
+        })
+    }
+}
+Write-Host "Harvested $($managedInstallRefs.Count) managed sibling reference assembly/assemblies from the Terraria install."
+if ($nativeInstallDlls.Count -gt 0) {
+    Write-Host "Ignored $($nativeInstallDlls.Count) native/non-managed sibling DLL(s) for ILSpy reference resolution."
+}
+
+$contentPipelinePath = Join-Path $refs 'Microsoft.Xna.Framework.Content.Pipeline.dll'
+if (Test-Path -LiteralPath $contentPipelinePath -PathType Leaf) {
+    $fromInstall = @($managedInstallRefs | Where-Object { $_.assembly -eq 'Microsoft.Xna.Framework.Content.Pipeline' }).Count -gt 0
+    if ($fromInstall) {
+        Write-Host 'Using Terraria installation copy of Microsoft.Xna.Framework.Content.Pipeline.dll.'
+    }
+}
+else {
+    Write-Warning 'Microsoft.Xna.Framework.Content.Pipeline.dll was not found in the Terraria install or bundled fallback references. If this Terraria version references it, the audit may report unresolved types.'
+}
+
 Write-Host 'Pass 1/2: recovering Terraria embedded managed dependencies...'
 Invoke-Ilspy -Arguments @(
     '--disable-updatecheck',
     '--ignore-decompilation-errors',
     '-p',
+    '-r', $refs,
     '-o', $bootstrap,
     $terrariaExe.FullName
 )
 
-$embeddedCount = 0
+$embeddedRefs = New-Object System.Collections.Generic.List[object]
 Get-ChildItem -Path $bootstrap -Recurse -File -Filter '*.dll' | ForEach-Object {
     try {
-        $assemblyName = [System.Reflection.AssemblyName]::GetAssemblyName($_.FullName).Name
-        if ($assemblyName) {
-            Copy-Item $_.FullName (Join-Path $refs ($assemblyName + '.dll')) -Force
-            $embeddedCount++
+        $assembly = [System.Reflection.AssemblyName]::GetAssemblyName($_.FullName)
+        if ($assembly.Name) {
+            $targetName = $assembly.Name + '.dll'
+            Copy-Item $_.FullName (Join-Path $refs $targetName) -Force
+            $embeddedRefs.Add([pscustomobject]@{
+                file = $_.Name
+                assembly = $assembly.Name
+                version = $assembly.Version.ToString()
+                target = $targetName
+            })
         }
     }
     catch {
         Write-Verbose "Skipping non-managed DLL resource: $($_.FullName)"
     }
 }
-Write-Host "Recovered $embeddedCount embedded managed reference assemblies."
+Write-Host "Recovered $($embeddedRefs.Count) embedded managed reference assemblies."
 
-Write-Host 'Pass 2/2: clean decompile with bundled references...'
+Write-Host 'Pass 2/2: clean decompile with install + embedded + bundled fallback references...'
 Invoke-Ilspy -Arguments @(
     '--disable-updatecheck',
     '-p',
@@ -121,6 +184,16 @@ Invoke-Ilspy -Arguments @(
 
 $auditResult = & $auditScript -SourceDirectory $source -OutputDirectory $audit -TerrariaVersion $fileVersion
 
+$referenceReport = [pscustomobject]@{
+    terraria_version = $fileVersion
+    terraria_root = $terrariaRoot
+    managed_install_references = @($managedInstallRefs)
+    ignored_native_install_dlls = @($nativeInstallDlls)
+    embedded_managed_references = @($embeddedRefs)
+    content_pipeline_from_install = (@($managedInstallRefs | Where-Object { $_.assembly -eq 'Microsoft.Xna.Framework.Content.Pipeline' }).Count -gt 0)
+}
+$referenceReport | ConvertTo-Json -Depth 6 | Set-Content -Path (Join-Path $audit 'reference-sources.json') -Encoding UTF8
+
 $safeVersion = ($fileVersion -replace '[^0-9A-Za-z._-]', '_')
 $zipPath = Join-Path $OutputDirectory "TerrariaDecomp-$safeVersion-clean.zip"
 Compress-Archive -Path (Join-Path $source '*') -DestinationPath $zipPath -CompressionLevel Optimal -Force
@@ -128,6 +201,7 @@ Compress-Archive -Path (Join-Path $source '*') -DestinationPath $zipPath -Compre
 Write-Host ''
 Write-Host "Clean source ZIP: $zipPath"
 Write-Host "Audit report: $(Join-Path $audit 'audit.md')"
+Write-Host "Reference report: $(Join-Path $audit 'reference-sources.json')"
 
 if (-not $KeepWork) {
     Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
