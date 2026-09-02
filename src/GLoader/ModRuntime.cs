@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using HarmonyLib;
@@ -28,17 +29,19 @@ namespace GLoader
                 gameAssembly,
                 gameDirectory,
                 supportDirectory);
+            var compiledModCache = Path.Combine(supportDirectory, "cache", "compiled-mods");
 
             foreach (var mod in mods)
             {
-                LoadOne(mod, references, isServerTarget);
+                LoadOne(mod, references, isServerTarget, compiledModCache);
             }
         }
 
         private static void LoadOne(
             ModSource mod,
             System.Collections.Generic.IReadOnlyList<Microsoft.CodeAnalysis.MetadataReference> references,
-            bool isServerTarget)
+            bool isServerTarget,
+            string compiledModCache)
         {
             var harmonyId = "gloader.mod." + mod.Id;
             Harmony harmony = null;
@@ -46,7 +49,11 @@ namespace GLoader
             try
             {
                 Log.Info("Compiling mod: " + mod.DisplayName);
-                var assembly = ModCompiler.Compile(mod, references, isServerTarget);
+                var assembly = ModCompiler.Compile(
+                    mod,
+                    references,
+                    isServerTarget,
+                    compiledModCache);
 
                 InvokeOptionalLoad(assembly, GetModDirectory(mod));
 
@@ -75,7 +82,7 @@ namespace GLoader
             if (mod == null || mod.SourceFiles == null || mod.SourceFiles.Count == 0)
                 return null;
 
-            return System.IO.Path.GetDirectoryName(mod.SourceFiles[0]);
+            return Path.GetDirectoryName(mod.SourceFiles[0]);
         }
 
         private static void InvokeOptionalLoad(Assembly assembly, string modDirectory)
