@@ -9,7 +9,11 @@ on:
       - .github/workflows/expanded-worlds-tier-geometry-audit.yml
       - gmods/ExpandedWorlds/DiscreteCountScaling.cs
       - gmods/ExpandedWorlds/FeatureGeometryScaling.cs
+      - gmods/ExpandedWorlds/GenerationCapacityMath.cs
+      - gmods/ExpandedWorlds/StatueScaling.cs
+      - gmods/ExpandedWorlds/TempleScaling.cs
       - tests/ExpandedWorldCompile/**
+      - tests/ExpandedWorldMathCompile/**
 
 jobs:
   audit-tier-and-geometry-rules:
@@ -104,6 +108,11 @@ jobs:
             if (-not $ok) { $failures.Add($Name) }
           }
 
+          $reset = Get-MethodSlice `
+            'WorldGen.Reset' `
+            'public static void Reset\(\)' `
+            '\r?\n\tpublic static bool IsDungeonPlatformOrShelf\('
+
           $placeTrap = Get-MethodSlice `
             'WorldGen.placeTrap' `
             'public static bool placeTrap\(int x2, int y2, int type = -1\)' `
@@ -129,8 +138,18 @@ jobs:
             'public static void PlantAlch\(\)' `
             '\r?\n\tpublic static void PlaceSuitableHerbHere\('
 
+          $makeTemple = Get-MethodSlice `
+            'WorldGen.makeTemple' `
+            'public static void makeTemple\(int x, int y, GenerationProgress progress = null\)' `
+            '\r?\n\tpublic static void makeTemple_GenerateBricks\('
+
           Add-Content -Encoding UTF8 $report ''
           Add-Content -Encoding UTF8 $report '=== Discrete world-size counts ==='
+
+          Assert-InMethod 'Statue multiplier is computed in WorldGen.Reset' $reset 'GenVars\.extraBastStatueCountMax\s*=\s*2;'
+          Assert-InMethod 'Statue Large threshold remains 8400 -> offset 2' $reset 'if\s*\(Main\.maxTilesX\s*>=\s*8400\).*?=\s*2;'
+          Assert-InMethod 'Statue Medium threshold remains 6400 -> offset 1' $reset 'else if\s*\(Main\.maxTilesX\s*>=\s*6400\).*?=\s*1;'
+          Assert-InMethod 'Statue final multiplier remains 2 plus size offset' $reset 'GenVars\.extraBastStatueCountMax\s*=\s*2\s*\+'
 
           Assert-InMethod 'Glow Tulips still classify physical width at 4200/6400' $glowTulips 'Main\.maxTilesX\s*>\s*4200.*Main\.maxTilesX\s*<=\s*6400'
           Assert-InMethod 'Glow Tulips still use source counts 2/4/6' $glowTulips 'num4\s*=\s*num\s+switch.*1\s*=>\s*4.*2\s*=>\s*6.*_\s*=>\s*2'
@@ -156,13 +175,23 @@ jobs:
           Assert-InMethod 'PlantAlch uses the same radius on Y bounds' $plantAlch 'Utils\.Clamp\(num2\s*-\s*num3.*Utils\.Clamp\(num2\s*\+\s*num3'
 
           Add-Content -Encoding UTF8 $report ''
+          Add-Content -Encoding UTF8 $report '=== Jungle Temple source shape ==='
+
+          Assert-InMethod 'Temple scale is double maxTilesX/4200.0' $makeTemple 'double\s+num\s*=\s*\(double\)Main\.maxTilesX\s*/\s*4200\.0;'
+          Assert-InMethod 'Temple room range is Next((int)(10*scale),(int)(16*scale))' $makeTemple 'genRand\.Next\(\(int\)\(num\s*\*\s*10\.0\),\s*\(int\)\(num\s*\*\s*16\.0\)\)'
+          Assert-InMethod 'Temple Rectangle storage is dynamic roomCount+10' $makeTemple 'new Rectangle\[num2\s*\+\s*10\]'
+          Assert-InMethod 'Temple depth storage is dynamic roomCount+10' $makeTemple 'new int\[num2\s*\+\s*10\]'
+
+          Add-Content -Encoding UTF8 $report ''
           Add-Content -Encoding UTF8 $report '=== Exact audited method excerpts ==='
           foreach ($entry in @(
+            @{ Name = 'Reset'; Text = $reset },
             @{ Name = 'placeTrap'; Text = $placeTrap },
             @{ Name = 'AddSpikeCaves'; Text = $spikeCaves },
             @{ Name = 'GrowGlowTulips'; Text = $glowTulips },
             @{ Name = 'PlaceChilletEggs'; Text = $chilletEggs },
-            @{ Name = 'PlantAlch'; Text = $plantAlch }
+            @{ Name = 'PlantAlch'; Text = $plantAlch },
+            @{ Name = 'makeTemple'; Text = $makeTemple }
           )) {
             Add-Content -Encoding UTF8 $report "--- $($entry.Name) ---"
             Add-Content -Encoding UTF8 $report $entry.Text
