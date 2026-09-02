@@ -203,7 +203,7 @@ jobs:
             Copy-Item $world $dest -Force
             $hash = (Get-FileHash $dest -Algorithm SHA256).Hash
             Add-Content (Join-Path $out 'manifest.txt') "$name|$width|$height|$env:EW_SEED|$($info.Length)|$hash"
-            Write-Host "PASS $name: $width x $height, $($info.Length) bytes, SHA256 $hash"
+            Write-Host "PASS ${name}: $width x $height, $($info.Length) bytes, SHA256 $hash"
           }
 
           Generate-World 'Small' 1 4200 1200 7841 '' ''
