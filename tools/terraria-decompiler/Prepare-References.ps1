@@ -159,27 +159,21 @@ try {
     Extract-SfxCab -ExePath $XnaInstaller -CabPath $xnaCab
     New-Item -ItemType Directory -Force -Path $xnaTop | Out-Null
 
-    # Windows Server 2025's built-in expand.exe returns E_NOTIMPL for this old LZX CAB.
-    # GitHub's Windows image includes 7-Zip, which handles it correctly. Keep expand.exe
-    # as a fallback for machines where it supports the payload.
+    # GitHub's Windows image includes 7-Zip, which handles the old LZX CAB and the
+    # nested MSI/Cabinet data without invoking or installing any 2011 setup package.
     $sevenZip = Get-Command '7z.exe' -ErrorAction SilentlyContinue
     if (-not $sevenZip) {
         $sevenZipPath = Join-Path $env:ProgramFiles '7-Zip\7z.exe'
         if (Test-Path -LiteralPath $sevenZipPath) { $sevenZip = Get-Item -LiteralPath $sevenZipPath }
     }
-
-    if ($sevenZip) {
-        $sevenZipExe = if ($sevenZip.PSObject.Properties.Name -contains 'Source') { $sevenZip.Source } else { $sevenZip.FullName }
-        & $sevenZipExe x $xnaCab "-o$xnaTop" -y | Out-Host
-        if ($LASTEXITCODE -ne 0) {
-            throw "7-Zip failed to unpack the XNA bootstrap CAB with exit code $LASTEXITCODE."
-        }
+    if (-not $sevenZip) {
+        throw '7-Zip is required to unpack the legacy XNA MSI/CAB payloads. Install 7-Zip or use the GitHub Actions runner.'
     }
-    else {
-        & "$env:SystemRoot\System32\expand.exe" '-F:*' $xnaCab $xnaTop | Out-Host
-        if ($LASTEXITCODE -ne 0) {
-            throw "No working CAB extractor was available. expand.exe exited with $LASTEXITCODE and 7-Zip was not found."
-        }
+    $sevenZipExe = if ($sevenZip.PSObject.Properties.Name -contains 'Source') { $sevenZip.Source } else { $sevenZip.FullName }
+
+    & $sevenZipExe x $xnaCab "-o$xnaTop" -y | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw "7-Zip failed to unpack the XNA bootstrap CAB with exit code $LASTEXITCODE."
     }
 
     $redistsMsi = Get-ChildItem -Path $xnaTop -Recurse -File -Filter 'redists.msi' | Select-Object -First 1
@@ -187,20 +181,31 @@ try {
         throw 'The XNA bootstrap payload did not contain redists.msi.'
     }
 
-    $redistsAdmin = Join-Path $WorkDirectory 'xna-redists-admin'
-    Invoke-MsiAdminExtract -MsiPath $redistsMsi.FullName -TargetDirectory $redistsAdmin
-
-    $xnaFxMsi = Get-ChildItem -Path $redistsAdmin -Recurse -File -Filter 'xnafx40_redist.msi' | Select-Object -First 1
-    $sharedMsi = Get-ChildItem -Path $redistsAdmin -Recurse -File -Filter 'xnags_shared.msi' | Select-Object -First 1
-    if (-not $xnaFxMsi -or -not $sharedMsi) {
-        $available = Get-ChildItem -Path $redistsAdmin -Recurse -File -Filter '*.msi' | ForEach-Object FullName
-        throw "Could not locate xnafx40_redist.msi and xnags_shared.msi after extracting redists.msi. MSI files found:`n$($available -join "`n")"
+    # Do not run these 2011 MSI packages. Modern Windows Installer can reject the old
+    # wrapper even though its archive data is intact. 7-Zip understands MSI/CFB plus
+    # the embedded Cabinet streams, so extract the payload as data only.
+    $redistsUnpacked = Join-Path $WorkDirectory 'xna-redists-unpacked'
+    New-Item -ItemType Directory -Force -Path $redistsUnpacked | Out-Null
+    & $sevenZipExe x $redistsMsi.FullName "-o$redistsUnpacked" -y | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw "7-Zip failed to unpack redists.msi with exit code $LASTEXITCODE."
     }
 
-    $xnaFxAdmin = Join-Path $WorkDirectory 'xna-fx-admin'
-    $xnaSharedAdmin = Join-Path $WorkDirectory 'xna-shared-admin'
-    Invoke-MsiAdminExtract -MsiPath $xnaFxMsi.FullName -TargetDirectory $xnaFxAdmin
-    Invoke-MsiAdminExtract -MsiPath $sharedMsi.FullName -TargetDirectory $xnaSharedAdmin
+    $sharedInstaller = Get-ChildItem -Path $redistsUnpacked -Recurse -File |
+        Where-Object { $_.Name -eq 'SharedFilesInstaller_File' -or $_.Name -match '^SharedFilesInstaller' } |
+        Sort-Object Length -Descending |
+        Select-Object -First 1
+    if (-not $sharedInstaller) {
+        $available = Get-ChildItem -Path $redistsUnpacked -Recurse -File | Select-Object -First 50 -ExpandProperty FullName
+        throw "Could not locate the XNA shared-components installer after unpacking redists.msi. Files found:`n$($available -join "`n")"
+    }
+
+    $sharedUnpacked = Join-Path $WorkDirectory 'xna-shared-unpacked'
+    New-Item -ItemType Directory -Force -Path $sharedUnpacked | Out-Null
+    & $sevenZipExe x $sharedInstaller.FullName "-o$sharedUnpacked" -y | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw "7-Zip failed to unpack '$($sharedInstaller.Name)' with exit code $LASTEXITCODE."
+    }
 
     $requiredXna = @(
         'Microsoft.Xna.Framework.dll',
@@ -211,7 +216,8 @@ try {
     )
 
     foreach ($name in $requiredXna) {
-        $candidate = Get-ChildItem -Path $xnaFxAdmin, $xnaSharedAdmin -Recurse -File -Filter $name |
+        $logicalName = $name.Replace('.', '_')
+        $candidate = Get-ChildItem -Path $sharedUnpacked -Recurse -File -Filter $logicalName |
             Sort-Object Length -Descending |
             Select-Object -First 1
         if (-not $candidate) {
