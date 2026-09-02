@@ -15,13 +15,10 @@ using Terraria.WorldBuilding;
 ///
 /// Expanded worlds satisfy the Large threshold and therefore leave vanilla
 /// Reset() with 4. Let Terraria finish that calculation first, verify the clean
-/// 1.4.5.8 Large boundary condition, then continue the discrete tier to 5/6.
-///
-/// This intentionally uses a postfix instead of the old GenerateWorld
-/// transpiler. The clean retail source proves the assignment is in Reset(), not
-/// GenerateWorld(), and Reset() also performs an earlier initialization write of
-/// 2 to the same field. A postfix avoids guessing which field store is the final
-/// size-derived one.
+/// 1.4.5.8 Large boundary condition, then continue the source-backed width tier.
+/// XL uses 5; Huge and THICC both use 6 because they share the same 16,800-tile
+/// horizontal quantum. THICC's extra height is not used to invent a new
+/// categorical statue term.
 /// </summary>
 [HarmonyPatch(typeof(WorldGen), nameof(WorldGen.Reset))]
 internal static class ExpandedWorldStatueMultiplierPatch
@@ -34,8 +31,6 @@ internal static class ExpandedWorldStatueMultiplierPatch
 
         int vanillaMultiplier = GenVars.extraBastStatueCountMax;
 
-        // XL/Huge are physically wider than Large, so clean Terraria 1.4.5.8
-        // must have selected Large's final multiplier before this continuation.
         if (vanillaMultiplier != 4)
         {
             throw new InvalidOperationException(
@@ -46,10 +41,10 @@ internal static class ExpandedWorldStatueMultiplierPatch
         switch (ExpandedWorldState.GenerationPreset)
         {
             case ExpandedWorldPreset.XL:
-                GenVars.extraBastStatueCountMax = ExpandedWorldStatueTierMath.Multiplier(4);
-                break;
             case ExpandedWorldPreset.Huge:
-                GenVars.extraBastStatueCountMax = ExpandedWorldStatueTierMath.Multiplier(5);
+            case ExpandedWorldPreset.Thicc:
+                GenVars.extraBastStatueCountMax = ExpandedWorldStatueTierMath.Multiplier(
+                    ExpandedWorldState.DiscreteTierFor(ExpandedWorldState.GenerationPreset));
                 break;
         }
     }
@@ -58,7 +53,8 @@ internal static class ExpandedWorldStatueMultiplierPatch
 
 /// <summary>
 /// Pure source-derived discrete statue multiplier: tiers 1/2/3 are vanilla
-/// Small/Medium/Large 2/3/4, therefore tiers 4/5 are XL/Huge 5/6.
+/// Small/Medium/Large 2/3/4, therefore width tiers 4/5 are XL/Huge 5/6.
+/// THICC intentionally reuses tier 5.
 /// </summary>
 internal static class ExpandedWorldStatueTierMath
 {
