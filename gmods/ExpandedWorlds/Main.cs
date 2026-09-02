@@ -15,8 +15,8 @@ public static class Mod
 {
     public static void Load()
     {
-        Console.WriteLine("[Expanded Worlds] XL (12600x2400) and Huge (16800x2400) world sizes enabled.");
-        Console.WriteLine("[Expanded Worlds] Vanilla still categorizes both custom sizes as Large for compatibility.");
+        Console.WriteLine("[Expanded Worlds] XL (12600x2400), Huge (16800x2400), and THICC (16800x4800) world sizes enabled.");
+        Console.WriteLine("[Expanded Worlds] Vanilla still categorizes all custom sizes as Large for compatibility.");
     }
 }
 
@@ -25,6 +25,7 @@ internal enum ExpandedWorldPreset
     None = 0,
     XL = 1,
     Huge = 2,
+    Thicc = 3,
 }
 
 internal static class ExpandedWorldState
@@ -32,7 +33,11 @@ internal static class ExpandedWorldState
     public const int VanillaLargeWidth = 8400;
     public const int VanillaLargeHeight = 2400;
     public const int XLWidth = 12600;
+    public const int XLHeight = 2400;
     public const int HugeWidth = 16800;
+    public const int HugeHeight = 2400;
+    public const int ThiccWidth = 16800;
+    public const int ThiccHeight = 4800;
 
     public static ExpandedWorldPreset Selected { get; private set; }
     public static ExpandedWorldPreset GenerationPreset { get; private set; }
@@ -68,8 +73,43 @@ internal static class ExpandedWorldState
                 return XLWidth;
             case ExpandedWorldPreset.Huge:
                 return HugeWidth;
+            case ExpandedWorldPreset.Thicc:
+                return ThiccWidth;
             default:
                 return VanillaLargeWidth;
+        }
+    }
+
+    public static int HeightFor(ExpandedWorldPreset preset)
+    {
+        switch (preset)
+        {
+            case ExpandedWorldPreset.XL:
+                return XLHeight;
+            case ExpandedWorldPreset.Huge:
+                return HugeHeight;
+            case ExpandedWorldPreset.Thicc:
+                return ThiccHeight;
+            default:
+                return VanillaLargeHeight;
+        }
+    }
+
+    public static int DiscreteTierFor(ExpandedWorldPreset preset)
+    {
+        switch (preset)
+        {
+            case ExpandedWorldPreset.XL:
+                return 4;
+            case ExpandedWorldPreset.Huge:
+            case ExpandedWorldPreset.Thicc:
+                // THICC is Huge's horizontal quantum with additional vertical
+                // canvas. Categorical/width-tier continuations therefore stay
+                // on Huge's source-backed fifth term rather than inventing a
+                // sixth term solely because the world is taller.
+                return 5;
+            default:
+                return 3;
         }
     }
 
@@ -81,6 +121,8 @@ internal static class ExpandedWorldState
                 return "XL";
             case ExpandedWorldPreset.Huge:
                 return "Huge";
+            case ExpandedWorldPreset.Thicc:
+                return "THICC";
             default:
                 return "Vanilla";
         }
@@ -92,14 +134,15 @@ internal static class ExpandedWorldState
             return;
 
         int width = WidthFor(GenerationPreset);
+        int height = HeightFor(GenerationPreset);
         Main.maxTilesX = width;
-        Main.maxTilesY = VanillaLargeHeight;
+        Main.maxTilesY = height;
 
         // Keep all derived world bounds coherent before tile/section allocation.
         Main.rightWorld = width * 16f;
-        Main.bottomWorld = VanillaLargeHeight * 16f;
+        Main.bottomWorld = height * 16f;
         Main.maxSectionsX = width / 200;
-        Main.maxSectionsY = VanillaLargeHeight / 150;
+        Main.maxSectionsY = height / 150;
 
         // Let Terraria recalculate any additional derived size state it owns.
         // Reflection keeps a visibility change from turning this into a compile-time break.
@@ -135,22 +178,22 @@ internal static class ExpandedWorldState
                     "SetWorldSize(int,int)");
             }
 
-            setMetadataSize.Invoke(worldFileData, new object[] { width, VanillaLargeHeight });
+            setMetadataSize.Invoke(worldFileData, new object[] { width, height });
         }
 
         Console.WriteLine(
             "[Expanded Worlds] " + stage + ": using " + LabelFor(GenerationPreset) +
-            " " + width + "x" + VanillaLargeHeight +
+            " " + width + "x" + height +
             " (vanilla tier " + WorldGen.GetWorldSize() + ").");
     }
 }
 
 /// <summary>
-/// Injects two extra choices into Terraria's existing world-size row.
+/// Injects three extra choices into Terraria's existing world-size row.
 /// We intentionally do NOT add values to Terraria's private WorldSizeId enum.
-/// XL/Huge set the vanilla selection to Large, then carry their real dimensions
-/// separately until CreateNewWorld. This keeps code that branches on Small /
-/// Medium / Large seeing a known vanilla value.
+/// XL/Huge/THICC set the vanilla selection to Large, then carry their real
+/// dimensions separately until CreateNewWorld. This keeps code that branches on
+/// Small / Medium / Large seeing a known vanilla value.
 /// </summary>
 [HarmonyPatch]
 internal static class ExpandedWorldCreationSizeRowPatch
@@ -167,6 +210,7 @@ internal static class ExpandedWorldCreationSizeRowPatch
     private static UIWorldCreation _owner;
     private static UITextPanel<string> _xlButton;
     private static UITextPanel<string> _hugeButton;
+    private static UITextPanel<string> _thiccButton;
 
     private static MethodBase TargetMethod()
     {
@@ -203,9 +247,10 @@ internal static class ExpandedWorldCreationSizeRowPatch
             if (__args.Length > 4 && __args[4] is float)
                 usableWidthPercent = (float)__args[4];
 
-            // Match vanilla's spacing formula, but distribute five choices instead of three.
-            const int totalChoices = 5;
-            float widthPixels = -4f * (totalChoices - 1);
+            // Match vanilla's spacing formula, but distribute six choices instead of three.
+            const int totalChoices = 6;
+            const int lastIndex = totalChoices - 1;
+            float widthPixels = -4f * lastIndex;
             float widthPercent = usableWidthPercent / totalChoices;
 
             for (int i = 0; i < vanillaButtons.Length; i++)
@@ -215,15 +260,17 @@ internal static class ExpandedWorldCreationSizeRowPatch
                     continue;
 
                 button.Width.Set(widthPixels, widthPercent);
-                button.HAlign = i / (float)(totalChoices - 1);
+                button.HAlign = i / (float)lastIndex;
             }
 
             _owner = __instance;
-            _xlButton = MakeCustomButton(__instance, first, "XL", ExpandedWorldPreset.XL, 3, widthPixels, widthPercent);
-            _hugeButton = MakeCustomButton(__instance, first, "Huge", ExpandedWorldPreset.Huge, 4, widthPixels, widthPercent);
+            _xlButton = MakeCustomButton(__instance, first, "XL", ExpandedWorldPreset.XL, 3, lastIndex, widthPixels, widthPercent);
+            _hugeButton = MakeCustomButton(__instance, first, "Huge", ExpandedWorldPreset.Huge, 4, lastIndex, widthPixels, widthPercent);
+            _thiccButton = MakeCustomButton(__instance, first, "THICC", ExpandedWorldPreset.Thicc, 5, lastIndex, widthPixels, widthPercent);
 
             container.Append(_xlButton);
             container.Append(_hugeButton);
+            container.Append(_thiccButton);
             RefreshVisuals(__instance);
         }
         catch (Exception ex)
@@ -238,6 +285,7 @@ internal static class ExpandedWorldCreationSizeRowPatch
         string text,
         ExpandedWorldPreset preset,
         int index,
+        int lastIndex,
         float widthPixels,
         float widthPercent)
     {
@@ -245,7 +293,7 @@ internal static class ExpandedWorldCreationSizeRowPatch
         button.Width.Set(widthPixels, widthPercent);
         button.Height.Set(template.Height.Pixels, template.Height.Percent);
         button.Top.Set(template.Top.Pixels, template.Top.Percent);
-        button.HAlign = index / 4f;
+        button.HAlign = index / (float)lastIndex;
         button.SetPadding(0f);
         button.SetSnapPoint("size", index);
 
@@ -256,9 +304,7 @@ internal static class ExpandedWorldCreationSizeRowPatch
 
         button.OnMouseOver += delegate
         {
-            SetDescription(owner, preset == ExpandedWorldPreset.XL
-                ? "XL world: 12,600 x 2,400 tiles. The next exact 4,200-tile horizontal size quantum after Large."
-                : "Huge world: 16,800 x 2,400 tiles. Twice the width and tile area of vanilla Large.");
+            SetDescription(owner, DescriptionFor(preset));
         };
 
         button.OnMouseOut += delegate
@@ -269,12 +315,27 @@ internal static class ExpandedWorldCreationSizeRowPatch
         return button;
     }
 
+    private static string DescriptionFor(ExpandedWorldPreset preset)
+    {
+        switch (preset)
+        {
+            case ExpandedWorldPreset.XL:
+                return "XL world: 12,600 x 2,400 tiles. The next exact 4,200-tile horizontal size quantum after Large.";
+            case ExpandedWorldPreset.Huge:
+                return "Huge world: 16,800 x 2,400 tiles. Twice the width and tile area of vanilla Large.";
+            case ExpandedWorldPreset.Thicc:
+                return "THICC world: 16,800 x 4,800 tiles. Huge width with twice vanilla Large height and four times vanilla Large tile area.";
+            default:
+                return string.Empty;
+        }
+    }
+
     private static void SelectCustom(UIWorldCreation owner, ExpandedWorldPreset preset)
     {
         ExpandedWorldState.Select(preset);
 
-        // Keep Terraria's own categorical state at vanilla Large. The true width
-        // is armed only when CreateNewWorld actually begins.
+        // Keep Terraria's own categorical state at vanilla Large. The true
+        // physical dimensions are armed only when CreateNewWorld actually begins.
         WorldGen.SetWorldSize(2);
         DeselectVanillaButtons(owner);
         RefreshVisuals(owner);
@@ -303,6 +364,7 @@ internal static class ExpandedWorldCreationSizeRowPatch
         bool sameOwner = owner != null && ReferenceEquals(owner, _owner);
         SetButtonVisual(_xlButton, sameOwner && ExpandedWorldState.Selected == ExpandedWorldPreset.XL);
         SetButtonVisual(_hugeButton, sameOwner && ExpandedWorldState.Selected == ExpandedWorldPreset.Huge);
+        SetButtonVisual(_thiccButton, sameOwner && ExpandedWorldState.Selected == ExpandedWorldPreset.Thicc);
 
         if (sameOwner && ExpandedWorldState.IsCustomSelected)
             DeselectVanillaButtons(owner);
