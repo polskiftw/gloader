@@ -87,8 +87,8 @@ namespace Terraria
             int steps,
             int type,
             bool addTile,
-            float speedX,
-            float speedY,
+            double speedX,
+            double speedY,
             bool noYChange,
             bool overRide,
             int ignoreTileType)
@@ -188,7 +188,7 @@ namespace Terraria.GameContent.Biomes
 {
     public class JunglePass
     {
-        private float _worldScale;
+        private double _worldScale;
         private void ApplyPass() { }
         private void ApplyRandomMovement(ref int x, ref int y, int xRange, int yRange) { }
         private void PlaceGemsAt(int x, int y, ushort baseGem, int gemVariants) { }
@@ -229,6 +229,6 @@ namespace Terraria.WorldBuilding
 
     public class GenerationProgress
     {
-        public void Set(float value) { }
+        public void Set(double value) { }
     }
 }
