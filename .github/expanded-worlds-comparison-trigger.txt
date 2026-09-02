@@ -1,1 +1,0 @@
-Run the real six-size comparison from one fresh Terraria 1.4.5.8 seed.
