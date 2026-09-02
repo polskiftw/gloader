@@ -1,11 +1,7 @@
 name: Expanded Worlds real six-size comparison
 
 on:
-  push:
-    branches:
-      - feat/expanded-world-sizes
-    paths:
-      - .github/expanded-worlds-comparison-trigger.txt
+  workflow_dispatch:
 
 permissions:
   contents: read
