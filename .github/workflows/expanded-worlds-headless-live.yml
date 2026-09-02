@@ -7,6 +7,8 @@ on:
       - feat/expanded-world-sizes
     paths:
       - .github/workflows/expanded-worlds-headless-live.yml
+      - gmods/ExpandedWorlds/**
+      - src/GLoader/**
   pull_request:
     branches:
       - main
@@ -112,6 +114,13 @@ jobs:
           $deadline = (Get-Date).AddMinutes(30)
           while ((Get-Date) -lt $deadline) {
             if ($p.HasExited) { break }
+            if (Test-Path $stdout) {
+              $partial = Get-Content -Raw $stdout -ErrorAction SilentlyContinue
+              if ($partial -and $partial.Contains('Mod failed: ExpandedWorlds')) {
+                Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+                break
+              }
+            }
             $client = New-Object System.Net.Sockets.TcpClient
             try {
               $task = $client.ConnectAsync('127.0.0.1', $port)
@@ -127,11 +136,12 @@ jobs:
           Write-Host '--- Terraria/gloader stderr ---'
           if (Test-Path $stderr) { Get-Content -Raw $stderr | Write-Host }
 
+          $log = if (Test-Path $stdout) { Get-Content -Raw $stdout } else { '' }
+          if ($log.Contains('Mod failed: ExpandedWorlds')) { throw 'Expanded Worlds source mod failed.' }
           if (-not $ready) { throw ("Server never became ready; process exit=" + $p.ExitCode) }
           if (-not (Test-Path $world)) { throw 'Server became ready but .wld is missing.' }
           $info = Get-Item $world
           if ($info.Length -lt 1MB) { throw ("Generated .wld too small: " + $info.Length) }
-          $log = Get-Content -Raw $stdout
           $need = @(
             ("Dedicated-server headless preset: " + $preset + " " + $width + 'x2400'),
             ("GenerateWorld: using " + $preset + " " + $width + 'x2400 (vanilla tier 2)'),
@@ -142,7 +152,6 @@ jobs:
           foreach ($marker in $need) {
             if (-not $log.Contains($marker)) { throw ("Missing runtime marker: " + $marker) }
           }
-          if ($log.Contains('Mod failed:')) { throw 'Expanded Worlds source mod failed.' }
           $hash = (Get-FileHash $world -Algorithm SHA256).Hash
           Write-Host ("PASS: generated real " + $preset + " " + $width + "x2400 world; bytes=" + $info.Length + "; SHA256=" + $hash)
 
