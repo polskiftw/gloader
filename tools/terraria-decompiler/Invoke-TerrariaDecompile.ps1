@@ -41,26 +41,38 @@ if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
     throw '.NET SDK/runtime was not found. Install .NET 10 or use the GitHub Actions workflow.'
 }
 
-if (-not (Test-Path -LiteralPath $TerrariaInput -PathType Leaf)) {
+if (-not (Test-Path -LiteralPath $TerrariaInput)) {
     throw "Terraria input not found: $TerrariaInput"
 }
 
-if ([System.IO.Path]::GetExtension($TerrariaInput).Equals('.zip', [System.StringComparison]::OrdinalIgnoreCase)) {
-    Expand-Archive -Path $TerrariaInput -DestinationPath $inputStage -Force
+$inputItem = Get-Item -LiteralPath $TerrariaInput
+if ($inputItem.PSIsContainer) {
+    $terrariaRoot = $inputItem.FullName
+    $terrariaExePath = Join-Path $terrariaRoot 'Terraria.exe'
+    if (-not (Test-Path -LiteralPath $terrariaExePath -PathType Leaf)) {
+        throw "Terraria.exe was not found directly inside: $terrariaRoot"
+    }
+    $terrariaExe = Get-Item -LiteralPath $terrariaExePath
+}
+elseif ([System.IO.Path]::GetExtension($inputItem.FullName).Equals('.zip', [System.StringComparison]::OrdinalIgnoreCase)) {
+    Expand-Archive -Path $inputItem.FullName -DestinationPath $inputStage -Force
     $terrariaExe = Get-ChildItem -Path $inputStage -Recurse -File -Filter 'Terraria.exe' | Select-Object -First 1
     if (-not $terrariaExe) { throw 'The input ZIP did not contain Terraria.exe.' }
+    $terrariaRoot = $terrariaExe.Directory.FullName
 }
 else {
-    if ((Split-Path $TerrariaInput -Leaf) -ne 'Terraria.exe') {
-        Write-Warning "Input file is not named Terraria.exe: $TerrariaInput"
+    if ($inputItem.Name -ne 'Terraria.exe') {
+        Write-Warning "Input file is not named Terraria.exe: $($inputItem.FullName)"
     }
-    $terrariaExe = Get-Item -LiteralPath $TerrariaInput
+    $terrariaExe = $inputItem
+    $terrariaRoot = $terrariaExe.Directory.FullName
 }
 
 $fileVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($terrariaExe.FullName).FileVersion
 if ([string]::IsNullOrWhiteSpace($fileVersion)) { $fileVersion = 'unknown' }
 Set-Content -Path (Join-Path $OutputDirectory 'version.txt') -Value $fileVersion -Encoding ASCII
 Write-Host "Terraria file version: $fileVersion"
+Write-Host "Terraria install/reference root: $terrariaRoot"
 
 if ($ExpectedVersion -and -not $fileVersion.StartsWith($ExpectedVersion, [System.StringComparison]::OrdinalIgnoreCase)) {
     throw "Terraria version mismatch. Expected '$ExpectedVersion', got '$fileVersion'."
@@ -87,31 +99,63 @@ if (-not (Test-Path -LiteralPath $ReferencesDirectory -PathType Container)) {
     throw "References directory not found: $ReferencesDirectory"
 }
 
-# Pass 1 intentionally runs without Terraria's embedded managed libraries. ILSpy still
-# exports those raw DLL resources, which we then canonicalize by real assembly name.
+# Prefer the exact managed assemblies shipped beside Terraria.exe. Native DLLs are
+# useful to Terraria at runtime but do not provide CLR metadata to ILSpy.
+$managedInstallRefs = New-Object System.Collections.Generic.List[object]
+$nativeInstallDlls = New-Object System.Collections.Generic.List[object]
+Get-ChildItem -LiteralPath $terrariaRoot -File -Filter '*.dll' | Sort-Object Name | ForEach-Object {
+    try {
+        $assembly = [System.Reflection.AssemblyName]::GetAssemblyName($_.FullName)
+        $targetName = $assembly.Name + '.dll'
+        Copy-Item $_.FullName (Join-Path $ReferencesDirectory $targetName) -Force
+        $managedInstallRefs.Add([pscustomobject]@{
+            file = $_.Name
+            assembly = $assembly.Name
+            version = $assembly.Version.ToString()
+            target = $targetName
+            sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        })
+    }
+    catch {
+        $nativeInstallDlls.Add([pscustomobject]@{
+            file = $_.Name
+            bytes = $_.Length
+        })
+    }
+}
+Write-Host "Harvested $($managedInstallRefs.Count) managed sibling reference assembly/assemblies from the Terraria install."
+if ($nativeInstallDlls.Count -gt 0) {
+    Write-Host "Ignored $($nativeInstallDlls.Count) native/non-managed sibling DLL(s) for ILSpy reference resolution."
+}
+
 Write-Host 'Running bootstrap ILSpy pass to recover embedded managed dependencies...'
-& $ilspy --disable-updatecheck --ignore-decompilation-errors -p -o $bootstrap $terrariaExe.FullName
+& $ilspy --disable-updatecheck --ignore-decompilation-errors -p -r $ReferencesDirectory -o $bootstrap $terrariaExe.FullName
 if ($LASTEXITCODE -ne 0) {
     throw "Bootstrap ILSpy pass failed with exit code $LASTEXITCODE."
 }
 
-$embeddedCount = 0
+$embeddedRefs = New-Object System.Collections.Generic.List[object]
 Get-ChildItem -Path $bootstrap -Recurse -File -Filter '*.dll' | ForEach-Object {
     try {
-        $assemblyName = [System.Reflection.AssemblyName]::GetAssemblyName($_.FullName).Name
-        if ($assemblyName) {
-            $target = Join-Path $ReferencesDirectory ($assemblyName + '.dll')
-            Copy-Item $_.FullName $target -Force
-            $embeddedCount++
+        $assembly = [System.Reflection.AssemblyName]::GetAssemblyName($_.FullName)
+        if ($assembly.Name) {
+            $targetName = $assembly.Name + '.dll'
+            Copy-Item $_.FullName (Join-Path $ReferencesDirectory $targetName) -Force
+            $embeddedRefs.Add([pscustomobject]@{
+                file = $_.Name
+                assembly = $assembly.Name
+                version = $assembly.Version.ToString()
+                target = $targetName
+            })
         }
     }
     catch {
         Write-Verbose "Skipping non-managed DLL resource: $($_.FullName)"
     }
 }
-Write-Host "Recovered $embeddedCount embedded managed reference assemblies."
+Write-Host "Recovered $($embeddedRefs.Count) embedded managed reference assemblies."
 
-Write-Host 'Running clean ILSpy pass with complete reference directory...'
+Write-Host 'Running clean ILSpy pass with install + embedded + prepared references...'
 & $ilspy --disable-updatecheck -p -r $ReferencesDirectory -o $source $terrariaExe.FullName
 if ($LASTEXITCODE -ne 0) {
     throw "Clean ILSpy pass failed with exit code $LASTEXITCODE."
@@ -122,6 +166,16 @@ $auditResult = & (Join-Path $scriptRoot 'Audit-Decompile.ps1') `
     -OutputDirectory $audit `
     -TerrariaVersion $fileVersion
 
+$referenceReport = [pscustomobject]@{
+    terraria_version = $fileVersion
+    terraria_root = $terrariaRoot
+    managed_install_references = @($managedInstallRefs)
+    ignored_native_install_dlls = @($nativeInstallDlls)
+    embedded_managed_references = @($embeddedRefs)
+    content_pipeline_from_install = (@($managedInstallRefs | Where-Object { $_.assembly -eq 'Microsoft.Xna.Framework.Content.Pipeline' }).Count -gt 0)
+}
+$referenceReport | ConvertTo-Json -Depth 6 | Set-Content -Path (Join-Path $audit 'reference-sources.json') -Encoding UTF8
+
 if (-not $NoSourceZip) {
     $safeVersion = ($fileVersion -replace '[^0-9A-Za-z._-]', '_')
     $zipPath = Join-Path $OutputDirectory "TerrariaDecomp-$safeVersion-clean.zip"
@@ -130,6 +184,7 @@ if (-not $NoSourceZip) {
 }
 
 Write-Host "Audit report: $(Join-Path $audit 'audit.md')"
+Write-Host "Reference report: $(Join-Path $audit 'reference-sources.json')"
 $auditResult
 
 if (-not $KeepWork) {
