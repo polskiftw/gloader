@@ -159,9 +159,27 @@ try {
     Extract-SfxCab -ExePath $XnaInstaller -CabPath $xnaCab
     New-Item -ItemType Directory -Force -Path $xnaTop | Out-Null
 
-    & "$env:SystemRoot\System32\expand.exe" '-F:*' $xnaCab $xnaTop | Out-Host
-    if ($LASTEXITCODE -ne 0) {
-        throw "expand.exe failed to unpack the XNA bootstrap CAB with exit code $LASTEXITCODE."
+    # Windows Server 2025's built-in expand.exe returns E_NOTIMPL for this old LZX CAB.
+    # GitHub's Windows image includes 7-Zip, which handles it correctly. Keep expand.exe
+    # as a fallback for machines where it supports the payload.
+    $sevenZip = Get-Command '7z.exe' -ErrorAction SilentlyContinue
+    if (-not $sevenZip) {
+        $sevenZipPath = Join-Path $env:ProgramFiles '7-Zip\7z.exe'
+        if (Test-Path -LiteralPath $sevenZipPath) { $sevenZip = Get-Item -LiteralPath $sevenZipPath }
+    }
+
+    if ($sevenZip) {
+        $sevenZipExe = if ($sevenZip.PSObject.Properties.Name -contains 'Source') { $sevenZip.Source } else { $sevenZip.FullName }
+        & $sevenZipExe x $xnaCab "-o$xnaTop" -y | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            throw "7-Zip failed to unpack the XNA bootstrap CAB with exit code $LASTEXITCODE."
+        }
+    }
+    else {
+        & "$env:SystemRoot\System32\expand.exe" '-F:*' $xnaCab $xnaTop | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            throw "No working CAB extractor was available. expand.exe exited with $LASTEXITCODE and 7-Zip was not found."
+        }
     }
 
     $redistsMsi = Get-ChildItem -Path $xnaTop -Recurse -File -Filter 'redists.msi' | Select-Object -First 1
