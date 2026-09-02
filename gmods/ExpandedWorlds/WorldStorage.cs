@@ -10,7 +10,8 @@ using Terraria;
 /// <summary>
 /// Terraria 1.4.5.8 keeps several world-sized backing arrays at the dimensions
 /// that existed during process startup. Changing Main.maxTilesX/maxTilesY is
-/// therefore not sufficient by itself for a world wider than vanilla Large.
+/// therefore not sufficient by itself for a world wider or taller than vanilla
+/// Large.
 ///
 /// This support is intentionally shared by GLOADER_CLIENT and GLOADER_SERVER:
 /// a client needs it for generation, local reload and joining an expanded
@@ -26,8 +27,7 @@ internal static class ExpandedWorldBackingStorage
 
     public static bool IsSupportedExpandedWorld(int width, int height)
     {
-        return height == ExpandedWorldMath.LargeHeight &&
-               (width == ExpandedWorldMath.XLWidth || width == ExpandedWorldMath.HugeWidth);
+        return ExpandedWorldMath.IsExpandedPresetDimensions(width, height);
     }
 
     public static int RequiredBackingWidth(int logicalWidth)
@@ -170,7 +170,8 @@ internal static class ExpandedWorldBackingStoragePatch
 /// ActiveSections.LastActiveTime and LeashedEntity.BySection. The latter is
 /// static readonly, so trying to resize it later is runtime-dependent and not a
 /// safe contract. Patch both initializers before Terraria's entry point runs and
-/// give them the inexpensive Huge section capacity from the start.
+/// give them the inexpensive maximum supported THICC section capacity from the
+/// start.
 ///
 /// Exact client source contains one Main.maxTilesX and one Main.maxTilesY load
 /// in each initializer's section-array allocation. Any shape change fails closed.
@@ -202,13 +203,13 @@ internal static class ExpandedWorldSectionStorageInitializerPatch
             if (instruction.opcode == OpCodes.Ldsfld && Equals(instruction.operand, MaxTilesXField))
             {
                 instruction.opcode = OpCodes.Ldc_I4;
-                instruction.operand = ExpandedWorldMath.HugeWidth;
+                instruction.operand = ExpandedWorldMath.ThiccWidth;
                 widthLoads++;
             }
             else if (instruction.opcode == OpCodes.Ldsfld && Equals(instruction.operand, MaxTilesYField))
             {
                 instruction.opcode = OpCodes.Ldc_I4;
-                instruction.operand = ExpandedWorldMath.HugeHeight;
+                instruction.operand = ExpandedWorldMath.ThiccHeight;
                 heightLoads++;
             }
 
@@ -228,24 +229,33 @@ internal static class ExpandedWorldSectionStorageInitializerPatch
 
 #if GLOADER_CLIENT
 /// <summary>
-/// Terraria's client map has a second world-width ceiling independent of
-/// WorldMap._tiles. In exact 1.4.5.8 MapRenderer allocates a 5x2 render-target
-/// grid and DrawMap literally iterates X target indices 0..4. Large fits because
-/// 8400 tiles occupies targets 0..4 at 2000 tiles each; XL requires 0..6 and
-/// Huge requires 0..8.
+/// Terraria's client map has independent world-width and world-height ceilings
+/// beyond WorldMap._tiles. Exact 1.4.5.8 MapRenderer allocates a 5x2 target grid:
+/// each normal target covers 2000x1800 tiles, while the final allocated column
+/// and row are special 400x600 tails.
 ///
-/// The renderer also treats its final allocated X column specially as a 400-tile
-/// tail. Huge's actual tail at index 8 is 800 tiles, so simply changing 5 -> 9
-/// would retain a hidden truncation. We allocate one unused guard column (10
-/// total) so target 8 takes the ordinary full-width path. No RenderTarget2D is
-/// created for guard column 9 because current-world loops stop at the physical
-/// world-derived target index.
+/// Huge/THICC width reaches physical X target index 8. THICC height reaches
+/// physical Y target index 2. If either physical final index were also the final
+/// allocated index, MapRenderer.checkMap would apply its vanilla short-tail size
+/// and truncate the real 800-tile X tail or 1200-tile Y tail. Allocate one unused
+/// guard target after each expanded physical edge: 10 columns and 4 rows. Current
+/// world loops never create those guard RenderTarget2D objects; they only keep the
+/// real final targets on the ordinary full-size path.
+///
+/// DrawMap's X loop is separately hard-coded to 0..4 and therefore must be
+/// extended through index 8. Its Y loop is already derived from maxTilesY and
+/// automatically reaches THICC's index 2 once the backing grid has enough rows.
 /// </summary>
 internal static class ExpandedWorldMapRendererContract
 {
+    public const int TextureMaxWidth = 2000;
+    public const int TextureMaxHeight = 1800;
     public const int VanillaTargetColumns = 5;
-    public const int HugeLastRenderableTargetIndex = ExpandedWorldMath.HugeWidth / 2000;
+    public const int VanillaTargetRows = 2;
+    public const int HugeLastRenderableTargetIndex = ExpandedWorldMath.HugeWidth / TextureMaxWidth;
+    public const int ThiccLastRenderableTargetRowIndex = ExpandedWorldMath.ThiccHeight / TextureMaxHeight;
     public const int BackingTargetColumns = HugeLastRenderableTargetIndex + 2;
+    public const int BackingTargetRows = ThiccLastRenderableTargetRowIndex + 2;
 
     public static Type RequireMapRendererType()
     {
@@ -257,12 +267,23 @@ internal static class ExpandedWorldMapRendererContract
 
     public static FieldInfo RequireTargetColumnsField()
     {
+        return RequireStaticIntField("numTargetsX");
+    }
+
+    public static FieldInfo RequireTargetRowsField()
+    {
+        return RequireStaticIntField("numTargetsY");
+    }
+
+    private static FieldInfo RequireStaticIntField(string fieldName)
+    {
         Type type = RequireMapRendererType();
-        FieldInfo field = AccessTools.Field(type, "numTargetsX");
+        FieldInfo field = AccessTools.Field(type, fieldName);
         if (field == null || field.FieldType != typeof(int) || !field.IsStatic)
         {
             throw new InvalidOperationException(
-                "[Expanded Worlds] MapRenderer.numTargetsX no longer matches the audited static Int32 field.");
+                "[Expanded Worlds] MapRenderer." + fieldName +
+                " no longer matches the audited static Int32 field.");
         }
         return field;
     }
@@ -299,6 +320,9 @@ internal static class ExpandedWorldMapRendererInitializerPatch
     private static readonly FieldInfo TargetColumnsField =
         ExpandedWorldMapRendererContract.RequireTargetColumnsField();
 
+    private static readonly FieldInfo TargetRowsField =
+        ExpandedWorldMapRendererContract.RequireTargetRowsField();
+
     private static MethodBase TargetMethod()
     {
         Type type = ExpandedWorldMapRendererContract.RequireMapRendererType();
@@ -314,33 +338,53 @@ internal static class ExpandedWorldMapRendererInitializerPatch
         MethodBase __originalMethod)
     {
         var code = instructions.ToList();
-        int patched = 0;
+        int patchedColumns = 0;
+        int patchedRows = 0;
 
         for (int i = 1; i < code.Count; i++)
         {
-            if (code[i].opcode != OpCodes.Stsfld || !Equals(code[i].operand, TargetColumnsField))
+            if (code[i].opcode != OpCodes.Stsfld)
                 continue;
 
-            if (!ExpandedWorldMapRendererContract.IsIntConstant(
-                    code[i - 1],
-                    ExpandedWorldMapRendererContract.VanillaTargetColumns))
+            if (Equals(code[i].operand, TargetColumnsField))
             {
-                throw new InvalidOperationException(
-                    "[Expanded Worlds] MapRenderer.numTargetsX initializer no longer stores audited value 5.");
-            }
+                if (!ExpandedWorldMapRendererContract.IsIntConstant(
+                        code[i - 1],
+                        ExpandedWorldMapRendererContract.VanillaTargetColumns))
+                {
+                    throw new InvalidOperationException(
+                        "[Expanded Worlds] MapRenderer.numTargetsX initializer no longer stores audited value 5.");
+                }
 
-            ExpandedWorldMapRendererContract.ReplaceWithIntConstant(
-                code[i - 1],
-                ExpandedWorldMapRendererContract.BackingTargetColumns);
-            patched++;
+                ExpandedWorldMapRendererContract.ReplaceWithIntConstant(
+                    code[i - 1],
+                    ExpandedWorldMapRendererContract.BackingTargetColumns);
+                patchedColumns++;
+            }
+            else if (Equals(code[i].operand, TargetRowsField))
+            {
+                if (!ExpandedWorldMapRendererContract.IsIntConstant(
+                        code[i - 1],
+                        ExpandedWorldMapRendererContract.VanillaTargetRows))
+                {
+                    throw new InvalidOperationException(
+                        "[Expanded Worlds] MapRenderer.numTargetsY initializer no longer stores audited value 2.");
+                }
+
+                ExpandedWorldMapRendererContract.ReplaceWithIntConstant(
+                    code[i - 1],
+                    ExpandedWorldMapRendererContract.BackingTargetRows);
+                patchedRows++;
+            }
         }
 
-        if (patched != 1)
+        if (patchedColumns != 1 || patchedRows != 1)
         {
             throw new InvalidOperationException(
                 "[Expanded Worlds] MapRenderer initializer shape changed in " +
                 (__originalMethod?.DeclaringType?.FullName ?? "Terraria.MapRenderer") +
-                ": expected one numTargetsX assignment, found " + patched + ".");
+                ": expected one numTargetsX and one numTargetsY assignment, found " +
+                patchedColumns + " and " + patchedRows + ".");
         }
 
         return code;
@@ -380,7 +424,8 @@ internal static class ExpandedWorldMapRendererDrawPatch
 
         // Exact 1.4.5.8 source contains exactly one integer literal 4 here:
         //   for (int i = 0; i <= 4; i++)
-        // Continue the renderer through Huge's final physical target index 8.
+        // Continue the renderer through Huge/THICC's final physical X target 8.
+        // The Y loop is already `j <= Main.maxTilesY / textureMaxHeight`.
         for (int i = 0; i < code.Count; i++)
         {
             if (!ExpandedWorldMapRendererContract.IsIntConstant(code[i], 4))
