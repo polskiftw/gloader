@@ -7,6 +7,13 @@ on:
       - feat/expanded-world-sizes
     paths:
       - .github/workflows/expanded-worlds-headless-live.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/expanded-worlds-headless-live.yml
+      - gmods/ExpandedWorlds/**
+      - src/GLoader/**
 
 jobs:
   live-worldgen:
@@ -37,7 +44,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $msi = Join-Path $env:RUNNER_TEMP 'xnafx40_redist.msi'
           Invoke-WebRequest 'https://download.microsoft.com/download/a/c/2/ac2c903b-e6e8-42c2-9fd7-bebac362a930/xnafx40_redist.msi' -OutFile $msi
-          $p = Start-Process msiexec.exe -ArgumentList @('/i', ('"' + $msi + '"'), '/qn', '/norestart') -Wait -PassThru
+          $p = Start-Process msiexec.exe -ArgumentList @('/i', ('\"' + $msi + '\"'), '/qn', '/norestart') -Wait -PassThru
           if ($p.ExitCode -notin @(0,3010)) { throw "XNA install failed: $($p.ExitCode)" }
 
       - name: Download TerrariaServer 1.4.5.8 and build x86 gloader
@@ -86,8 +93,8 @@ jobs:
           $stderr = Join-Path $outDir 'stderr.txt'
 
           $game = @(
-            '-savedirectory', ('"' + $save + '"'),
-            '-world', ('"' + $world + '"'),
+            '-savedirectory', ('\"' + $save + '\"'),
+            '-world', ('\"' + $world + '\"'),
             '-autocreate', '3',
             '-worldname', ('ExpandedWorld' + $preset),
             '-seed', '123456789',
@@ -96,7 +103,7 @@ jobs:
             '-maxplayers', '1',
             '-noupnp'
           )
-          $loader = @('--target', ('"' + $env:TERRARIA_SERVER + '"'), '--mods', ('"' + $env:MODS_DIR + '"'), '--')
+          $loader = @('--target', ('\"' + $env:TERRARIA_SERVER + '\"'), '--mods', ('\"' + $env:MODS_DIR + '\"'), '--')
           $args = ($loader + $game) -join ' '
           Write-Host ("Starting " + $preset + " generation")
           $p = Start-Process -FilePath $env:GLOADER_EXE -ArgumentList $args -WorkingDirectory $env:SERVER_DIR -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
