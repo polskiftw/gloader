@@ -14,6 +14,7 @@ Terraria/
   TerrariaServer.exe
   gloader.exe
   gmods/
+    ExpandedWorlds/
     InfiniteAngler/
     NoLiquidDupe/
     Radio/
@@ -29,6 +30,10 @@ Terraria/
 
 ```text
 gmods/
+  ExpandedWorlds/
+    [Expanded Worlds source files]
+    README.md
+    DGD.md
   InfiniteAngler/
     Main.cs
     InfiniteAngler.ini
@@ -157,6 +162,26 @@ gdeps/logs/gloader-server.log
 
 ## Included mods
 
+### Expanded Worlds
+
+`gmods/ExpandedWorlds/` adds three larger Terraria 1.4.5.8 world sizes directly to the New World size row:
+
+```text
+XL     12600 x 2400
+Huge   16800 x 2400
+THICC  16800 x 4800
+```
+
+The visible row becomes:
+
+```text
+Small | Medium | Large | XL | Huge | THICC
+```
+
+All three custom presets remain categorically vanilla **Large** for compatibility while the mod carries their real physical dimensions into world generation, storage, metadata, map rendering, and section bookkeeping. THICC shares Huge's width/discrete tier but doubles the physical height, so width-driven rules stay Huge-shaped while height- and area-driven rules see the larger canvas.
+
+For headless generation, set `GLOADER_EXPANDED_WORLD` to `XL`, `HUGE`, or `THICC`. See `gmods/ExpandedWorlds/README.md` for the source-backed scaling model and technical audit, or `gmods/ExpandedWorlds/DGD.md` for the short version.
+
 ### Infinite Angler
 
 `gmods/InfiniteAngler/Main.cs` is a server-authoritative shared endless Angler quest mod for multiplayer. Joining clients can remain completely vanilla. Vanilla's dawn quest rollover is suppressed, so the current quest stays active until every required, fully connected player has completed it. Each finisher is kept locked out of repeating that same quest. When the whole required group is finished, the server performs one normal Angler quest swap and broadcasts the next quest immediately. Players who join count immediately; players who disconnect stop counting.
@@ -242,6 +267,8 @@ dist/gloader/
 ```
 
 Copy the **contents** of `dist/gloader/` directly into the Terraria installation folder. The package adds `gloader.exe` plus two sibling folders: `gmods/` for mods and `gdeps/` for GLoader runtime/support files.
+
+`build.ps1` marks the distributed `gloader.exe` **Large Address Aware** and verifies the PE flag. That is required by the proven THICC `16,800 x 4,800` world-generation path and is harmless for normal/other mod use.
 
 Raw source mods execute with the same privileges as Terraria. Only use code you trust.
 
