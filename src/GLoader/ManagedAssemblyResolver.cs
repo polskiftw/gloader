@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -18,7 +19,8 @@ namespace GLoader
         public ManagedAssemblyResolver(Assembly resourceAssembly, params string[] directories)
         {
             _resourceAssembly = resourceAssembly;
-            _directories = directories
+            _directories = new[] { AppDomain.CurrentDomain.BaseDirectory }
+                .Concat(directories ?? Array.Empty<string>())
                 .Where(path => !string.IsNullOrWhiteSpace(path))
                 .Select(Path.GetFullPath)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -41,10 +43,7 @@ namespace GLoader
                 {
                     try
                     {
-                        return string.Equals(
-                            assembly.GetName().Name,
-                            requested.Name,
-                            StringComparison.OrdinalIgnoreCase);
+                        return MatchesRequestedIdentity(assembly.GetName(), requested);
                     }
                     catch
                     {
@@ -69,6 +68,12 @@ namespace GLoader
 
                     try
                     {
+                        var candidateName = AssemblyName.GetAssemblyName(candidate);
+                        if (!MatchesRequestedIdentity(candidateName, requested))
+                        {
+                            continue;
+                        }
+
                         return Assembly.LoadFrom(candidate);
                     }
                     catch (BadImageFormatException)
@@ -83,6 +88,41 @@ namespace GLoader
             }
 
             return ResolveEmbedded(requested);
+        }
+
+        private static bool MatchesRequestedIdentity(AssemblyName candidate, AssemblyName requested)
+        {
+            if (candidate == null || requested == null ||
+                !string.Equals(candidate.Name, requested.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            // Weak-named assemblies historically bind by simple name in gloader.
+            // Preserve that behavior. Strong-named dependencies, however, must
+            // not be substituted across versions: Roslyn 5.9, for example,
+            // requires System.Collections.Immutable 10.x and will fail if an
+            // older strong-named copy from Terraria or another dependency wins.
+            var requestedToken = requested.GetPublicKeyToken();
+            if (requestedToken == null || requestedToken.Length == 0)
+            {
+                return true;
+            }
+
+            var candidateToken = candidate.GetPublicKeyToken();
+            if (candidateToken == null || !candidateToken.SequenceEqual(requestedToken))
+            {
+                return false;
+            }
+
+            if (requested.Version != null && candidate.Version != requested.Version)
+            {
+                return false;
+            }
+
+            var requestedCulture = requested.CultureName ?? string.Empty;
+            var candidateCulture = candidate.CultureName ?? string.Empty;
+            return string.Equals(candidateCulture, requestedCulture, StringComparison.OrdinalIgnoreCase);
         }
 
         private Assembly ResolveEmbedded(AssemblyName requested)
@@ -132,7 +172,10 @@ namespace GLoader
                                 continue;
                             }
 
-                            return Assembly.Load(memory.ToArray());
+                            var assembly = Assembly.Load(memory.ToArray());
+                            return MatchesRequestedIdentity(assembly.GetName(), requested)
+                                ? assembly
+                                : null;
                         }
                     }
                 }
