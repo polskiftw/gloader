@@ -81,8 +81,8 @@ namespace Gloader.TerrariaDecompiler
         {
             Text = "Terraria Decompiler";
             StartPosition = FormStartPosition.CenterScreen;
-            MinimumSize = new Size(760, 500);
-            ClientSize = new Size(760, 470);
+            MinimumSize = new Size(780, 520);
+            ClientSize = new Size(780, 490);
             Font = new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
 
             BuildUi();
@@ -103,7 +103,7 @@ namespace Gloader.TerrariaDecompiler
 
             var subtitle = new Label
             {
-                Text = "Clean two-pass ILSpy decompile using Terraria's own install DLLs first.",
+                Text = "One click decompiles both Terraria.exe and TerrariaServer.exe, then audits them together.",
                 AutoSize = true,
                 ForeColor = SystemColors.GrayText,
                 Location = new Point(27, 61)
@@ -112,13 +112,17 @@ namespace Gloader.TerrariaDecompiler
 
             Controls.Add(MakeLabel("Terraria.exe", 27, 101));
             terrariaBox.Location = new Point(27, 124);
-            terrariaBox.Size = new Size(585, 23);
+            terrariaBox.Size = new Size(605, 23);
             terrariaBox.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            terrariaBox.TextChanged += (_, __) => RefreshTerrariaInfo();
+            terrariaBox.TextChanged += (_, __) =>
+            {
+                RefreshTerrariaInfo();
+                if (!outputManuallyChosen) SetDefaultOutputForCurrentVersion();
+            };
             Controls.Add(terrariaBox);
 
             terrariaBrowse.Text = "Browse...";
-            terrariaBrowse.Location = new Point(622, 122);
+            terrariaBrowse.Location = new Point(642, 122);
             terrariaBrowse.Size = new Size(105, 27);
             terrariaBrowse.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             terrariaBrowse.Click += BrowseTerraria;
@@ -126,59 +130,59 @@ namespace Gloader.TerrariaDecompiler
 
             terrariaInfo.AutoSize = false;
             terrariaInfo.Location = new Point(27, 155);
-            terrariaInfo.Size = new Size(700, 35);
+            terrariaInfo.Size = new Size(720, 42);
             terrariaInfo.ForeColor = SystemColors.GrayText;
             terrariaInfo.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(terrariaInfo);
 
-            Controls.Add(MakeLabel("Output folder", 27, 198));
-            outputBox.Location = new Point(27, 221);
-            outputBox.Size = new Size(585, 23);
+            Controls.Add(MakeLabel("Output folder", 27, 205));
+            outputBox.Location = new Point(27, 228);
+            outputBox.Size = new Size(605, 23);
             outputBox.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(outputBox);
 
             outputBrowse.Text = "Browse...";
-            outputBrowse.Location = new Point(622, 219);
+            outputBrowse.Location = new Point(642, 226);
             outputBrowse.Size = new Size(105, 27);
             outputBrowse.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             outputBrowse.Click += BrowseOutput;
             Controls.Add(outputBrowse);
 
-            decompileButton.Text = "DECOMPILE";
+            decompileButton.Text = "DECOMPILE BOTH";
             decompileButton.Font = new Font("Segoe UI Semibold", 11F, FontStyle.Bold, GraphicsUnit.Point);
-            decompileButton.Location = new Point(27, 270);
-            decompileButton.Size = new Size(160, 43);
+            decompileButton.Location = new Point(27, 278);
+            decompileButton.Size = new Size(190, 43);
             decompileButton.Click += async (_, __) => await StartDecompileAsync();
             Controls.Add(decompileButton);
 
             cancelButton.Text = "Cancel";
-            cancelButton.Location = new Point(198, 278);
+            cancelButton.Location = new Point(228, 286);
             cancelButton.Size = new Size(85, 29);
             cancelButton.Enabled = false;
             cancelButton.Click += (_, __) => CancelCurrentRun();
             Controls.Add(cancelButton);
 
-            progress.Location = new Point(27, 329);
-            progress.Size = new Size(700, 16);
+            progress.Location = new Point(27, 337);
+            progress.Size = new Size(720, 16);
             progress.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             progress.Minimum = 0;
             progress.Maximum = 100;
             Controls.Add(progress);
 
             statusLabel.Text = "Ready.";
-            statusLabel.Location = new Point(27, 354);
-            statusLabel.Size = new Size(700, 24);
+            statusLabel.Location = new Point(27, 362);
+            statusLabel.Size = new Size(720, 24);
             statusLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(statusLabel);
 
             detailsButton.Text = "Show Details";
-            detailsButton.Location = new Point(27, 394);
+            detailsButton.Location = new Point(27, 402);
             detailsButton.Size = new Size(105, 30);
             detailsButton.Click += (_, __) => ToggleDetails();
             Controls.Add(detailsButton);
 
             openOutputButton.Text = "Open Output";
-            openOutputButton.Location = new Point(502, 394);
+            openOutputButton.Location = new Point(522, 402);
             openOutputButton.Size = new Size(105, 30);
             openOutputButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             openOutputButton.Enabled = false;
@@ -186,15 +190,15 @@ namespace Gloader.TerrariaDecompiler
             Controls.Add(openOutputButton);
 
             viewAuditButton.Text = "View Audit";
-            viewAuditButton.Location = new Point(617, 394);
+            viewAuditButton.Location = new Point(637, 402);
             viewAuditButton.Size = new Size(110, 30);
             viewAuditButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             viewAuditButton.Enabled = false;
             viewAuditButton.Click += (_, __) => ViewAudit();
             Controls.Add(viewAuditButton);
 
-            logBox.Location = new Point(27, 444);
-            logBox.Size = new Size(700, 210);
+            logBox.Location = new Point(27, 452);
+            logBox.Size = new Size(720, 220);
             logBox.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             logBox.Multiline = true;
             logBox.ReadOnly = true;
@@ -228,10 +232,7 @@ namespace Gloader.TerrariaDecompiler
 
             var savedTerraria = ReadSetting("TerrariaExe");
             var detected = File.Exists(savedTerraria) ? savedTerraria : DetectTerrariaExe();
-            if (!string.IsNullOrWhiteSpace(detected))
-            {
-                terrariaBox.Text = detected;
-            }
+            if (!string.IsNullOrWhiteSpace(detected)) terrariaBox.Text = detected;
 
             var savedOutput = ReadSetting("OutputDir");
             if (!string.IsNullOrWhiteSpace(savedOutput))
@@ -263,7 +264,6 @@ namespace Gloader.TerrariaDecompiler
                 {
                     terrariaBox.Text = dialog.FileName;
                     WriteSetting("TerrariaExe", dialog.FileName);
-                    if (!outputManuallyChosen) SetDefaultOutputForCurrentVersion();
                 }
             }
         }
@@ -272,7 +272,7 @@ namespace Gloader.TerrariaDecompiler
         {
             using (var dialog = new FolderBrowserDialog())
             {
-                dialog.Description = "Choose where the decompiled source and audit should be written.";
+                dialog.Description = "Choose where client, server, and audit output should be written.";
                 dialog.ShowNewFolderButton = true;
                 if (Directory.Exists(outputBox.Text.Trim())) dialog.SelectedPath = outputBox.Text.Trim();
                 if (dialog.ShowDialog(this) == DialogResult.OK)
@@ -284,19 +284,29 @@ namespace Gloader.TerrariaDecompiler
             }
         }
 
+        private static string GetServerExePath(string clientExe)
+        {
+            if (string.IsNullOrWhiteSpace(clientExe)) return null;
+            var folder = Path.GetDirectoryName(clientExe);
+            return string.IsNullOrWhiteSpace(folder) ? null : Path.Combine(folder, "TerrariaServer.exe");
+        }
+
         private void RefreshTerrariaInfo()
         {
-            var exe = terrariaBox.Text.Trim();
-            if (!File.Exists(exe))
+            var clientExe = terrariaBox.Text.Trim();
+            if (!File.Exists(clientExe))
             {
-                terrariaInfo.Text = "Select Terraria.exe. The decompiler will automatically harvest managed DLLs beside it.";
+                terrariaInfo.Text = "Select Terraria.exe. TerrariaServer.exe will be picked up automatically from the same folder.";
                 return;
             }
 
             try
             {
-                var version = FileVersionInfo.GetVersionInfo(exe).FileVersion;
-                var folder = Path.GetDirectoryName(exe);
+                var clientVersion = FileVersionInfo.GetVersionInfo(clientExe).FileVersion ?? "unknown";
+                var serverExe = GetServerExePath(clientExe);
+                var serverExists = !string.IsNullOrWhiteSpace(serverExe) && File.Exists(serverExe);
+                var serverVersion = serverExists ? (FileVersionInfo.GetVersionInfo(serverExe).FileVersion ?? "unknown") : "MISSING";
+                var folder = Path.GetDirectoryName(clientExe);
                 var managed = 0;
                 var totalDlls = 0;
                 foreach (var dll in Directory.GetFiles(folder, "*.dll", SearchOption.TopDirectoryOnly))
@@ -309,11 +319,16 @@ namespace Gloader.TerrariaDecompiler
                     }
                     catch { }
                 }
-                terrariaInfo.Text = $"Detected Terraria {version ?? "unknown"}  |  {managed} managed install DLL(s)  |  {totalDlls - managed} native/non-managed DLL(s) ignored by ILSpy";
+
+                var pairState = serverExists
+                    ? (string.Equals(clientVersion, serverVersion, StringComparison.OrdinalIgnoreCase) ? "client/server match" : "CLIENT/SERVER VERSION MISMATCH")
+                    : "TerrariaServer.exe MISSING";
+
+                terrariaInfo.Text = $"Client {clientVersion}  |  Server {serverVersion}  |  {pairState}\r\n{managed} managed install DLL(s)  |  {totalDlls - managed} native/non-managed DLL(s) ignored by ILSpy";
             }
             catch (Exception ex)
             {
-                terrariaInfo.Text = "Could not inspect this Terraria executable: " + ex.Message;
+                terrariaInfo.Text = "Could not inspect this Terraria installation: " + ex.Message;
             }
         }
 
@@ -335,33 +350,49 @@ namespace Gloader.TerrariaDecompiler
 
         private async Task StartDecompileAsync()
         {
-            var terraria = terrariaBox.Text.Trim();
+            var clientExe = terrariaBox.Text.Trim();
             var output = outputBox.Text.Trim();
 
-            if (!File.Exists(terraria))
+            if (!File.Exists(clientExe))
             {
                 MessageBox.Show(this, "Pick a valid Terraria.exe first.", "Terraria Decompiler", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
+
+            var serverExe = GetServerExePath(clientExe);
+            if (string.IsNullOrWhiteSpace(serverExe) || !File.Exists(serverExe))
+            {
+                MessageBox.Show(this, "TerrariaServer.exe was not found beside Terraria.exe. Update/verify the Terraria installation so both executables are present, then try again.", "Terraria Decompiler", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            var clientVersion = FileVersionInfo.GetVersionInfo(clientExe).FileVersion ?? "unknown";
+            var serverVersion = FileVersionInfo.GetVersionInfo(serverExe).FileVersion ?? "unknown";
+            if (!string.Equals(clientVersion, serverVersion, StringComparison.OrdinalIgnoreCase))
+            {
+                MessageBox.Show(this, $"Client/server version mismatch.\r\n\r\nTerraria.exe: {clientVersion}\r\nTerrariaServer.exe: {serverVersion}\r\n\r\nUpdate/verify the Terraria installation before decompiling.", "Terraria Decompiler", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
             if (string.IsNullOrWhiteSpace(output))
             {
                 MessageBox.Show(this, "Pick an output folder first.", "Terraria Decompiler", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
-            WriteSetting("TerrariaExe", terraria);
+            WriteSetting("TerrariaExe", clientExe);
             WriteSetting("OutputDir", output);
 
             SetRunningUi(true);
             logBox.Clear();
             progress.Value = 3;
-            statusLabel.Text = "Starting decompiler...";
+            statusLabel.Text = "Starting client + server decompile...";
 
             var psi = new ProcessStartInfo
             {
                 FileName = "powershell.exe",
                 Arguments = "-NoProfile -ExecutionPolicy Bypass -File " + Quote(BundlePaths.EngineScript) +
-                            " -TerrariaInput " + Quote(terraria) +
+                            " -TerrariaInput " + Quote(clientExe) +
                             " -OutputDirectory " + Quote(output),
                 WorkingDirectory = BundlePaths.Root,
                 UseShellExecute = false,
@@ -394,8 +425,8 @@ namespace Gloader.TerrariaDecompiler
                     viewAuditButton.Enabled = File.Exists(Path.Combine(output, "audit", "audit.md"));
                     var issueCount = ReadAuditIssueCount(Path.Combine(output, "audit", "audit.json"));
                     statusLabel.Text = issueCount.HasValue
-                        ? (issueCount.Value == 0 ? "Done. Audit clean: 0 issues." : $"Done, but audit found {issueCount.Value} tracked issue(s).")
-                        : "Done. Open the audit for details.";
+                        ? (issueCount.Value == 0 ? "Done. Client + server audit clean: 0 issues." : $"Done, but combined audit found {issueCount.Value} tracked issue(s).")
+                        : "Done. Open the combined audit for details.";
                 }
                 else
                 {
@@ -440,33 +471,43 @@ namespace Gloader.TerrariaDecompiler
         {
             if (line.IndexOf("Harvested ", StringComparison.OrdinalIgnoreCase) >= 0)
             {
-                progress.Value = Math.Max(progress.Value, 18);
+                progress.Value = Math.Max(progress.Value, 12);
                 statusLabel.Text = "Scanning Terraria install references...";
             }
-            else if (line.IndexOf("Pass 1/2", StringComparison.OrdinalIgnoreCase) >= 0)
+            else if (line.IndexOf("CLIENT pass 1/2", StringComparison.OrdinalIgnoreCase) >= 0)
             {
-                progress.Value = Math.Max(progress.Value, 30);
-                statusLabel.Text = "Recovering embedded Terraria DLLs...";
+                progress.Value = Math.Max(progress.Value, 20);
+                statusLabel.Text = "Client: recovering embedded DLLs...";
             }
-            else if (line.IndexOf("Recovered ", StringComparison.OrdinalIgnoreCase) >= 0)
+            else if (line.IndexOf("CLIENT pass 2/2", StringComparison.OrdinalIgnoreCase) >= 0)
             {
-                progress.Value = Math.Max(progress.Value, 52);
-                statusLabel.Text = "Embedded references recovered.";
+                progress.Value = Math.Max(progress.Value, 34);
+                statusLabel.Text = "Client: decompiling clean C#...";
             }
-            else if (line.IndexOf("Pass 2/2", StringComparison.OrdinalIgnoreCase) >= 0)
+            else if (line.IndexOf("CLIENT clean source ZIP:", StringComparison.OrdinalIgnoreCase) >= 0)
             {
-                progress.Value = Math.Max(progress.Value, 62);
-                statusLabel.Text = "Decompiling clean C# source...";
+                progress.Value = Math.Max(progress.Value, 48);
+                statusLabel.Text = "Client decompile complete.";
             }
-            else if (line.IndexOf("Clean source ZIP:", StringComparison.OrdinalIgnoreCase) >= 0)
+            else if (line.IndexOf("SERVER pass 1/2", StringComparison.OrdinalIgnoreCase) >= 0)
             {
-                progress.Value = Math.Max(progress.Value, 90);
-                statusLabel.Text = "Packaging clean source...";
+                progress.Value = Math.Max(progress.Value, 56);
+                statusLabel.Text = "Server: recovering embedded DLLs...";
             }
-            else if (line.IndexOf("Audit report:", StringComparison.OrdinalIgnoreCase) >= 0)
+            else if (line.IndexOf("SERVER pass 2/2", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                progress.Value = Math.Max(progress.Value, 72);
+                statusLabel.Text = "Server: decompiling clean C#...";
+            }
+            else if (line.IndexOf("SERVER clean source ZIP:", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                progress.Value = Math.Max(progress.Value, 88);
+                statusLabel.Text = "Server decompile complete.";
+            }
+            else if (line.IndexOf("Combined audit report:", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 progress.Value = Math.Max(progress.Value, 96);
-                statusLabel.Text = "Finishing audit...";
+                statusLabel.Text = "Finishing combined audit...";
             }
         }
 
@@ -519,7 +560,7 @@ namespace Gloader.TerrariaDecompiler
             detailsVisible = !detailsVisible;
             logBox.Visible = detailsVisible;
             detailsButton.Text = detailsVisible ? "Hide Details" : "Show Details";
-            ClientSize = new Size(ClientSize.Width, detailsVisible ? 690 : 470);
+            ClientSize = new Size(ClientSize.Width, detailsVisible ? 710 : 490);
         }
 
         private void OpenOutput()
@@ -549,6 +590,9 @@ namespace Gloader.TerrariaDecompiler
             try
             {
                 var json = File.ReadAllText(auditJson);
+                var totalMatch = Regex.Match(json, "\\\"total_tracked_issues\\\"\\s*:\\s*(\\d+)", RegexOptions.IgnoreCase);
+                if (totalMatch.Success) return int.Parse(totalMatch.Groups[1].Value);
+
                 var keys = new[]
                 {
                     "unknown_result_type", "encoded_constructor", "ref_cast_artifact", "failed_decompile",
