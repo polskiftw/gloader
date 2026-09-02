@@ -187,27 +187,30 @@ function Invoke-Ilspy {
     }
 }
 
-$managedInstallRefs = New-Object System.Collections.Generic.List[object]
-$nativeInstallDlls = New-Object System.Collections.Generic.List[object]
+# These collections stay as ordinary PowerShell arrays because the packaged engine
+# runs under Windows PowerShell 5.1. That avoids its generic-List binder edge cases
+# when arrays are later embedded into PSCustomObjects / JSON.
+$managedInstallRefs = @()
+$nativeInstallDlls = @()
 $installDllFiles = @(Get-ChildItem -LiteralPath $terrariaRoot -File -Filter '*.dll' | Sort-Object Name)
 foreach ($dllFile in $installDllFiles) {
     try {
         $assembly = [System.Reflection.AssemblyName]::GetAssemblyName($dllFile.FullName)
         $referenceFileName = $assembly.Name + '.dll'
         Copy-Item $dllFile.FullName (Join-Path $refsBase $referenceFileName) -Force
-        $managedInstallRefs.Add([pscustomobject]@{
+        $managedInstallRefs += [pscustomobject]@{
             file = $dllFile.Name
             assembly = $assembly.Name
             version = $assembly.Version.ToString()
             target = $referenceFileName
             sha256 = (Get-FileHash -LiteralPath $dllFile.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-        })
+        }
     }
     catch {
-        $nativeInstallDlls.Add([pscustomobject]@{
+        $nativeInstallDlls += [pscustomobject]@{
             file = $dllFile.Name
             bytes = $dllFile.Length
-        })
+        }
     }
 }
 Write-Host "Harvested $($managedInstallRefs.Count) managed sibling reference assembly/assemblies from the Terraria install."
@@ -267,7 +270,7 @@ function Invoke-TargetDecompile {
         $ExecutablePath
     )
 
-    $embeddedRefs = New-Object System.Collections.Generic.List[object]
+    $embeddedRefs = @()
     $embeddedDllFiles = @(Get-ChildItem -Path $bootstrap -Recurse -File -Filter '*.dll')
     foreach ($embeddedDll in $embeddedDllFiles) {
         try {
@@ -277,12 +280,12 @@ function Invoke-TargetDecompile {
                 # so that would overwrite the $TargetName function parameter.
                 $referenceFileName = $assembly.Name + '.dll'
                 Copy-Item $embeddedDll.FullName (Join-Path $refs $referenceFileName) -Force
-                $embeddedRefs.Add([pscustomobject]@{
+                $embeddedRefs += [pscustomobject]@{
                     file = $embeddedDll.Name
                     assembly = $assembly.Name
                     version = $assembly.Version.ToString()
                     target = $referenceFileName
-                })
+                }
             }
         }
         catch {
@@ -316,16 +319,16 @@ function Invoke-TargetDecompile {
         audit_directory = $targetAudit
         audit = $auditResult
         issue_count = Get-AuditIssueTotal $auditResult
-        embedded_managed_references = @($embeddedRefs)
+        embedded_managed_references = $embeddedRefs
     }
 }
 
-$results = New-Object System.Collections.Generic.List[object]
+$results = @()
 if ($clientRequired) {
-    $results.Add((Invoke-TargetDecompile -TargetName 'client' -ExecutablePath $clientExePath -Version $clientVersion -TargetOutputRoot $clientRoot))
+    $results += Invoke-TargetDecompile -TargetName 'client' -ExecutablePath $clientExePath -Version $clientVersion -TargetOutputRoot $clientRoot
 }
 if ($serverRequired) {
-    $results.Add((Invoke-TargetDecompile -TargetName 'server' -ExecutablePath $serverExePath -Version $serverVersion -TargetOutputRoot $serverRoot))
+    $results += Invoke-TargetDecompile -TargetName 'server' -ExecutablePath $serverExePath -Version $serverVersion -TargetOutputRoot $serverRoot
 }
 
 $countKeys = @(
@@ -431,7 +434,7 @@ foreach ($entry in $results) {
     $targetReferenceReports[$entry.name] = [pscustomobject]@{
         executable = $entry.executable
         version = $entry.version
-        embedded_managed_references = @($entry.embedded_managed_references)
+        embedded_managed_references = $entry.embedded_managed_references
     }
 }
 
@@ -439,8 +442,8 @@ $referenceReport = [pscustomobject]@{
     terraria_root = $terrariaRoot
     client_version = $clientVersion
     server_version = $serverVersion
-    managed_install_references = @($managedInstallRefs)
-    ignored_native_install_dlls = @($nativeInstallDlls)
+    managed_install_references = $managedInstallRefs
+    ignored_native_install_dlls = $nativeInstallDlls
     content_pipeline_from_install = (@($managedInstallRefs | Where-Object { $_.assembly -eq 'Microsoft.Xna.Framework.Content.Pipeline' }).Count -gt 0)
     targets = [pscustomobject]$targetReferenceReports
 }
