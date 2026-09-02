@@ -174,17 +174,72 @@ jobs:
           "RELEASE_VERSION=$version" >> $env:GITHUB_ENV
           Compress-Archive -Path "dist/gloader/*" -DestinationPath "gloader-$version.zip" -Force
 
+      - name: Build optional Terraria decompiler release asset
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release ')
+        shell: pwsh
+        run: |
+          ./tools/terraria-decompiler/offline/Build-OfflineBundle.ps1 `
+            -OutputDirectory "$env:GITHUB_WORKSPACE\release-tools"
+
       - name: Publish GitHub release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release ')
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v$env:RELEASE_VERSION" "gloader-$env:RELEASE_VERSION.zip" `
-            --repo "${{ github.repository }}" `
+          $repo = "${{ github.repository }}"
+          $tag = "v$env:RELEASE_VERSION"
+
+          gh release view $tag --repo $repo *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release delete $tag --repo $repo --yes --cleanup-tag
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not replace existing release '$tag'."
+            }
+          }
+          $global:LASTEXITCODE = 0
+
+          $notes = @"
+          ## Downloads
+
+          - **gloader-$env:RELEASE_VERSION.zip** — gloader itself. Extract it into the Terraria install folder.
+          - **TerrariaDecompilerOffline-win-x64.zip** — optional standalone GUI reference decompiler. It is not required to use gloader.
+
+          The decompiler is self-contained for Windows x64 and performs no dependency downloads while you use it. It harvests managed reference DLLs from your own Terraria install and does not include Terraria or decompiled Terraria source.
+          "@
+
+          if ($env:RELEASE_VERSION -eq '0.1.20-alpha') {
+            $notes += @"
+
+          ## v0.1.20-alpha highlights
+
+          - Native launcher GUI built directly into `gloader.exe`, including mod enable/disable, Configure, logs, console, vanilla launch, and normal Terraria launch controls.
+          - New included mods/tools added since v0.1.19-alpha, including Difficulty Cycler, Hardcore Save Protection, and World Capture.
+          - Terraria reference/decompiler tooling added for maintaining version-sensitive mods without shipping Terraria binaries or source.
+          "@
+          }
+
+          gh release create $tag `
+            "gloader-$env:RELEASE_VERSION.zip" `
+            "release-tools/TerrariaDecompilerOffline-win-x64.zip" `
+            --repo $repo `
             --target "${{ github.sha }}" `
             --title "gloader v$env:RELEASE_VERSION" `
-            --notes "Adds a small Infinite Angler debug function."
+            --notes $notes `
+            --generate-notes `
+            --latest
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not publish gloader release '$tag'."
+          }
+
+          gh release view 'terraria-decompiler-offline' --repo $repo *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release delete 'terraria-decompiler-offline' --repo $repo --yes --cleanup-tag
+            if ($LASTEXITCODE -ne 0) {
+              throw "Published '$tag', but could not remove the legacy standalone Terraria decompiler release."
+            }
+          }
+          $global:LASTEXITCODE = 0
 
       - name: Upload
         uses: actions/upload-artifact@v4
