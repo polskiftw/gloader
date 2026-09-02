@@ -8,6 +8,10 @@ on:
       - 'tools/terraria-decompiler/offline/**'
       - '.github/workflows/terraria-decompiler-offline.yml'
 
+concurrency:
+  group: terraria-decompiler-offline-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
@@ -66,6 +70,8 @@ jobs:
           Bundled: TerrariaDecompiler.exe WinForms GUI, ILSpyCmd, private .NET runtime, .NET Framework 4.0 reference assemblies, and redistributable XNA Framework runtime references.
 
           Game-specific managed references are harvested at runtime from the user's own Terraria install directory. Current Terraria ships the genuine Microsoft.Xna.Framework.Content.Pipeline.dll there, so this bundle contains no Content Pipeline shim and does not redistribute that developer DLL.
+
+          Output cleanup is ownership-guarded: the tool never deletes the selected output directory and refuses to remove colliding source/audit/work content unless that directory was previously marked as Terraria Decompiler output.
 
           Built from gloader commit $env:GITHUB_SHA.
           "@
