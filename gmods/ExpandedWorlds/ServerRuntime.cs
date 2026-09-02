@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 using HarmonyLib;
 using Terraria;
+using Terraria.IO;
 
 /// <summary>
 /// Dedicated-server entry point for Expanded Worlds.
@@ -158,6 +159,33 @@ internal static class ExpandedWorldServerState
             "[Expanded Worlds] " + stage + ": using " + LabelFor(Requested) +
             " " + width + "x" + VanillaLargeHeight + " (vanilla tier " + vanillaTier + ").");
     }
+
+    internal static void VerifyLoadedDimensions(string stage)
+    {
+        if (Requested == ExpandedWorldServerPreset.None)
+            return;
+
+        int expectedWidth = WidthFor(Requested);
+        if (Main.maxTilesX != expectedWidth || Main.maxTilesY != VanillaLargeHeight)
+        {
+            throw new InvalidOperationException(
+                "[Expanded Worlds] " + stage + " dimension verification failed. Expected " +
+                expectedWidth + "x" + VanillaLargeHeight + ", got " +
+                Main.maxTilesX + "x" + Main.maxTilesY + ".");
+        }
+
+        int vanillaTier = WorldGen.GetWorldSize();
+        if (vanillaTier != 2)
+        {
+            throw new InvalidOperationException(
+                "[Expanded Worlds] " + stage + " loaded world is no longer categorically Large; GetWorldSize()=" +
+                vanillaTier + ".");
+        }
+
+        Console.WriteLine(
+            "[Expanded Worlds] " + stage + " verified " + LabelFor(Requested) + " " +
+            Main.maxTilesX + "x" + Main.maxTilesY + " (vanilla tier " + vanillaTier + ").");
+    }
 }
 
 /// <summary>
@@ -248,6 +276,30 @@ internal static class ExpandedWorldServerGenerateEndPatch
         }
 
         return __exception;
+    }
+}
+
+/// <summary>
+/// Validate the dimensions that Terraria itself reports after its world-load path
+/// completes. This covers both the just-generated autocreate path and a later
+/// process that reloads the saved .wld from disk.
+/// </summary>
+[HarmonyPatch]
+internal static class ExpandedWorldServerLoadVerificationPatch
+{
+    private static MethodBase TargetMethod()
+    {
+        MethodBase method = AccessTools.Method(typeof(WorldFile), "LoadWorld", new[] { typeof(bool) });
+        if (method == null)
+            throw new MissingMethodException(typeof(WorldFile).FullName, "LoadWorld(bool)");
+
+        return method;
+    }
+
+    [HarmonyPostfix]
+    private static void Postfix()
+    {
+        ExpandedWorldServerState.VerifyLoadedDimensions("LoadWorld");
     }
 }
 #endif
