@@ -101,13 +101,17 @@ $md.Add('## Decompiler artifact counts')
 $md.Add('')
 $md.Add('| Artifact | Count |')
 $md.Add('|---|---:|')
-foreach ($key in $counts.Keys) { $md.Add("| `$key` | $($counts[$key]) |") }
+foreach ($key in $counts.Keys) {
+    $md.Add('| `' + $key + '` | ' + $counts[$key] + ' |')
+}
 $md.Add('')
 $md.Add('## Older-guide signatures')
 $md.Add('')
 $md.Add('| Signature | Count |')
 $md.Add('|---|---:|')
-foreach ($key in $legacyCounts.Keys) { $md.Add("| `$key` | $($legacyCounts[$key]) |") }
+foreach ($key in $legacyCounts.Keys) {
+    $md.Add('| `' + $key + '` | ' + $legacyCounts[$key] + ' |')
+}
 $md.Add('')
 $md.Add('## Files with remaining diagnostics')
 $md.Add('')
@@ -116,7 +120,7 @@ if (@($byFile).Count -eq 0) {
 }
 else {
     foreach ($entry in ($byFile | Select-Object -First 50)) {
-        $md.Add("- `$($entry.file)` — $($entry.hits) hit(s): $($entry.kinds -join ', ')")
+        $md.Add('- `' + $entry.file + '` — ' + $entry.hits + ' hit(s): ' + ($entry.kinds -join ', '))
     }
 }
 $md | Set-Content -Path (Join-Path $OutputDirectory 'audit.md') -Encoding UTF8
