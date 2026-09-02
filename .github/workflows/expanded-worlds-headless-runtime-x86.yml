@@ -213,7 +213,7 @@ jobs:
             ) + $gameArgs
 
             $argumentString = $arguments -join ' '
-            Write-Host "Starting $phase: $env:GLOADER_EXE $argumentString"
+            Write-Host "Starting ${phase}: $env:GLOADER_EXE $argumentString"
 
             $process = Start-Process `
               -FilePath $env:GLOADER_EXE `
