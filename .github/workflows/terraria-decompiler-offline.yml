@@ -43,45 +43,34 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Publish rolling offline release
+      - name: Attach bundle to matching gloader release
+        if: github.ref == 'refs/heads/main'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = 'terraria-decompiler-offline'
+          [xml]$project = Get-Content "src/GLoader/GLoader.csproj"
+          $version = [string]($project.Project.PropertyGroup.Version | Select-Object -First 1)
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            throw "Could not read Version from src/GLoader/GLoader.csproj"
+          }
+
+          $tag = "v$version"
           $repo = $env:GITHUB_REPOSITORY
 
           gh release view $tag --repo $repo *> $null
-          if ($LASTEXITCODE -eq 0) {
-            gh release delete $tag --repo $repo --yes --cleanup-tag
-            if ($LASTEXITCODE -ne 0) {
-              throw "Could not replace existing rolling release '$tag'."
-            }
+          if ($LASTEXITCODE -ne 0) {
+            $global:LASTEXITCODE = 0
+            Write-Host "No matching gloader release '$tag' exists yet. Keeping the bundle as an Actions artifact only."
+            exit 0
           }
-          $global:LASTEXITCODE = 0
 
-          $notes = @"
-          GUI-based offline Windows x64 Terraria decompiler.
-
-          Extract the ZIP and double-click TerrariaDecompiler.exe.
-          The GUI auto-detects Terraria when possible, lets you browse to Terraria.exe and choose the output folder, shows progress and audit status, and provides Open Output / View Audit buttons.
-
-          Runtime dependency downloads: none.
-          Bundled: TerrariaDecompiler.exe WinForms GUI, ILSpyCmd, private .NET runtime, .NET Framework 4.0 reference assemblies, and redistributable XNA Framework runtime references.
-
-          Game-specific managed references are harvested at runtime from the user's own Terraria install directory. Current Terraria ships the genuine Microsoft.Xna.Framework.Content.Pipeline.dll there, so this bundle contains no Content Pipeline shim and does not redistribute that developer DLL.
-
-          Output cleanup is ownership-guarded: the tool never deletes the selected output directory and refuses to remove colliding source/audit/work content unless that directory was previously marked as Terraria Decompiler output.
-
-          Built from gloader commit $env:GITHUB_SHA.
-          "@
-
-          gh release create $tag `
+          gh release upload $tag `
             artifacts/TerrariaDecompilerOffline-win-x64.zip `
             --repo $repo `
-            --target $env:GITHUB_SHA `
-            --title 'Terraria Decompiler Offline' `
-            --notes $notes
+            --clobber
           if ($LASTEXITCODE -ne 0) {
-            throw "Could not publish rolling release '$tag'."
+            throw "Could not attach Terraria decompiler bundle to gloader release '$tag'."
           }
+
+          Write-Host "Updated optional Terraria decompiler asset on gloader release '$tag'."
