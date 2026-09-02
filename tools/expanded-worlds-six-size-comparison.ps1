@@ -34,7 +34,7 @@ $serverDir = Split-Path -Parent $server
 Write-Host "TerrariaServer SHA256: $((Get-FileHash $server -Algorithm SHA256).Hash)"
 
 # Build the actual x86 loader and enable Large Address Aware, matching the successful
-# 16,800 x 4,800 proof run.
+# 16,800 x 4,800 proof run and the normal release-package build policy.
 dotnet build src/GLoader/GLoader.csproj -c Release -p:PlatformTarget=x86 -p:Prefer32Bit=true
 $gloader = Join-Path $repo 'src/GLoader/bin/Release/net48/gloader.exe'
 if (-not (Test-Path $gloader)) { throw "gloader.exe missing: $gloader" }
@@ -50,33 +50,12 @@ $verifyPe = [BitConverter]::ToInt32($verify, 0x3c)
 $verifyCharacteristics = [BitConverter]::ToUInt16($verify, $verifyPe + 22)
 if (($verifyCharacteristics -band 0x20) -eq 0) { throw 'Failed to enable Large Address Aware on gloader.exe.' }
 
-# Normal Expanded Worlds staging for XL/Huge.
-$normalMods = Join-Path $env:RUNNER_TEMP 'ew-comparison-normal-gmods'
-New-Item -ItemType Directory -Force $normalMods | Out-Null
-Copy-Item (Join-Path $repo 'gmods/ExpandedWorlds') (Join-Path $normalMods 'ExpandedWorlds') -Recurse -Force
-
-# Isolated THICC staging. This preserves normal Huge at 16,800 x 2,400 while using
-# the already-proven 16,800 x 4,800 runtime configuration for the sixth comparison world.
-$thiccMods = Join-Path $env:RUNNER_TEMP 'ew-comparison-thicc-gmods'
-$thiccMod = Join-Path $thiccMods 'ExpandedWorlds'
-New-Item -ItemType Directory -Force $thiccMods | Out-Null
-Copy-Item (Join-Path $repo 'gmods/ExpandedWorlds') $thiccMod -Recurse -Force
-
-function Replace-Once([string]$path, [string]$old, [string]$new) {
-    $text = Get-Content -Raw $path
-    $count = ([regex]::Matches($text, [regex]::Escape($old))).Count
-    if ($count -ne 1) { throw "Expected one '$old' in $path; found $count." }
-    Set-Content $path ($text.Replace($old, $new)) -Encoding UTF8
-}
-
-Replace-Once (Join-Path $thiccMod 'GenerationMath.cs') 'public const int HugeHeight = 2400;' 'public const int HugeHeight = 4800;'
-Replace-Once (Join-Path $thiccMod 'ServerRuntime.cs') 'internal const int VanillaLargeHeight = 2400;' 'internal const int VanillaLargeHeight = 4800;'
-$storage = Join-Path $thiccMod 'WorldStorage.cs'
-$storageText = Get-Content -Raw $storage
-$guardPattern = 'return\s+height\s*==\s*ExpandedWorldMath\.LargeHeight\s*&&\s*\(width\s*==\s*ExpandedWorldMath\.XLWidth\s*\|\|\s*width\s*==\s*ExpandedWorldMath\.HugeWidth\s*\);'
-if ([regex]::Matches($storageText, $guardPattern).Count -ne 1) { throw 'WorldStorage dimension guard shape changed.' }
-$guardReplacement = 'return (width == ExpandedWorldMath.XLWidth && height == ExpandedWorldMath.XLHeight) ||' + [Environment]::NewLine + '               (width == ExpandedWorldMath.HugeWidth && height == ExpandedWorldMath.HugeHeight);'
-Set-Content $storage ([regex]::Replace($storageText, $guardPattern, $guardReplacement, 1)) -Encoding UTF8
+# One normal source staging for every permanent Expanded Worlds preset. THICC is
+# no longer synthesized by rewriting Huge in a temporary copy; this tool now
+# exercises GLOADER_EXPANDED_WORLD=THICC directly.
+$expandedMods = Join-Path $env:RUNNER_TEMP 'ew-comparison-gmods'
+New-Item -ItemType Directory -Force $expandedMods | Out-Null
+Copy-Item (Join-Path $repo 'gmods/ExpandedWorlds') (Join-Path $expandedMods 'ExpandedWorlds') -Recurse -Force
 
 $worldRoot = Join-Path $env:RUNNER_TEMP 'ew-comparison-worlds'
 New-Item -ItemType Directory -Force $worldRoot | Out-Null
@@ -177,9 +156,9 @@ function Generate-World(
 Generate-World 'Small' 1 4200 1200 7841 '' ''
 Generate-World 'Medium' 2 6400 1800 7842 '' ''
 Generate-World 'Large' 3 8400 2400 7843 '' ''
-Generate-World 'XL' 3 12600 2400 7844 'XL' $normalMods
-Generate-World 'Huge' 3 16800 2400 7845 'HUGE' $normalMods
-Generate-World 'THICC' 3 16800 4800 7846 'HUGE' $thiccMods
+Generate-World 'XL' 3 12600 2400 7844 'XL' $expandedMods
+Generate-World 'Huge' 3 16800 2400 7845 'HUGE' $expandedMods
+Generate-World 'THICC' 3 16800 4800 7846 'THICC' $expandedMods
 
 # Build a tiny headless front-end against a pinned TEdit source revision. The actual
 # world loading and minimap rendering are TEdit's World.LoadWorld and RenderMiniMap.
@@ -346,6 +325,7 @@ $bitmap.Dispose()
 Remove-Item (Join-Path $out '*.wld') -Force
 
 Add-Summary '- World generation: **PASS — six real .wld files from one seed**'
+Add-Summary '- THICC path: **PASS — permanent GLOADER_EXPANDED_WORLD=THICC preset (no source rewrite)**'
 Add-Summary '- Renderer: **PASS — pinned TEdit World.LoadWorld + RenderMiniMap for all six worlds**'
 Add-Summary '- Scale: **1 output pixel = 8 Terraria tiles for every panel**'
 Add-Summary '- Final comparison: **ExpandedWorlds-SameSeed-AllSizes-TEdit.png**'
