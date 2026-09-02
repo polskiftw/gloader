@@ -1,6 +1,6 @@
 using System;
 
-#if GLOADER_CLIENT
+#if GLOADER
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -37,7 +37,7 @@ internal static class ExpandedWorldFeatureGeometryMath
     }
 }
 
-#if GLOADER_CLIENT
+#if GLOADER
 internal static class ExpandedWorldFeatureGeometryPatchUtil
 {
     internal static readonly FieldInfo MaxTilesXField =
@@ -187,8 +187,11 @@ internal static class ExpandedWorldShroomPatchGeometryPatch
 /// PlantAlch uses 15 * (maxTilesX/4200) as both the X and Y radius of its nearby
 /// herb scan. Generation attempts remain width-derived, but one exclusion body's
 /// two-dimensional radius must not double vertically just because Huge is wider.
-/// This patch also applies to post-generation herb growth in expanded worlds;
-/// vanilla dimensions still reproduce the exact original scalar.
+///
+/// PlantAlch is also called by the live WorldGen.UpdateWorld loop. In multiplayer
+/// that loop is server-authoritative, so this patch intentionally compiles for
+/// both GLOADER_CLIENT and GLOADER_SERVER. Vanilla dimensions still reproduce
+/// the exact original scalar.
 /// </summary>
 [HarmonyPatch]
 internal static class ExpandedWorldAlchemyHerbSpacingPatch
