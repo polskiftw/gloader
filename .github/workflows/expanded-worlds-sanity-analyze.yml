@@ -1,0 +1,370 @@
+name: Expanded Worlds TEdit sanity analysis
+
+on:
+  push:
+    branches:
+      - feat/expanded-world-sizes
+    paths:
+      - .github/workflows/expanded-worlds-sanity-analyze.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  analyze:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Wait for source worlds
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run watch 33661396533 --repo $env:GITHUB_REPOSITORY --exit-status
+
+      - name: Download Large XL Huge worlds
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 33661396533
+          pattern: expanded-worlds-sanity-*
+          path: inputs
+
+      - name: Clone current TEdit parser
+        shell: pwsh
+        run: |
+          git clone --depth 1 https://github.com/TEdit/Terraria-Map-Editor.git "$env:RUNNER_TEMP/tedit"
+          git -C "$env:RUNNER_TEMP/tedit" fetch --depth 1 origin cbf7b3876e408cf45240b5d792e0d8e57ba78e3f
+          git -C "$env:RUNNER_TEMP/tedit" checkout cbf7b3876e408cf45240b5d792e0d8e57ba78e3f
+
+      - name: Build and run tile-grid analyzer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $env:RUNNER_TEMP 'ew-analyzer'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          $teditProj = (Join-Path $env:RUNNER_TEMP 'tedit/src/TEdit.Terraria/TEdit.Terraria.csproj').Replace('\','/')
+
+          @"
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <OutputType>Exe</OutputType>
+              <TargetFramework>net10.0</TargetFramework>
+              <ImplicitUsings>enable</ImplicitUsings>
+              <Nullable>enable</Nullable>
+            </PropertyGroup>
+            <ItemGroup>
+              <ProjectReference Include="$teditProj" />
+            </ItemGroup>
+          </Project>
+          "@ | Set-Content -Encoding UTF8 (Join-Path $dir 'Analyzer.csproj')
+
+          @'
+          using System.Security.Cryptography;
+          using System.Text;
+          using System.Text.Json;
+          using TEdit.Terraria;
+
+          static class Program
+          {
+              record Rgb(byte R, byte G, byte B);
+
+              static readonly Dictionary<string, HashSet<ushort>> Biomes = new()
+              {
+                  ["desert"] = new ushort[] { 53, 112, 116, 234, 396, 397, 398, 399, 400, 401, 402, 403 }.ToHashSet(),
+                  ["snow"] = new ushort[] { 147, 161, 162, 163, 164, 200 }.ToHashSet(),
+                  ["jungle"] = new ushort[] { 59, 60, 61, 62, 74, 225 }.ToHashSet(),
+                  ["evil"] = new ushort[] { 23, 25, 32, 112, 163, 199, 200, 203, 234, 352, 398, 400 }.ToHashSet(),
+                  ["dungeon"] = new ushort[] { 41, 43, 44, 481, 482, 483 }.ToHashSet(),
+                  ["temple"] = new ushort[] { 226, 237 }.ToHashSet(),
+                  ["underworld"] = new ushort[] { 57, 58, 75, 76 }.ToHashSet()
+              };
+
+              static int Main(string[] args)
+              {
+                  if (args.Length != 2) throw new ArgumentException("input-dir output-dir");
+                  Directory.CreateDirectory(args[1]);
+                  var files = Directory.GetFiles(args[0], "*.wld", SearchOption.AllDirectories).OrderBy(x => x).ToArray();
+                  if (files.Length != 3) throw new InvalidOperationException($"Expected 3 .wld files, found {files.Length}");
+                  foreach (var file in files) Analyze(file, args[1]);
+                  return 0;
+              }
+
+              static void Analyze(string file, string outRoot)
+              {
+                  Console.WriteLine($"Loading {file}");
+                  var (world, error) = World.LoadWorld(file);
+                  if (error != null) throw new Exception($"TEdit failed to load {file}", error);
+                  if (world == null) throw new InvalidOperationException("TEdit returned null world");
+
+                  int w = world.TilesWide, h = world.TilesHigh;
+                  string key = w switch { 8400 => "Large", 12600 => "XL", 16800 => "Huge", _ => $"W{w}" };
+                  string outDir = Path.Combine(outRoot, key);
+                  Directory.CreateDirectory(outDir);
+
+                  long total = (long)w * h, active = 0, walls = 0, liquids = 0, empty = 0;
+                  var typeCounts = new Dictionary<ushort, long>();
+                  var biomeCounts = Biomes.Keys.ToDictionary(k => k, _ => 0L);
+                  var biomeMinX = Biomes.Keys.ToDictionary(k => k, _ => int.MaxValue);
+                  var biomeMaxX = Biomes.Keys.ToDictionary(k => k, _ => -1);
+                  var colActive = new int[w];
+                  var colWalls = new int[w];
+                  var colLiquids = new int[w];
+                  var surface = Enumerable.Repeat(-1, w).ToArray();
+                  var colTypeKinds = new int[w];
+
+                  const int factor = 8;
+                  int mapW = (w + factor - 1) / factor, mapH = (h + factor - 1) / factor;
+                  var sumR = new long[mapW * mapH];
+                  var sumG = new long[mapW * mapH];
+                  var sumB = new long[mapW * mapH];
+                  var sumN = new int[mapW * mapH];
+
+                  int surfaceSearchEnd = Math.Min(h - 1, (int)Math.Ceiling(world.GroundLevel + 220));
+
+                  for (int x = 0; x < w; x++)
+                  {
+                      var kinds = new HashSet<ushort>();
+                      for (int y = 0; y < h; y++)
+                      {
+                          var t = world.Tiles[x, y];
+                          if (t.IsActive)
+                          {
+                              active++; colActive[x]++; kinds.Add(t.Type);
+                              typeCounts.TryGetValue(t.Type, out long c); typeCounts[t.Type] = c + 1;
+                              foreach (var kv in Biomes)
+                              {
+                                  if (kv.Value.Contains(t.Type))
+                                  {
+                                      biomeCounts[kv.Key]++;
+                                      if (x < biomeMinX[kv.Key]) biomeMinX[kv.Key] = x;
+                                      if (x > biomeMaxX[kv.Key]) biomeMaxX[kv.Key] = x;
+                                  }
+                              }
+                          }
+                          if (t.Wall != 0) { walls++; colWalls[x]++; }
+                          if (t.HasLiquid) { liquids++; colLiquids[x]++; }
+                          if (t.IsEmpty) empty++;
+
+                          int pi = (y / factor) * mapW + (x / factor);
+                          var rgb = ColorFor(t, y, world.GroundLevel, world.RockLevel, h);
+                          sumR[pi] += rgb.R; sumG[pi] += rgb.G; sumB[pi] += rgb.B; sumN[pi]++;
+                      }
+                      colTypeKinds[x] = kinds.Count;
+
+                      for (int y = 80; y <= surfaceSearchEnd; y++)
+                      {
+                          if (!world.Tiles[x, y].IsActive) continue;
+                          int run = 0;
+                          int end = Math.Min(h - 1, y + 11);
+                          for (int yy = y; yy <= end; yy++) if (world.Tiles[x, yy].IsActive) run++;
+                          if (run >= 5) { surface[x] = y; break; }
+                      }
+                  }
+
+                  WritePpm(Path.Combine(outDir, $"{key}-map.ppm"), mapW, mapH, sumR, sumG, sumB, sumN);
+                  WriteProfile(Path.Combine(outDir, $"{key}-profile.csv"), colActive, colWalls, colLiquids, surface, colTypeKinds, h);
+
+                  var chunks = ChunkStats(colActive, colWalls, colLiquids, surface, h, 4200);
+                  var seams = new[] { 4200, 8400, 12600 }.Where(v => v < w).Select(v => Seam(v, colActive, surface, h)).ToArray();
+                  var stripHashes = StripHashes(world, 200, 8);
+                  var duplicates = stripHashes.GroupBy(x => x.Hash).Where(g => g.Count() > 1)
+                      .Select(g => new { hash = g.Key, starts = g.Select(x => x.Start).ToArray() }).ToArray();
+                  int blankColumns = Enumerable.Range(0, w).Count(x => colActive[x] == 0 && colWalls[x] == 0 && colLiquids[x] == 0);
+
+                  var biomeSummary = Biomes.Keys.ToDictionary(k => k, k => new
+                  {
+                      tiles = biomeCounts[k],
+                      minX = biomeMinX[k] == int.MaxValue ? -1 : biomeMinX[k],
+                      maxX = biomeMaxX[k],
+                      spanFraction = biomeMaxX[k] < 0 ? 0 : (biomeMaxX[k] - biomeMinX[k] + 1) / (double)w
+                  });
+
+                  var topTypes = typeCounts.OrderByDescending(kv => kv.Value).Take(25)
+                      .Select(kv => new { type = kv.Key, count = kv.Value, fractionActive = kv.Value / (double)Math.Max(1L, active) }).ToArray();
+
+                  var summary = new
+                  {
+                      key,
+                      file = Path.GetFileName(file),
+                      world.Title,
+                      world.Version,
+                      width = w,
+                      height = h,
+                      world.GroundLevel,
+                      world.RockLevel,
+                      world.SpawnX,
+                      world.SpawnY,
+                      world.DungeonX,
+                      world.DungeonY,
+                      chests = world.Chests.Count,
+                      signs = world.Signs.Count,
+                      totalTiles = total,
+                      activeTiles = active,
+                      activeFraction = active / (double)total,
+                      wallTiles = walls,
+                      wallFraction = walls / (double)total,
+                      liquidTiles = liquids,
+                      liquidFraction = liquids / (double)total,
+                      emptyTiles = empty,
+                      emptyFraction = empty / (double)total,
+                      blankColumns,
+                      distinctActiveTypes = typeCounts.Count,
+                      surfaceFoundFraction = surface.Count(y => y >= 0) / (double)w,
+                      surfaceMean = surface.Where(y => y >= 0).DefaultIfEmpty(0).Average(),
+                      surfaceStdDev = StdDev(surface.Where(y => y >= 0).Select(y => (double)y)),
+                      chunks,
+                      seams,
+                      duplicate200TileStripHashes = duplicates,
+                      biomes = biomeSummary,
+                      topTypes
+                  };
+
+                  File.WriteAllText(Path.Combine(outDir, $"{key}-summary.json"), JsonSerializer.Serialize(summary, new JsonSerializerOptions { WriteIndented = true }));
+                  Console.WriteLine($"{key}: {w}x{h}; active={active/(double)total:P2}; walls={walls/(double)total:P2}; liquid={liquids/(double)total:P2}; blank columns={blankColumns}; duplicate strips={duplicates.Length}");
+              }
+
+              static object ChunkStats(int[] a, int[] wall, int[] liquid, int[] surface, int h, int size)
+              {
+                  var list = new List<object>();
+                  for (int start = 0; start < a.Length; start += size)
+                  {
+                      int end = Math.Min(a.Length, start + size);
+                      var ss = surface.Skip(start).Take(end - start).Where(v => v >= 0).Select(v => (double)v).ToArray();
+                      list.Add(new
+                      {
+                          startX = start, endX = end - 1,
+                          activeFraction = a.Skip(start).Take(end-start).Sum(v => (long)v) / (double)((long)(end-start)*h),
+                          wallFraction = wall.Skip(start).Take(end-start).Sum(v => (long)v) / (double)((long)(end-start)*h),
+                          liquidFraction = liquid.Skip(start).Take(end-start).Sum(v => (long)v) / (double)((long)(end-start)*h),
+                          meanSurface = ss.Length == 0 ? -1 : ss.Average(),
+                          surfaceStdDev = StdDev(ss)
+                      });
+                  }
+                  return list;
+              }
+
+              static object Seam(int x, int[] active, int[] surface, int h)
+              {
+                  int r = 200;
+                  int l0 = Math.Max(0, x-r), l1 = x, r0 = x, r1 = Math.Min(active.Length, x+r);
+                  double leftA = active.Skip(l0).Take(l1-l0).Average(v => v/(double)h);
+                  double rightA = active.Skip(r0).Take(r1-r0).Average(v => v/(double)h);
+                  var ls = surface.Skip(l0).Take(l1-l0).Where(v => v >= 0).Select(v => (double)v).ToArray();
+                  var rs = surface.Skip(r0).Take(r1-r0).Where(v => v >= 0).Select(v => (double)v).ToArray();
+                  return new
+                  {
+                      x,
+                      leftActiveFraction = leftA,
+                      rightActiveFraction = rightA,
+                      activeFractionJump = rightA-leftA,
+                      leftMeanSurface = ls.Length == 0 ? -1 : ls.Average(),
+                      rightMeanSurface = rs.Length == 0 ? -1 : rs.Average(),
+                      surfaceJump = (ls.Length == 0 || rs.Length == 0) ? 0 : rs.Average()-ls.Average()
+                  };
+              }
+
+              static List<(int Start, string Hash)> StripHashes(World world, int stripWidth, int stride)
+              {
+                  var result = new List<(int, string)>();
+                  for (int start = 0; start + stripWidth <= world.TilesWide; start += stripWidth)
+                  {
+                      using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                      Span<byte> b = stackalloc byte[7];
+                      for (int x = start; x < start + stripWidth; x += stride)
+                      for (int y = 0; y < world.TilesHigh; y += stride)
+                      {
+                          var t = world.Tiles[x,y];
+                          b[0] = t.IsActive ? (byte)1 : (byte)0;
+                          b[1] = (byte)(t.Type & 255); b[2] = (byte)(t.Type >> 8);
+                          b[3] = (byte)(t.Wall & 255); b[4] = (byte)(t.Wall >> 8);
+                          b[5] = t.LiquidAmount;
+                          b[6] = (byte)Convert.ToInt32(t.LiquidType);
+                          sha.AppendData(b);
+                      }
+                      result.Add((start, Convert.ToHexString(sha.GetHashAndReset())));
+                  }
+                  return result;
+              }
+
+              static void WriteProfile(string path, int[] a, int[] wall, int[] liquid, int[] surface, int[] kinds, int h)
+              {
+                  using var sw = new StreamWriter(path, false, Encoding.UTF8);
+                  sw.WriteLine("x,active_fraction,wall_fraction,liquid_fraction,surface_y,distinct_types");
+                  for (int x = 0; x < a.Length; x++)
+                      sw.WriteLine($"{x},{a[x]/(double)h:F8},{wall[x]/(double)h:F8},{liquid[x]/(double)h:F8},{surface[x]},{kinds[x]}");
+              }
+
+              static void WritePpm(string path, int width, int height, long[] r, long[] g, long[] b, int[] n)
+              {
+                  using var fs = File.Create(path);
+                  var header = Encoding.ASCII.GetBytes($"P6\n{width} {height}\n255\n"); fs.Write(header);
+                  for (int i = 0; i < r.Length; i++)
+                  {
+                      int d = Math.Max(1, n[i]);
+                      fs.WriteByte((byte)(r[i]/d)); fs.WriteByte((byte)(g[i]/d)); fs.WriteByte((byte)(b[i]/d));
+                  }
+              }
+
+              static Rgb ColorFor(Tile t, int y, double ground, double rock, int h)
+              {
+                  if (t.HasLiquid)
+                  {
+                      return Convert.ToInt32(t.LiquidType) switch
+                      {
+                          1 => new(230, 90, 25),
+                          2 => new(210, 150, 45),
+                          3 => new(205, 150, 230),
+                          _ => new(55, 120, 215)
+                      };
+                  }
+                  if (t.IsActive)
+                  {
+                      return t.Type switch
+                      {
+                          0 => new(125, 88, 55), 1 => new(105, 105, 112), 2 => new(45, 145, 55),
+                          23 => new(115, 55, 145), 25 => new(80, 45, 105), 41 => new(55, 80, 150),
+                          43 => new(55, 125, 80), 44 => new(155, 75, 125), 53 => new(220, 195, 120),
+                          57 => new(75, 72, 78), 58 => new(205, 85, 40), 59 => new(85, 72, 45),
+                          60 => new(30, 155, 60), 109 => new(110, 200, 180), 117 => new(180, 185, 205),
+                          147 => new(230, 238, 245), 161 => new(125, 190, 225), 162 => new(150, 205, 235),
+                          163 => new(125, 105, 175), 164 => new(170, 220, 235), 189 => new(240, 240, 245),
+                          199 => new(175, 55, 65), 200 => new(150, 95, 115), 203 => new(125, 45, 55),
+                          226 => new(190, 125, 55), 396 => new(205, 175, 110), 397 => new(190, 160, 100),
+                          398 => new(125, 90, 145), 399 => new(170, 100, 100), 400 => new(205, 190, 135),
+                          481 => new(70, 95, 170), 482 => new(70, 145, 95), 483 => new(175, 90, 145),
+                          _ => y > h-192 ? new(105, 75, 70) : y > rock ? new(100, 96, 92) : y > ground ? new(115, 100, 80) : new(105, 105, 90)
+                      };
+                  }
+                  if (t.Wall != 0) return y > rock ? new(65, 62, 62) : new(80, 72, 65);
+                  if (y < 80) return new(25, 30, 55);
+                  if (y > h-192) return new(80, 35, 30);
+                  if (y > rock) return new(45, 42, 42);
+                  if (y > ground) return new(65, 52, 42);
+                  return new(105, 165, 215);
+              }
+
+              static double StdDev(IEnumerable<double> seq)
+              {
+                  var a = seq.ToArray(); if (a.Length == 0) return 0;
+                  double m = a.Average(); return Math.Sqrt(a.Sum(v => (v-m)*(v-m))/a.Length);
+              }
+          }
+          '@ | Set-Content -Encoding UTF8 (Join-Path $dir 'Program.cs')
+
+          dotnet run --project (Join-Path $dir 'Analyzer.csproj') -c Release -- (Join-Path $PWD 'inputs') (Join-Path $PWD 'analysis')
+
+      - name: Upload TEdit sanity analysis
+        uses: actions/upload-artifact@v4
+        with:
+          name: expanded-worlds-tedit-sanity-analysis
+          path: analysis/
+          if-no-files-found: error
+          retention-days: 7
