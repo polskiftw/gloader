@@ -1,0 +1,203 @@
+name: Expanded Worlds retail runtime contract audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/expanded-world-sizes
+    paths:
+      - .github/workflows/expanded-worlds-retail-runtime-contract-audit.yml
+      - gmods/ExpandedWorlds/**
+      - tests/ExpandedWorldCompile/**
+      - tests/ExpandedWorldServerCompile/**
+  pull_request:
+    paths:
+      - .github/workflows/expanded-worlds-retail-runtime-contract-audit.yml
+      - gmods/ExpandedWorlds/**
+      - tests/ExpandedWorldCompile/**
+      - tests/ExpandedWorldServerCompile/**
+
+jobs:
+  retail-runtime-contracts:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install ILSpy command line
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .audit-tools | Out-Null
+          dotnet tool install ilspycmd --tool-path .audit-tools
+
+      - name: Audit Terraria 1.4.5.8 runtime contracts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archiveVersion = '1458'
+          $zip = Join-Path $env:RUNNER_TEMP "terraria-server-$archiveVersion.zip"
+          $root = Join-Path $env:RUNNER_TEMP 'terraria-server'
+          $url = "https://terraria.org/api/download/pc-dedicated-server/terraria-server-$archiveVersion.zip"
+
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $root -Force
+
+          $server = Join-Path $root "$archiveVersion/Windows/TerrariaServer.exe"
+          if (-not (Test-Path $server)) {
+            throw "TerrariaServer.exe not found at expected path: $server"
+          }
+
+          $ilspy = Join-Path $PWD '.audit-tools/ilspycmd.exe'
+          $auditDir = Join-Path $PWD 'retail-runtime-contract-audit-output'
+          New-Item -ItemType Directory -Force $auditDir | Out-Null
+
+          $main = Join-Path $auditDir 'Main.cs'
+          $worldGen = Join-Path $auditDir 'WorldGen.cs'
+          $jungle = Join-Path $auditDir 'JunglePass.cs'
+          $desert = Join-Path $auditDir 'DesertDescription.cs'
+          $activeSections = Join-Path $auditDir 'ActiveSections.cs'
+          $leashedEntity = Join-Path $auditDir 'LeashedEntity.cs'
+
+          & $ilspy -t Terraria.Main $server | Set-Content -Encoding UTF8 $main
+          & $ilspy -t Terraria.WorldGen $server | Set-Content -Encoding UTF8 $worldGen
+          & $ilspy -t Terraria.GameContent.Biomes.JunglePass $server | Set-Content -Encoding UTF8 $jungle
+          & $ilspy -t Terraria.GameContent.Biomes.Desert.DesertDescription $server | Set-Content -Encoding UTF8 $desert
+          & $ilspy -t Terraria.DataStructures.ActiveSections $server | Set-Content -Encoding UTF8 $activeSections
+          & $ilspy -t Terraria.GameContent.LeashedEntity $server | Set-Content -Encoding UTF8 $leashedEntity
+
+          foreach ($required in @($main, $worldGen, $jungle, $desert, $activeSections, $leashedEntity)) {
+            if (-not (Test-Path $required) -or (Get-Item $required).Length -eq 0) {
+              throw "ILSpy did not produce required runtime-contract input: $required"
+            }
+          }
+
+          $sources = @{
+            Main = Get-Content -Raw $main
+            WorldGen = Get-Content -Raw $worldGen
+            Jungle = Get-Content -Raw $jungle
+            Desert = Get-Content -Raw $desert
+            ActiveSections = Get-Content -Raw $activeSections
+            LeashedEntity = Get-Content -Raw $leashedEntity
+          }
+
+          $report = Join-Path $auditDir 'terraria-1.4.5.8-runtime-contracts.txt'
+          @(
+            'Terraria 1.4.5.8 Expanded Worlds runtime contract audit',
+            "TerrariaServer.exe SHA256: $((Get-FileHash $server -Algorithm SHA256).Hash)",
+            ''
+          ) | Set-Content -Encoding UTF8 $report
+
+          $failures = New-Object System.Collections.Generic.List[string]
+
+          function Assert-Contract {
+            param(
+              [string]$Name,
+              [string]$Source,
+              [string]$Pattern
+            )
+
+            $ok = [regex]::IsMatch(
+              $Source,
+              $Pattern,
+              [System.Text.RegularExpressions.RegexOptions]::Multiline)
+            $result = if ($ok) { 'PASS' } else { 'FAIL' }
+            Write-Host "$result - $Name"
+            Add-Content -Encoding UTF8 $report "$result - $Name"
+            if (-not $ok) { $failures.Add($Name) }
+          }
+
+          Assert-Contract `
+            'Main.tile remains a fixed rectangular world backing array' `
+            $sources.Main `
+            'Tile\[,]\s+tile\s*=\s*new Tile\[maxTilesX,\s*maxTilesY\]'
+
+          Assert-Contract `
+            'JunglePass._worldScale remains Double' `
+            $sources.Jungle `
+            'double\s+_worldScale\s*;'
+
+          Assert-Contract `
+            'JunglePass source scale remains maxTilesX / 4200.0' `
+            $sources.Jungle `
+            '_worldScale\s*=\s*\(double\)Main\.maxTilesX\s*/\s*4200\.0'
+
+          Assert-Contract `
+            'Underground Desert overall scale remains Double maxTilesX / 4200.0' `
+            $sources.Desert `
+            'double\s+\w+\s*=\s*\(double\)Main\.maxTilesX\s*/\s*4200\.0'
+
+          Assert-Contract `
+            'ActiveSections storage is startup-sized from world section dimensions' `
+            $sources.ActiveSections `
+            'new uint\[Main\.maxTilesX\s*/\s*200\s*\+\s*1,\s*Main\.maxTilesY\s*/\s*150\s*\+\s*1\]'
+
+          Assert-Contract `
+            'LeashedEntity.BySection remains static readonly' `
+            $sources.LeashedEntity `
+            'static readonly SectionEntityList\[,]\s+BySection'
+
+          Assert-Contract `
+            'LeashedEntity.BySection is startup-sized from world section dimensions' `
+            $sources.LeashedEntity `
+            'BySection\s*=\s*new SectionEntityList\[Main\.maxTilesX\s*/\s*200\s*\+\s*1,\s*Main\.maxTilesY\s*/\s*150\s*\+\s*1\]'
+
+          Assert-Contract `
+            'clearWorld resets ActiveSections' `
+            $sources.WorldGen `
+            'ActiveSections\.Reset\(\)'
+
+          Assert-Contract `
+            'clearWorld resets LeashedEntity section state' `
+            $sources.WorldGen `
+            'LeashedEntity\.Clear\(\)'
+
+          Assert-Contract `
+            'PlantAlch remains part of live WorldGen world updates' `
+            $sources.WorldGen `
+            'PlantAlch\(\);'
+
+          Assert-Contract `
+            'PlantAlch spacing still contains the maxTilesX / 4200.0 source scalar' `
+            $sources.WorldGen `
+            'Main\.maxTilesX\s*/\s*4200\.0'
+
+          if ($failures.Count -gt 0) {
+            throw "Terraria 1.4.5.8 retail runtime contract audit failed: $($failures -join '; ')"
+          }
+
+      - name: Build shared client/server Expanded Worlds source fixtures
+        shell: pwsh
+        run: |
+          dotnet restore tests/ExpandedWorldCompile/ExpandedWorldCompile.csproj
+          dotnet restore tests/ExpandedWorldServerCompile/ExpandedWorldServerCompile.csproj
+          dotnet build tests/ExpandedWorldCompile/ExpandedWorldCompile.csproj -c Release --no-restore
+          dotnet build tests/ExpandedWorldServerCompile/ExpandedWorldServerCompile.csproj -c Release --no-restore
+
+      - name: Run Expanded Worlds source fixtures
+        shell: pwsh
+        run: |
+          & "tests/ExpandedWorldCompile/bin/Release/net48/ExpandedWorldCompile.exe"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Expanded Worlds client source fixture failed with exit code $LASTEXITCODE"
+          }
+
+          & "tests/ExpandedWorldServerCompile/bin/Release/net48/ExpandedWorldServerCompile.exe"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Expanded Worlds server source fixture failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Upload audited source contracts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: expanded-worlds-retail-runtime-contract-audit
+          path: retail-runtime-contract-audit-output/
+          if-no-files-found: warn
+          retention-days: 7
