@@ -106,7 +106,7 @@ jobs:
         run: |
           & "tests/RadioPolicyCompile/bin/Release/net48/RadioPolicyCompile.exe"
           if ($LASTEXITCODE -ne 0) {
-            throw "Radio policy regression test failed with exit code $LASTEXITCODE"
+            throw "Radio policy regression failed with exit code $LASTEXITCODE"
           }
 
       - name: General Radio overlay-upgrade discovery test
@@ -211,3 +211,43 @@ jobs:
         with:
           name: gloader
           path: dist/gloader/
+
+  expanded-worlds-six-size-comparison:
+    name: Real six-size TEdit comparison
+    runs-on: windows-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8 and 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Install official Microsoft XNA Framework 4.0
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msi = Join-Path $env:RUNNER_TEMP 'xnafx40_redist.msi'
+          Invoke-WebRequest -Uri 'https://download.microsoft.com/download/a/c/2/ac2c903b-e6e8-42c2-9fd7-bebac362a930/xnafx40_redist.msi' -OutFile $msi
+          $p = Start-Process -FilePath msiexec.exe -ArgumentList @('/i', ('"' + $msi + '"'), '/qn', '/norestart') -Wait -PassThru
+          if ($p.ExitCode -notin @(0, 3010)) { throw "XNA installer exited $($p.ExitCode)." }
+
+      - name: Generate six real worlds, run TEdit, and compose comparison
+        shell: pwsh
+        run: ./tools/expanded-worlds-six-size-comparison.ps1
+
+      - name: Upload comparison evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: expanded-worlds-six-size-real-tedit-comparison
+          path: |
+            comparison/*.png
+            comparison/*.txt
+          if-no-files-found: warn
+          retention-days: 14
