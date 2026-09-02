@@ -1,0 +1,60 @@
+name: Windows Defender package scan
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "src/**"
+      - "build.ps1"
+      - ".github/workflows/windows-defender-package-scan.yml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "build.ps1"
+      - ".github/workflows/windows-defender-package-scan.yml"
+
+jobs:
+  defender-scan:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Build release package
+        shell: pwsh
+        run: ./build.ps1
+
+      - name: Scan gloader.exe with Microsoft Defender
+        shell: pwsh
+        run: |
+          $platformRoot = Join-Path $env:ProgramData "Microsoft\Windows Defender\Platform"
+          $mp = Get-ChildItem $platformRoot -Filter MpCmdRun.exe -Recurse -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+
+          if (-not $mp) {
+            $fallback = Join-Path $env:ProgramFiles "Windows Defender\MpCmdRun.exe"
+            if (Test-Path $fallback) {
+              $mp = Get-Item $fallback
+            }
+          }
+
+          if (-not $mp) {
+            throw "Microsoft Defender MpCmdRun.exe was not found on the Windows runner."
+          }
+
+          & $mp.FullName -SignatureUpdate
+          if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Defender signature update returned $LASTEXITCODE; scanning with the runner's current signatures."
+          }
+
+          $exe = (Resolve-Path "dist/gloader/gloader.exe").Path
+          & $mp.FullName -Scan -ScanType 3 -File $exe -DisableRemediation
+          if ($LASTEXITCODE -ne 0) {
+            throw "Microsoft Defender flagged gloader.exe (MpCmdRun exit code $LASTEXITCODE)."
+          }
