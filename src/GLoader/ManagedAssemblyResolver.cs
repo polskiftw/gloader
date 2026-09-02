@@ -11,6 +11,15 @@ namespace GLoader
         private readonly string[] _directories;
         private readonly Assembly _resourceAssembly;
 
+        // AssemblyResolve may be serviced by more than one ManagedAssemblyResolver
+        // instance at once (the bootstrap resolver and the Terraria/resource resolver).
+        // Assembly.LoadFrom/Assembly.Load can themselves raise AssemblyResolve, so a
+        // same-identity request must not be allowed to ping-pong between handlers.
+        // ThreadStatic keeps the guard scoped to the synchronous bind chain while
+        // still sharing it across resolver instances on that thread.
+        [ThreadStatic]
+        private static HashSet<string> _resolvingIdentities;
+
         public ManagedAssemblyResolver(params string[] directories)
             : this(null, directories)
         {
@@ -19,8 +28,7 @@ namespace GLoader
         public ManagedAssemblyResolver(Assembly resourceAssembly, params string[] directories)
         {
             _resourceAssembly = resourceAssembly;
-            _directories = new[] { AppDomain.CurrentDomain.BaseDirectory }
-                .Concat(directories ?? Array.Empty<string>())
+            _directories = (directories ?? Array.Empty<string>())
                 .Where(path => !string.IsNullOrWhiteSpace(path))
                 .Select(Path.GetFullPath)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -36,8 +44,40 @@ namespace GLoader
 
         private Assembly Resolve(object sender, ResolveEventArgs args)
         {
-            var requested = new AssemblyName(args.Name);
+            var requestedIdentity = args == null ? null : args.Name;
+            if (string.IsNullOrWhiteSpace(requestedIdentity))
+            {
+                return null;
+            }
 
+            var resolving = _resolvingIdentities;
+            if (resolving == null)
+            {
+                resolving = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                _resolvingIdentities = resolving;
+            }
+
+            if (!resolving.Add(requestedIdentity))
+            {
+                return null;
+            }
+
+            try
+            {
+                return ResolveCore(new AssemblyName(requestedIdentity));
+            }
+            finally
+            {
+                resolving.Remove(requestedIdentity);
+                if (resolving.Count == 0)
+                {
+                    _resolvingIdentities = null;
+                }
+            }
+        }
+
+        private Assembly ResolveCore(AssemblyName requested)
+        {
             var loaded = AppDomain.CurrentDomain.GetAssemblies()
                 .FirstOrDefault(assembly =>
                 {
