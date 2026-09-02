@@ -39,12 +39,12 @@ $patterns = [ordered]@{
 }
 
 $counts = [ordered]@{}
-$hits = New-Object System.Collections.Generic.List[object]
+$hits = New-Object 'System.Collections.Generic.List[object]'
 
 foreach ($key in $patterns.Keys) {
     $count = 0
     foreach ($file in $files) {
-        $matches = Select-String -LiteralPath $file.FullName -Pattern $patterns[$key] -AllMatches
+        $matches = @(Select-String -LiteralPath $file.FullName -Pattern $patterns[$key] -AllMatches)
         foreach ($match in $matches) {
             $matchCount = [Math]::Max(1, $match.Matches.Count)
             $count += $matchCount
@@ -69,7 +69,7 @@ $legacyCounts = [ordered]@{}
 foreach ($key in $legacyPatterns.Keys) {
     $legacyCount = 0
     foreach ($file in $files) {
-        $legacyMatches = Select-String -LiteralPath $file.FullName -Pattern $legacyPatterns[$key] -AllMatches
+        $legacyMatches = @(Select-String -LiteralPath $file.FullName -Pattern $legacyPatterns[$key] -AllMatches)
         foreach ($match in $legacyMatches) {
             $legacyCount += [Math]::Max(1, $match.Matches.Count)
         }
@@ -77,16 +77,24 @@ foreach ($key in $legacyPatterns.Keys) {
     $legacyCounts[$key] = $legacyCount
 }
 
-$byFile = $hits |
-    Group-Object file |
-    ForEach-Object {
-        [pscustomobject]@{
-            file = $_.Name
-            hits = ($_.Group | Measure-Object occurrences -Sum).Sum
-            kinds = @($_.Group.kind | Sort-Object -Unique)
-        }
-    } |
-    Sort-Object hits -Descending
+# Windows PowerShell 5.1 can throw "Argument types do not match" when a generic
+# List[object] is wrapped directly in @(...). Materialize it explicitly first.
+$hitArray = $hits.ToArray()
+$byFile = @()
+if ($hitArray.Length -gt 0) {
+    $byFile = @(
+        $hitArray |
+            Group-Object file |
+            ForEach-Object {
+                [pscustomobject]@{
+                    file = $_.Name
+                    hits = ($_.Group | Measure-Object occurrences -Sum).Sum
+                    kinds = @($_.Group.kind | Sort-Object -Unique)
+                }
+            } |
+            Sort-Object hits -Descending
+    )
+}
 
 $result = [pscustomobject]@{
     terraria_version = $TerrariaVersion
@@ -94,14 +102,14 @@ $result = [pscustomobject]@{
     source_files = $files.Count
     counts = [pscustomobject]$counts
     legacy_signatures = [pscustomobject]$legacyCounts
-    files_with_hits = @($byFile).Count
-    by_file = @($byFile)
-    hits = @($hits)
+    files_with_hits = $byFile.Count
+    by_file = $byFile
+    hits = $hitArray
 }
 
 $result | ConvertTo-Json -Depth 8 | Set-Content -Path (Join-Path $OutputDirectory 'audit.json') -Encoding UTF8
 
-$md = New-Object System.Collections.Generic.List[string]
+$md = New-Object 'System.Collections.Generic.List[string]'
 $md.Add('# Terraria decompile audit')
 $md.Add('')
 if ($TerrariaVersion) { $md.Add("Terraria version: **$TerrariaVersion**") }
@@ -125,7 +133,7 @@ foreach ($key in $legacyCounts.Keys) {
 $md.Add('')
 $md.Add('## Files with remaining diagnostics')
 $md.Add('')
-if (@($byFile).Count -eq 0) {
+if ($byFile.Count -eq 0) {
     $md.Add('None.')
 }
 else {
