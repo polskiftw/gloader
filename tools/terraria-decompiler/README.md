@@ -1,58 +1,90 @@
 # Terraria Decompiler
 
-A reproducible ILSpy pipeline for Terraria's Windows `.exe`.
+A reproducible two-pass ILSpy pipeline for Terraria's Windows `.exe`.
 
-The problem this tool solves is not ILSpy itself. Terraria references Microsoft XNA 4.0 and embeds several managed dependency DLLs inside `Terraria.exe`. If ILSpy is given only the EXE, unresolved references can produce enormous numbers of misleading decompiler diagnostics and malformed expressions.
+Terraria references Microsoft XNA 4.0 and embeds several managed dependency DLLs inside `Terraria.exe`. Decompiling only the EXE can therefore produce huge numbers of misleading `Unknown result type` diagnostics and malformed C# when the references are not resolved.
 
-This tool performs two passes:
+The pipeline performs two passes:
 
 1. A bootstrap ILSpy pass extracts Terraria's embedded managed DLL resources.
-2. A clean pass runs ILSpy again with those DLLs, the exact XNA Game Studio 4.0 Refresh assemblies, and Microsoft's .NET Framework 4.0 reference assemblies available through `--referencepath`.
+2. A clean pass runs ILSpy again with those embedded libraries plus the required framework/XNA metadata references.
 
-It then writes a machine-readable and human-readable audit of common decompiler artifacts.
+It then writes both machine-readable and human-readable audits of common decompiler artifacts.
 
-## Local use
+## Recommended local use: offline bundle
 
-Requires:
+Use the **Terraria Decompiler Offline Bundle** produced by `.github/workflows/terraria-decompiler-offline.yml`.
 
-- Windows
-- PowerShell 7
+The finished Windows x64 bundle is self-contained. Running it requires only Windows; it does **not** download dependencies and does not require you to separately install:
+
+- ILSpy
 - .NET 10
-- 7-Zip (`7z.exe` on `PATH` or installed at `C:\Program Files\7-Zip\7z.exe`)
+- PowerShell 7
+- 7-Zip
+- XNA / XNA Game Studio
+- .NET Framework reference packs
 
-You do **not** need XNA installed. The tool downloads Microsoft's original XNA Game Studio 4.0 Refresh package, verifies it, and extracts the needed assemblies as archive data without installing the old MSI packages.
+The bundle already contains a private .NET runtime, ILSpyCmd, .NET Framework 4.0 reference assemblies, and the redistributable XNA Framework 4.0 runtime assemblies.
+
+The XNA Game Studio `Microsoft.Xna.Framework.Content.Pipeline.dll` developer binary is **not redistributed**. The bundle instead contains a tiny gloader-built metadata-only compatibility assembly with the public type/member signatures Terraria currently references. It has no Content Pipeline implementation.
+
+### Easiest use
+
+1. Extract `TerrariaDecompilerOffline-win-x64.zip`.
+2. Drag `Terraria.exe` onto `RUN-DECOMPILER.cmd`.
+3. Open the generated `output` folder.
+
+If Terraria uses the normal Steam path, double-clicking `RUN-DECOMPILER.cmd` with no argument also works.
+
+The result includes:
+
+- `output/source/` — decompiled source tree.
+- `output/audit/audit.md` and `audit.json` — decompiler-artifact audit.
+- `output/TerrariaDecomp-<detected-version>-clean.zip` — clean source ZIP.
+
+The version comes from the supplied executable, so the same bundle can be used when Terraria updates. If a future update introduces a new dependency or ILSpy reconstruction issue, the audit should expose it instead of silently declaring the output clean.
+
+### Content Pipeline shim fidelity
+
+Terraria 1.4.5.8 references the Content Pipeline API from only `Terraria.Testing/FxReader.cs`. With the public-safe metadata shim, that file can contain redundant compiler-safe casts around `EffectProcessor.Process`; the worldgen, networking, save/load, gameplay, and other Terraria source do not reference that developer assembly. The audit still reports zero unresolved-type/decompiler-error diagnostics for the current game.
+
+## Maintainer / rebuild path
+
+`Invoke-TerrariaDecompile.ps1` and `Prepare-References.ps1` remain as the reproducible online/bootstrap path. They are useful for rebuilding the offline package, investigating a future dependency change, or reproducing exactly how the reference set was obtained.
+
+That path requires Windows, PowerShell 7, .NET 10, and 7-Zip and may download the pinned reference/tool packages while it runs.
 
 ```powershell
 pwsh ./tools/terraria-decompiler/Invoke-TerrariaDecompile.ps1 `
   -TerrariaInput 'C:\Games\Terraria\Terraria.exe' `
-  -OutputDirectory './artifacts/terraria-decompile' `
-  -ExpectedVersion '1.4.5.8'
+  -OutputDirectory './artifacts/terraria-decompile'
 ```
 
 `TerrariaInput` may also be a ZIP containing `Terraria.exe`.
 
-The clean source is written to `source/`, the audit to `audit/`, and a clean source ZIP is created beside them.
-
 ## GitHub Actions
 
-`.github/workflows/terraria-decompiler.yml` has two modes:
+There are two workflows:
 
-- With no Terraria URL, it performs a dependency smoke test. This is what runs automatically when the tool changes.
-- With a Terraria URL, it downloads the EXE/ZIP, performs the full decompile, and uploads **only the audit report**. The decompiled game source is intentionally not published as an artifact from this public repository.
+- `.github/workflows/terraria-decompiler-offline.yml` builds the self-contained offline Windows x64 bundle. Network access is used only while **building the bundle**; the finished bundle performs no dependency downloads.
+- `.github/workflows/terraria-decompiler.yml` is the reference/decompiler smoke-test workflow. With a Terraria URL it can temporarily decompile the supplied EXE/ZIP and publish only the audit report. It deliberately does not publish Terraria's decompiled source from this public repository.
 
-For private input URLs, prefer the repository secret `TERRARIA_BINARY_URL` instead of a workflow input, because workflow input values can be visible in run metadata. An optional `TERRARIA_BINARY_SHA256` secret can pin the exact input bytes.
+For the second workflow, private input URLs should use the repository secret `TERRARIA_BINARY_URL`; `TERRARIA_BINARY_SHA256` can optionally pin the exact input bytes.
 
-The Windows runner path has been smoke-tested against the current `windows-latest`/Windows Server 2025 image, including the legacy XNA LZX CAB/MSI extraction chain.
-
-## Versions currently pinned
+## Pinned tool inputs
 
 - ILSpyCmd: `11.0.0.9375`
-- Microsoft XNA Game Studio: `4.0 Refresh`
+- Bundled .NET runtime: `10.0.11` win-x64
 - Microsoft .NET Framework reference assemblies: `net40 1.0.3`
+- Microsoft XNA Framework Redistributable: `4.0 Refresh`
 
 ## Files
 
-- `Prepare-References.ps1` — obtains and extracts .NET 4.0 + XNA reference assemblies.
-- `Invoke-TerrariaDecompile.ps1` — two-pass clean decompile pipeline.
-- `Audit-Decompile.ps1` — counts common reconstruction/missing-reference artifacts.
+- `Invoke-TerrariaDecompile.ps1` — two-pass maintainer decompile pipeline.
+- `Prepare-References.ps1` — obtains/extracts the online reference set.
+- `Audit-Decompile.ps1` — artifact audit for the maintainer path.
+- `offline/Build-OfflineBundle.ps1` — assembles the self-contained Windows bundle.
+- `offline/Invoke-Offline.ps1` — network-free runtime decompiler.
+- `offline/Audit-Offline.ps1` — Windows PowerShell compatible offline audit.
+- `offline/ContentPipelineStub/` — public metadata compatibility shim; no Microsoft Content Pipeline implementation code.
 - `DGD.md` — short operational instructions.
