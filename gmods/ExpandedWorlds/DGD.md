@@ -31,6 +31,8 @@ THICC does **not** replace Huge. It is a separate third custom size.
 
 Nothing else is required for ordinary client world creation.
 
+The retail-client UI hook is installed after Terraria finishes building the New World page, using the live vanilla size-button row. If a package shows only Small/Medium/Large, that package predates the retail UI fix and should be replaced with the current release asset.
+
 ## What THICC actually means
 
 THICC is:
