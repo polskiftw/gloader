@@ -131,7 +131,7 @@ function Generate-World(
         $argString = ($loaderArgs + $game) -join ' '
     }
 
-    Write-Host "=== Generate $name: $width x $height, seed $seed ==="
+    Write-Host "=== Generate ${name}: $width x $height, seed $seed ==="
     $process = Start-Process -FilePath $exe -ArgumentList $argString -WorkingDirectory $serverDir -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
     $ready = $false
     $deadline = (Get-Date).AddMinutes(100)
@@ -171,7 +171,7 @@ function Generate-World(
     Copy-Item $world $dest -Force
     $hash = (Get-FileHash $dest -Algorithm SHA256).Hash
     Add-Content (Join-Path $out 'manifest.txt') "$name|$width|$height|$seed|$($info.Length)|$hash"
-    Write-Host "PASS $name: $width x $height; $($info.Length) bytes; SHA256 $hash"
+    Write-Host "PASS ${name}: $width x $height; $($info.Length) bytes; SHA256 $hash"
 }
 
 Generate-World 'Small' 1 4200 1200 7841 '' ''
@@ -276,7 +276,7 @@ foreach ($name in $names) {
     try { $actual = "$($image.Width)x$($image.Height)" }
     finally { $image.Dispose() }
     if ($actual -ne $expected[$name]) { throw "$name TEdit map expected $($expected[$name]), got $actual." }
-    Write-Host "PASS TEdit $name: $actual"
+    Write-Host "PASS TEdit ${name}: $actual"
 }
 
 # Mechanically compose the six untouched TEdit PNGs. No generative-image tooling is
