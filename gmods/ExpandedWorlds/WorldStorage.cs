@@ -22,6 +22,7 @@ internal static class ExpandedWorldBackingStorage
 {
     private const string ActiveSectionsTypeName = "Terraria.DataStructures.ActiveSections";
     private const string LeashedEntityTypeName = "Terraria.GameContent.LeashedEntity";
+    private const string NetplayTypeName = "Terraria.Netplay";
 
     private static readonly FieldInfo MainMapField = AccessTools.Field(typeof(Main), "Map");
 
@@ -40,6 +41,16 @@ internal static class ExpandedWorldBackingStorage
         return checked(logicalHeight + 1);
     }
 
+    public static int RequiredSectionColumns(int logicalWidth)
+    {
+        return checked(logicalWidth / 200 + 1);
+    }
+
+    public static int RequiredSectionRows(int logicalHeight)
+    {
+        return checked(logicalHeight / 150 + 1);
+    }
+
     public static void EnsureForCurrentDimensions(string stage)
     {
         int width = Main.maxTilesX;
@@ -52,6 +63,7 @@ internal static class ExpandedWorldBackingStorage
         int requiredHeight = RequiredBackingHeight(height);
 
         EnsureTileStorage(requiredWidth, requiredHeight, stage);
+        EnsureRemoteClientSectionStorage(width, height, stage);
 
 #if GLOADER_CLIENT
         // WorldMap owns a fixed MapTile[,] and exposes no resize operation in
@@ -78,6 +90,86 @@ internal static class ExpandedWorldBackingStorage
         Console.WriteLine(
             "[Expanded Worlds] " + stage + ": tile backing storage enlarged to " +
             requiredWidth + "x" + requiredHeight + ".");
+    }
+
+    private static void EnsureRemoteClientSectionStorage(int logicalWidth, int logicalHeight, string stage)
+    {
+        // RemoteClient.TileSections and TileSectionsCheckTime are instance field
+        // initializers in exact 1.4.5.8. Netplay.Initialize can construct those
+        // RemoteClient objects while Main still has startup dimensions, before an
+        // expanded .wld header or custom generation preset supplies the real
+        // canvas. Resize any already-created clients once the physical dimensions
+        // are known. RemoteClients constructed later automatically use the current
+        // Main.maxTilesX/maxTilesY and already have sufficient storage.
+        Type netplayType = AccessTools.TypeByName(NetplayTypeName);
+        if (netplayType == null)
+            throw new TypeLoadException("[Expanded Worlds] Terraria.Netplay was not found.");
+
+        FieldInfo clientsField = AccessTools.Field(netplayType, "Clients");
+        if (clientsField == null || !clientsField.IsStatic || !clientsField.FieldType.IsArray)
+        {
+            throw new InvalidOperationException(
+                "[Expanded Worlds] Terraria.Netplay.Clients no longer matches the audited static array shape.");
+        }
+
+        Type remoteClientType = clientsField.FieldType.GetElementType();
+        if (remoteClientType == null)
+            throw new InvalidOperationException("[Expanded Worlds] Could not resolve Terraria.RemoteClient from Netplay.Clients.");
+
+        FieldInfo sectionsField = AccessTools.Field(remoteClientType, "TileSections");
+        FieldInfo sectionTimesField = AccessTools.Field(remoteClientType, "TileSectionsCheckTime");
+        if (sectionsField == null || sectionsField.IsStatic || sectionsField.FieldType != typeof(bool[,]) ||
+            sectionTimesField == null || sectionTimesField.IsStatic || sectionTimesField.FieldType != typeof(uint[,]))
+        {
+            throw new InvalidOperationException(
+                "[Expanded Worlds] Terraria.RemoteClient section fields no longer match the audited bool[,] / uint[,] shapes.");
+        }
+
+        Array clients = clientsField.GetValue(null) as Array;
+        if (clients == null)
+            throw new InvalidOperationException("[Expanded Worlds] Terraria.Netplay.Clients is null.");
+
+        int requiredColumns = RequiredSectionColumns(logicalWidth);
+        int requiredRows = RequiredSectionRows(logicalHeight);
+        int resized = 0;
+
+        for (int i = 0; i < clients.Length; i++)
+        {
+            object client = clients.GetValue(i);
+            if (client == null)
+                continue;
+
+            bool[,] sections = sectionsField.GetValue(client) as bool[,];
+            uint[,] sectionTimes = sectionTimesField.GetValue(client) as uint[,];
+            if (sections == null || sectionTimes == null)
+            {
+                throw new InvalidOperationException(
+                    "[Expanded Worlds] Terraria.RemoteClient section storage is unexpectedly null for client slot " + i + ".");
+            }
+
+            bool sectionsTooSmall =
+                sections.GetLength(0) < requiredColumns || sections.GetLength(1) < requiredRows;
+            bool timesTooSmall =
+                sectionTimes.GetLength(0) < requiredColumns || sectionTimes.GetLength(1) < requiredRows;
+
+            if (!sectionsTooSmall && !timesTooSmall)
+                continue;
+
+            // clearWorld is a world-transition/allocation boundary. Section-send
+            // state from the previous/startup canvas must not carry into the new
+            // world anyway, so fresh arrays are both safer and cheaper than trying
+            // to remap row-major storage across a dimension change.
+            sectionsField.SetValue(client, new bool[requiredColumns, requiredRows]);
+            sectionTimesField.SetValue(client, new uint[requiredColumns, requiredRows]);
+            resized++;
+        }
+
+        if (resized > 0)
+        {
+            Console.WriteLine(
+                "[Expanded Worlds] " + stage + ": resized " + resized +
+                " RemoteClient section table(s) to " + requiredColumns + "x" + requiredRows + ".");
+        }
     }
 
 #if GLOADER_CLIENT
