@@ -59,10 +59,12 @@ jobs:
           $notes = @"
           Self-contained offline Windows x64 Terraria decompiler.
 
-          Extract the ZIP and drag Terraria.exe onto RUN-DECOMPILER.cmd.
+          Extract the ZIP and drag Terraria.exe (or the Terraria install folder) onto RUN-DECOMPILER.cmd.
 
           Runtime dependency downloads: none.
-          Bundled: ILSpyCmd, private .NET runtime, .NET Framework 4.0 reference assemblies, redistributable XNA Framework runtime references, and the gloader metadata-only Content Pipeline compatibility shim.
+          Bundled: ILSpyCmd, private .NET runtime, .NET Framework 4.0 reference assemblies, and redistributable XNA Framework runtime references.
+
+          Game-specific managed references are harvested at runtime from the user's own Terraria install directory. Current Terraria ships the genuine Microsoft.Xna.Framework.Content.Pipeline.dll there, so this bundle contains no Content Pipeline shim and does not redistribute that developer DLL.
 
           Built from gloader commit $env:GITHUB_SHA.
           "@
