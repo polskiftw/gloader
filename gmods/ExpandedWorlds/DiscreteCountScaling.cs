@@ -135,9 +135,9 @@ internal static class ExpandedWorldDiscreteCountPatchUtil
         switch (ExpandedWorldState.GenerationPreset)
         {
             case ExpandedWorldPreset.XL:
-                return countForTier(4);
             case ExpandedWorldPreset.Huge:
-                return countForTier(5);
+            case ExpandedWorldPreset.Thicc:
+                return countForTier(ExpandedWorldState.DiscreteTierFor(ExpandedWorldState.GenerationPreset));
             default:
                 return vanillaLargeCount;
         }
@@ -191,7 +191,7 @@ internal static class ExpandedWorldDiscreteCountPatchUtil
 
 /// <summary>
 /// GrowGlowTulips hard-stops at Terraria's Large branch (2/4/6). Continue that
-/// exact +2-per-tier count to XL/Huge without touching placement attempts or RNG.
+/// exact +2-per-width-tier count to XL/Huge; THICC shares Huge's width tier.
 /// </summary>
 [HarmonyPatch]
 internal static class ExpandedWorldGlowTulipCountPatch
@@ -233,7 +233,7 @@ internal static class ExpandedWorldGlowTulipCountPatch
 /// <summary>
 /// placeTrap uses a 2/4/6 Small/Medium/Large cap for the rare Boulder Pet trap
 /// variant. No Traps doubles the source cap after this switch, so only the base
-/// is continued to 8/10 and the seed multiplier remains vanilla-owned.
+/// is continued to 8/10 for XL/Huge; THICC retains Huge's width-tier quota.
 /// </summary>
 [HarmonyPatch]
 internal static class ExpandedWorldBoulderPetQuotaPatch
@@ -274,7 +274,8 @@ internal static class ExpandedWorldBoulderPetQuotaPatch
 
 /// <summary>
 /// AddSpikeCaves uses the explicit Small/Medium/Large base sequence 3/5/7 and
-/// then performs vanilla's +Next(2). Only the base is continued to 9/11.
+/// then performs vanilla's +Next(2). Only the base is continued to 9/11 for
+/// XL/Huge; THICC retains Huge's width-tier base.
 /// </summary>
 [HarmonyPatch]
 internal static class ExpandedWorldSpikeCaveCountPatch
@@ -315,7 +316,8 @@ internal static class ExpandedWorldSpikeCaveCountPatch
 
 /// <summary>
 /// PlaceChilletEggs uses 6/9/12 by Terraria size. Continue its exact +3 sequence
-/// to 15/18 while leaving placement search, spacing, Remix depth, and RNG intact.
+/// to 15/18 for XL/Huge while leaving placement search, spacing, Remix depth,
+/// and RNG intact. THICC keeps Huge's width-tier count.
 /// </summary>
 [HarmonyPatch]
 internal static class ExpandedWorldChilletEggCountPatch
