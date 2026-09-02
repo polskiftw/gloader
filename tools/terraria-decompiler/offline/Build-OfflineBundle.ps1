@@ -145,66 +145,70 @@ try {
     Copy-Item (Join-Path $scriptRoot 'Invoke-Offline.ps1') (Join-Path $stage 'Run-TerrariaDecompiler.ps1') -Force
     Copy-Item (Join-Path $scriptRoot 'Audit-Offline.ps1') (Join-Path $stage 'Audit-Offline.ps1') -Force
 
-    $launcher = @'
-@echo off
-setlocal
-set "INPUT=%~1"
-if "%INPUT%"=="" set "INPUT=C:\Program Files (x86)\Steam\steamapps\common\Terraria\Terraria.exe"
-if not exist "%INPUT%" (
-  echo Terraria input not found:
-  echo   %INPUT%
-  echo.
-  echo Drag Terraria.exe or the Terraria install folder onto RUN-DECOMPILER.cmd.
-  pause
-  exit /b 1
-)
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Run-TerrariaDecompiler.ps1" -TerrariaInput "%INPUT%" -OutputDirectory "%~dp0output"
-set "ERR=%ERRORLEVEL%"
-echo.
-if not "%ERR%"=="0" echo Decompiler failed with exit code %ERR%.
-if "%ERR%"=="0" echo Done. Open the output folder.
-pause
-exit /b %ERR%
-'@
-    Set-Content -Path (Join-Path $stage 'RUN-DECOMPILER.cmd') -Value $launcher -Encoding ASCII
+    Write-Host 'Building TerrariaDecompiler.exe WinForms launcher...'
+    $guiProject = Join-Path $scriptRoot 'Gui\TerrariaDecompilerGui.csproj'
+    $guiOut = Join-Path $WorkDirectory 'gui-output'
+    & dotnet build $guiProject -c Release -o $guiOut
+    if ($LASTEXITCODE -ne 0) {
+        throw "TerrariaDecompiler GUI build failed with exit code $LASTEXITCODE."
+    }
+    $guiExe = Join-Path $guiOut 'TerrariaDecompiler.exe'
+    if (-not (Test-Path -LiteralPath $guiExe -PathType Leaf)) {
+        throw 'TerrariaDecompiler.exe was not produced by the GUI build.'
+    }
+    Copy-Item $guiExe (Join-Path $stage 'TerrariaDecompiler.exe') -Force
+    $guiConfig = Join-Path $guiOut 'TerrariaDecompiler.exe.config'
+    if (Test-Path -LiteralPath $guiConfig -PathType Leaf) {
+        Copy-Item $guiConfig (Join-Path $stage 'TerrariaDecompiler.exe.config') -Force
+    }
 
     $readme = @"
 Terraria Decompiler - OFFLINE Windows x64 bundle
 
+NORMAL USE:
+1. Double-click TerrariaDecompiler.exe
+2. Pick Terraria.exe (the normal Steam install is auto-detected when possible)
+3. Pick the output folder
+4. Click DECOMPILE
+
+The GUI shows the detected Terraria version and install DLL inventory, progress stages, final audit status, and buttons to open the output or audit. Show Details exposes the captured engine log when needed.
+
 NO RUNTIME DOWNLOADS.
 This folder already contains:
+- TerrariaDecompiler.exe WinForms GUI
 - ILSpyCmd $IlspyVersion
-- .NET runtime $DotnetRuntimeVersion
+- .NET runtime $DotnetRuntimeVersion for ILSpy
 - Microsoft .NET Framework 4.0 reference assemblies
 - Redistributable Microsoft XNA Framework 4.0 Refresh runtime references
 
 Terraria's own install directory is the FIRST reference source.
-The runner scans DLLs sitting next to Terraria.exe, keeps the managed .NET assemblies, and ignores native DLLs for ILSpy reference resolution. This lets it use the genuine Microsoft.Xna.Framework.Content.Pipeline.dll and any other managed dependencies Re-Logic ships with the game.
+The engine scans DLLs sitting next to Terraria.exe, keeps the managed .NET assemblies, and ignores native DLLs for ILSpy reference resolution. This lets it use the genuine Microsoft.Xna.Framework.Content.Pipeline.dll and any other managed dependencies Re-Logic ships with the game.
 
-EASIEST USE:
-1. Drag Terraria.exe (or the Terraria install folder) onto RUN-DECOMPILER.cmd
-2. Wait for both ILSpy passes and the audit
-3. Open output\
-
-Default Steam install path is used if you double-click RUN-DECOMPILER.cmd with no argument.
-
-The output ZIP is named TerrariaDecomp-<detected-version>-clean.zip.
-The audit is output\audit\audit.md.
-Reference provenance is output\audit\reference-sources.json.
+The output contains:
+- source\ - decompiled C# tree
+- audit\audit.md and audit.json - reconstruction audit
+- audit\reference-sources.json - reference provenance
+- TerrariaDecomp-<detected-version>-clean.zip - clean source ZIP
 
 The bundle itself does not contact the network. Future Terraria versions may introduce new dependencies; if the audit stops being zero, update/rebuild this bundle rather than hiding the diagnostic.
+
+Run-TerrariaDecompiler.ps1 remains in the bundle as the internal/debug engine. It is not the normal user interface.
 "@
     Set-Content -Path (Join-Path $stage 'README-OFFLINE.txt') -Value $readme -Encoding UTF8
 
     $notices = @'
 Third-party component notes
 
+TerrariaDecompiler.exe
+- gloader WinForms launcher built from this repository.
+- Targets the Windows .NET Framework included with supported Windows installations.
+
 ILSpy / ICSharpCode.Decompiler
 - Project: https://github.com/icsharpcode/ILSpy
 - License: MIT
 
 Microsoft .NET runtime
-- Bundled from Microsoft's official dotnet-install distribution.
+- Bundled from Microsoft's official dotnet-install distribution for ILSpy.
 - License and third-party notices are included inside the runtime directory where supplied by Microsoft.
 
 Microsoft .NET Framework reference assemblies
@@ -236,6 +240,13 @@ Microsoft.Xna.Framework.Content.Pipeline.dll
     & (Join-Path $runtime 'dotnet.exe') $bundledIlspy.FullName --version
     if ($LASTEXITCODE -ne 0) {
         throw "Bundled ILSpy smoke test failed with exit code $LASTEXITCODE."
+    }
+
+    Write-Host 'Self-testing packaged TerrariaDecompiler.exe...'
+    $packagedGui = Join-Path $stage 'TerrariaDecompiler.exe'
+    $guiTest = Start-Process -FilePath $packagedGui -ArgumentList '--self-test' -Wait -PassThru
+    if ($guiTest.ExitCode -ne 0) {
+        throw "Packaged TerrariaDecompiler.exe self-test failed with exit code $($guiTest.ExitCode)."
     }
 
     $zipPath = Join-Path $OutputDirectory ($bundleName + '.zip')
