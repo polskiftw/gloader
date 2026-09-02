@@ -31,7 +31,22 @@ internal static class Program
             return 1;
         }
 
-        Console.WriteLine("PASS: Expanded Worlds shared client/server storage source compiles under GLOADER_SERVER with THICC support.");
+        if (ExpandedWorldBackingStorage.RequiredSectionColumns(ExpandedWorldMath.ThiccWidth) != 85 ||
+            ExpandedWorldBackingStorage.RequiredSectionRows(ExpandedWorldMath.ThiccHeight) != 33)
+        {
+            Console.Error.WriteLine("Expanded Worlds server fixture: THICC section-table dimensions changed unexpectedly.");
+            return 1;
+        }
+
+        if (ExpandedWorldServerState.WidthFor(ExpandedWorldServerPreset.Thicc) != 16800 ||
+            ExpandedWorldServerState.HeightFor(ExpandedWorldServerPreset.Thicc) != 4800 ||
+            ExpandedWorldServerState.LabelFor(ExpandedWorldServerPreset.Thicc) != "THICC")
+        {
+            Console.Error.WriteLine("Expanded Worlds server fixture: THICC headless preset wiring changed unexpectedly.");
+            return 1;
+        }
+
+        Console.WriteLine("PASS: Expanded Worlds shared client/server storage and dedicated-server THICC preset source compile under GLOADER_SERVER.");
         return 0;
     }
 }
