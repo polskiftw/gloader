@@ -18,7 +18,7 @@ permissions:
 jobs:
   build-offline-bundle:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -34,6 +34,69 @@ jobs:
         run: |
           ./tools/terraria-decompiler/offline/Build-OfflineBundle.ps1 `
             -OutputDirectory "$env:GITHUB_WORKSPACE\artifacts"
+
+      - name: Smoke-test latest public TerrariaServer.exe decompile
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $namesResponse = Invoke-RestMethod -Uri 'https://terraria.org/api/get/dedicated-servers-names'
+          $serverNames = @($namesResponse)
+          if ($serverNames.Count -eq 0 -or [string]::IsNullOrWhiteSpace([string]$serverNames[0])) {
+            throw 'Terraria.org did not return a PC dedicated-server archive name.'
+          }
+
+          $archiveName = [string]$serverNames[0]
+          if (-not $archiveName.EndsWith('.zip', [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "Unexpected dedicated-server archive name from Terraria.org: $archiveName"
+          }
+
+          $serverZip = Join-Path $env:RUNNER_TEMP $archiveName
+          $serverUrl = "https://terraria.org/api/download/pc-dedicated-server/$archiveName"
+          Write-Host "Downloading public Terraria dedicated server: $serverUrl"
+          Invoke-WebRequest -Uri $serverUrl -OutFile $serverZip
+
+          $serverExtract = Join-Path $env:RUNNER_TEMP 'terraria-public-server'
+          $bundleExtract = Join-Path $env:RUNNER_TEMP 'terraria-decompiler-bundle'
+          $smokeOutput = Join-Path $env:RUNNER_TEMP 'terraria-server-decompile-smoke'
+          Remove-Item $serverExtract, $bundleExtract, $smokeOutput -Recurse -Force -ErrorAction SilentlyContinue
+          Expand-Archive -Path $serverZip -DestinationPath $serverExtract -Force
+          Expand-Archive -Path 'artifacts/TerrariaDecompilerOffline-win-x64.zip' -DestinationPath $bundleExtract -Force
+
+          $serverExe = Get-ChildItem -Path $serverExtract -Recurse -File -Filter 'TerrariaServer.exe' |
+            Where-Object { $_.FullName -match '[\\/]Windows[\\/]' } |
+            Select-Object -First 1
+          if (-not $serverExe) {
+            $serverExe = Get-ChildItem -Path $serverExtract -Recurse -File -Filter 'TerrariaServer.exe' | Select-Object -First 1
+          }
+          if (-not $serverExe) {
+            throw "Public dedicated-server archive '$archiveName' did not contain TerrariaServer.exe."
+          }
+
+          $engine = Join-Path $bundleExtract 'Run-TerrariaDecompiler.ps1'
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $engine `
+            -TerrariaInput $serverExe.Directory.FullName `
+            -OutputDirectory $smokeOutput `
+            -TargetMode Server
+          if ($LASTEXITCODE -ne 0) {
+            throw "Public TerrariaServer.exe decompile smoke test failed with exit code $LASTEXITCODE."
+          }
+
+          $auditPath = Join-Path $smokeOutput 'audit\audit.json'
+          if (-not (Test-Path -LiteralPath $auditPath -PathType Leaf)) {
+            throw 'Server smoke test did not produce audit\audit.json.'
+          }
+          $audit = Get-Content -LiteralPath $auditPath -Raw | ConvertFrom-Json
+          if ([int]$audit.total_tracked_issues -ne 0) {
+            throw "Server smoke test audit found $($audit.total_tracked_issues) tracked issue(s)."
+          }
+
+          $serverSource = Join-Path $smokeOutput 'server\source'
+          $serverCsCount = @(Get-ChildItem -Path $serverSource -Recurse -File -Filter '*.cs').Count
+          if ($serverCsCount -eq 0) {
+            throw 'Server smoke test produced no C# source files.'
+          }
+          Write-Host "Public TerrariaServer.exe smoke test clean: $serverCsCount C# files, 0 tracked issues."
 
       - name: Upload offline bundle artifact
         uses: actions/upload-artifact@v4
