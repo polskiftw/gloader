@@ -1,0 +1,154 @@
+name: Expanded Worlds headless runtime x86
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/expanded-world-sizes
+    paths:
+      - .github/workflows/expanded-worlds-headless-runtime-x86.yml
+      - src/GLoader/**
+      - gmods/ExpandedWorlds/**
+
+jobs:
+  vanilla-server-smoke-x86:
+    runs-on: windows-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install official Microsoft XNA Framework 4.0
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msi = Join-Path $env:RUNNER_TEMP 'xnafx40_redist.msi'
+          $url = 'https://download.microsoft.com/download/a/c/2/ac2c903b-e6e8-42c2-9fd7-bebac362a930/xnafx40_redist.msi'
+          Invoke-WebRequest -Uri $url -OutFile $msi
+          Write-Host "XNA MSI SHA256: $((Get-FileHash $msi -Algorithm SHA256).Hash)"
+
+          $p = Start-Process -FilePath msiexec.exe -ArgumentList @('/i', ('"' + $msi + '"'), '/qn', '/norestart') -Wait -PassThru
+          if ($p.ExitCode -notin @(0, 3010)) {
+            throw "XNA Framework installer exited with code $($p.ExitCode)."
+          }
+
+          $xnaCandidates = @(
+            "$env:WINDIR\Microsoft.NET\assembly\GAC_32\Microsoft.Xna.Framework",
+            "$env:WINDIR\assembly\GAC_32\Microsoft.Xna.Framework"
+          )
+          if (-not ($xnaCandidates | Where-Object { Test-Path $_ })) {
+            throw 'XNA Framework install completed but Microsoft.Xna.Framework was not found in the 32-bit GAC.'
+          }
+
+      - name: Download official Terraria 1.4.5.8 dedicated server
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archiveVersion = '1458'
+          $zip = Join-Path $env:RUNNER_TEMP "terraria-server-$archiveVersion.zip"
+          $root = Join-Path $env:RUNNER_TEMP 'terraria-server-runtime-x86'
+          $url = "https://terraria.org/api/download/pc-dedicated-server/terraria-server-$archiveVersion.zip"
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $root -Force
+
+          $server = Join-Path $root "$archiveVersion/Windows/TerrariaServer.exe"
+          if (-not (Test-Path $server)) { throw "TerrariaServer.exe not found: $server" }
+
+          $assemblyName = [System.Reflection.AssemblyName]::GetAssemblyName($server)
+          Write-Host "Server assembly: $($assemblyName.FullName)"
+          Write-Host "ProcessorArchitecture: $($assemblyName.ProcessorArchitecture)"
+          Write-Host "TerrariaServer.exe SHA256: $((Get-FileHash $server -Algorithm SHA256).Hash)"
+
+          "TERRARIA_SERVER=$server" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "TERRARIA_SERVER_DIR=$(Split-Path -Parent $server)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build x86 gloader runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          dotnet build src/GLoader/GLoader.csproj -c Release -p:PlatformTarget=x86 -p:Prefer32Bit=true
+
+          $gloader = Join-Path $PWD 'src/GLoader/bin/Release/net48/gloader.exe'
+          if (-not (Test-Path $gloader)) { throw "gloader.exe not found: $gloader" }
+          "GLOADER_EXE=$gloader" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Generate vanilla Small world through gloader
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $saveRoot = Join-Path $env:RUNNER_TEMP 'terraria-headless-x86-save'
+          $worldDir = Join-Path $saveRoot 'Worlds'
+          $world = Join-Path $worldDir 'vanilla-smoke.wld'
+          New-Item -ItemType Directory -Force $worldDir | Out-Null
+
+          $logDir = Join-Path $PWD 'headless-runtime-x86-output'
+          New-Item -ItemType Directory -Force $logDir | Out-Null
+          $stdoutPath = Join-Path $logDir 'vanilla-server-stdout.txt'
+          $stderrPath = Join-Path $logDir 'vanilla-server-stderr.txt'
+
+          $arguments = @(
+            '--target', ('"' + $env:TERRARIA_SERVER + '"'),
+            '--no-mods',
+            '--',
+            '-savedirectory', ('"' + $saveRoot + '"'),
+            '-autocreate', '1',
+            '-world', ('"' + $world + '"'),
+            '-worldname', 'GLoaderVanillaSmoke',
+            '-seed', '123456789',
+            '-difficulty', '0',
+            '-nosteam',
+            '-noupnp'
+          ) -join ' '
+
+          $si = New-Object System.Diagnostics.ProcessStartInfo
+          $si.FileName = $env:GLOADER_EXE
+          $si.Arguments = $arguments
+          $si.WorkingDirectory = $env:TERRARIA_SERVER_DIR
+          $si.UseShellExecute = $false
+          $si.RedirectStandardInput = $true
+          $si.RedirectStandardOutput = $true
+          $si.RedirectStandardError = $true
+          $si.CreateNoWindow = $true
+
+          $process = New-Object System.Diagnostics.Process
+          $process.StartInfo = $si
+          if (-not $process.Start()) { throw 'Failed to start gloader/TerrariaServer.' }
+
+          $process.StandardInput.WriteLine('exit')
+          $process.StandardInput.Close()
+          $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+          $stderrTask = $process.StandardError.ReadToEndAsync()
+
+          if (-not $process.WaitForExit(1200000)) {
+            try { $process.Kill() } catch {}
+            throw 'TerrariaServer did not exit within 20 minutes.'
+          }
+
+          $stdout = $stdoutTask.Result
+          $stderr = $stderrTask.Result
+          $stdout | Set-Content -Encoding UTF8 $stdoutPath
+          $stderr | Set-Content -Encoding UTF8 $stderrPath
+          Write-Host $stdout
+          if ($stderr) { Write-Host $stderr }
+
+          if ($process.ExitCode -ne 0) { throw "gloader/TerrariaServer exited with code $($process.ExitCode)." }
+          if (-not (Test-Path $world)) { throw "World was not created: $world" }
+
+          $worldInfo = Get-Item $world
+          if ($worldInfo.Length -lt 1MB) { throw "World is unexpectedly small: $($worldInfo.Length) bytes" }
+          Write-Host "PASS: generated real vanilla world via in-process gloader/TerrariaServer: $($worldInfo.Length) bytes"
+
+      - name: Upload runtime logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: expanded-worlds-headless-runtime-x86-smoke
+          path: headless-runtime-x86-output/
+          if-no-files-found: warn
+          retention-days: 7
