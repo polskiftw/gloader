@@ -2,7 +2,15 @@
 
 ## I just want the good source
 
-On Windows, from the gloader repo:
+You need Windows with:
+
+- PowerShell 7
+- .NET 10
+- 7-Zip
+
+You **do not** need XNA installed.
+
+From the gloader repo:
 
 ```powershell
 pwsh ./tools/terraria-decompiler/Invoke-TerrariaDecompile.ps1 -TerrariaInput 'C:\path\to\Terraria.exe' -OutputDirectory './artifacts/terraria-decompile'
@@ -35,6 +43,8 @@ For a private/signed binary URL, put it in the repository secret:
 Optional exact-byte check:
 
 `TERRARIA_BINARY_SHA256`
+
+The runner already has .NET and 7-Zip. It downloads and verifies the official Microsoft XNA package itself.
 
 ## What a good audit looks like
 
