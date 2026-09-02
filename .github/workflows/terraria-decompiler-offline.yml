@@ -35,6 +35,85 @@ jobs:
           ./tools/terraria-decompiler/offline/Build-OfflineBundle.ps1 `
             -OutputDirectory "$env:GITHUB_WORKSPACE\artifacts"
 
+      - name: Smoke-test paired client/server orchestration
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $bundleExtract = Join-Path $env:RUNNER_TEMP 'terraria-decompiler-pair-bundle'
+          $pairInput = Join-Path $env:RUNNER_TEMP 'terraria-decompiler-pair-input'
+          $pairOutput = Join-Path $env:RUNNER_TEMP 'terraria-decompiler-pair-output'
+          Remove-Item $bundleExtract, $pairInput, $pairOutput -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $pairInput | Out-Null
+          Expand-Archive -Path 'artifacts/TerrariaDecompilerOffline-win-x64.zip' -DestinationPath $bundleExtract -Force
+
+          $fixtureSource = Join-Path $pairInput 'PairFixture.cs'
+          @'
+          using System.Reflection;
+          [assembly: AssemblyVersion("1.4.5.8")]
+          [assembly: AssemblyFileVersion("1.4.5.8")]
+          public static class Program
+          {
+              public static void Main() { }
+          }
+          '@ | Set-Content -LiteralPath $fixtureSource -Encoding ASCII
+
+          $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+          if (-not (Test-Path -LiteralPath $csc -PathType Leaf)) {
+            $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe'
+          }
+          if (-not (Test-Path -LiteralPath $csc -PathType Leaf)) {
+            throw 'Could not find the Windows .NET Framework C# compiler for the pair fixture.'
+          }
+
+          $clientFixture = Join-Path $pairInput 'Terraria.exe'
+          $serverFixture = Join-Path $pairInput 'TerrariaServer.exe'
+          & $csc /nologo /target:exe "/out:$clientFixture" $fixtureSource
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not compile pair-orchestration fixture (csc exit $LASTEXITCODE)."
+          }
+          Copy-Item -LiteralPath $clientFixture -Destination $serverFixture -Force
+          Remove-Item -LiteralPath $fixtureSource -Force
+
+          $engine = Join-Path $bundleExtract 'Run-TerrariaDecompiler.ps1'
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $engine `
+            -TerrariaInput $clientFixture `
+            -OutputDirectory $pairOutput `
+            -TargetMode Pair
+          if ($LASTEXITCODE -ne 0) {
+            throw "Paired decompiler orchestration smoke test failed with exit code $LASTEXITCODE."
+          }
+
+          $auditPath = Join-Path $pairOutput 'audit\audit.json'
+          if (-not (Test-Path -LiteralPath $auditPath -PathType Leaf)) {
+            throw 'Pair smoke test did not produce audit\audit.json.'
+          }
+          $audit = Get-Content -LiteralPath $auditPath -Raw | ConvertFrom-Json
+          if ([int]$audit.total_tracked_issues -ne 0) {
+            throw "Pair smoke test audit found $($audit.total_tracked_issues) tracked issue(s)."
+          }
+          if ([string]$audit.target_mode -ne 'Pair') {
+            throw "Pair smoke test reported unexpected target_mode '$($audit.target_mode)'."
+          }
+
+          $targetNames = @($audit.targets.PSObject.Properties.Name)
+          if ($targetNames -notcontains 'client' -or $targetNames -notcontains 'server') {
+            throw "Pair smoke test combined audit does not contain both client and server targets: $($targetNames -join ', ')"
+          }
+
+          $clientZip = @(Get-ChildItem -Path (Join-Path $pairOutput 'client') -File -Filter 'TerrariaClientDecomp-*-clean.zip')
+          $serverZip = @(Get-ChildItem -Path (Join-Path $pairOutput 'server') -File -Filter 'TerrariaServerDecomp-*-clean.zip')
+          if ($clientZip.Count -ne 1 -or $serverZip.Count -ne 1) {
+            throw "Pair smoke test did not produce exactly one client ZIP and one server ZIP. Client=$($clientZip.Count), Server=$($serverZip.Count)"
+          }
+
+          if (-not (Test-Path -LiteralPath (Join-Path $pairOutput 'client\source') -PathType Container) -or
+              -not (Test-Path -LiteralPath (Join-Path $pairOutput 'server\source') -PathType Container)) {
+            throw 'Pair smoke test did not produce both client\source and server\source trees.'
+          }
+
+          Write-Host 'Pair orchestration smoke test clean: client + server outputs + combined audit, 0 tracked issues.'
+
       - name: Smoke-test latest public TerrariaServer.exe decompile
         shell: pwsh
         run: |
