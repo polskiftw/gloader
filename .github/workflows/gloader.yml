@@ -190,6 +190,15 @@ jobs:
           $repo = "${{ github.repository }}"
           $tag = "v$env:RELEASE_VERSION"
 
+          $releaseListJson = gh release list --repo $repo --limit 100 --json tagName,publishedAt,isDraft
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Could not inspect existing releases to determine the changelog base.'
+          }
+          $previousTag = (($releaseListJson | ConvertFrom-Json) |
+            Where-Object { -not $_.isDraft -and $_.tagName -like 'v*' -and $_.tagName -ne $tag } |
+            Sort-Object { [datetime]$_.publishedAt } -Descending |
+            Select-Object -First 1).tagName
+
           gh release view $tag --repo $repo *> $null
           if ($LASTEXITCODE -eq 0) {
             gh release delete $tag --repo $repo --yes --cleanup-tag
@@ -219,15 +228,23 @@ jobs:
           "@
           }
 
-          gh release create $tag `
-            "gloader-$env:RELEASE_VERSION.zip" `
-            "release-tools/TerrariaDecompilerOffline-win-x64.zip" `
-            --repo $repo `
-            --target "${{ github.sha }}" `
-            --title "gloader v$env:RELEASE_VERSION" `
-            --notes $notes `
-            --generate-notes `
-            --latest
+          $releaseArgs = @(
+            'release', 'create', $tag,
+            "gloader-$env:RELEASE_VERSION.zip",
+            'release-tools/TerrariaDecompilerOffline-win-x64.zip',
+            '--repo', $repo,
+            '--target', "${{ github.sha }}",
+            '--title', "gloader v$env:RELEASE_VERSION",
+            '--notes', $notes,
+            '--generate-notes',
+            '--latest'
+          )
+          if (-not [string]::IsNullOrWhiteSpace($previousTag)) {
+            $releaseArgs += @('--notes-start-tag', $previousTag)
+            Write-Host "Generating release notes from $previousTag to $tag."
+          }
+
+          & gh @releaseArgs
           if ($LASTEXITCODE -ne 0) {
             throw "Could not publish gloader release '$tag'."
           }
