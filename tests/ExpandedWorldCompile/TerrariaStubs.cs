@@ -78,6 +78,7 @@ namespace Terraria
         public static void CreateNewWorld() { }
         public static void clearWorld() { }
         public static void GenerateWorld() { }
+        public static void Reset() { }
         public static void makeTemple(int x, int y) { }
 
         public static void TileRunner(
