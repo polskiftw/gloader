@@ -73,7 +73,7 @@ internal static class Program
         CheckRange("Bee Hives Large", 11, 16, ExpandedWorldMath.BeeHives(8400));
 
         CheckDouble("Drunk Hive Small", 1d, ExpandedWorldMath.DrunkHiveLinearScale(4200));
-        CheckDouble("Drunk Hive Medium", 1d, ExpandedWorldMath.DrunkHiveLinearScale(6400));
+        CheckDouble("Drunk Hive Medium", (6400d / 4200d + 1d) / 2d, ExpandedWorldMath.DrunkHiveLinearScale(6400));
         CheckDouble("Drunk Hive Large", 1.5d, ExpandedWorldMath.DrunkHiveLinearScale(8400));
 
         CheckCount("Underground Desert width Small", 320, ExpandedWorldMath.UndergroundDesertWidth(4200));
@@ -263,9 +263,12 @@ internal static class Program
         CheckTrue("Huge Dungeon doors exceed current vanilla 500 slots", ExpandedWorldCapacityMath.DungeonDoorRecordUpperBound(hugeW, hugeH) > 500);
         CheckTrue("Huge Dungeon platforms fit current vanilla 500 slots", ExpandedWorldCapacityMath.DungeonPlatformRecordUpperBound(hugeW, hugeH) <= 500);
 
+        CheckRange("Small Temple rooms", 10, 15, ExpandedWorldCapacityMath.JungleTempleRoomCountRange(4200));
+        CheckRange("Medium Temple rooms", 15, 23, ExpandedWorldCapacityMath.JungleTempleRoomCountRange(6400));
         CheckRange("Large Temple rooms", 20, 31, ExpandedWorldCapacityMath.JungleTempleRoomCountRange(8400));
         CheckRange("XL Temple rooms", 30, 47, ExpandedWorldCapacityMath.JungleTempleRoomCountRange(xlW));
         CheckRange("Huge Temple rooms", 40, 63, ExpandedWorldCapacityMath.JungleTempleRoomCountRange(hugeW));
+        CheckCount("Medium Temple legacy scratch capacity", 40, ExpandedWorldCapacityMath.JungleTempleRoomScratchCapacity(6400));
         CheckCount("Large Temple scratch capacity", 40, ExpandedWorldCapacityMath.JungleTempleRoomScratchCapacity(8400));
         CheckCount("XL Temple scratch capacity", 48, ExpandedWorldCapacityMath.JungleTempleRoomScratchCapacity(xlW));
         CheckCount("Huge Temple scratch capacity", 64, ExpandedWorldCapacityMath.JungleTempleRoomScratchCapacity(hugeW));
