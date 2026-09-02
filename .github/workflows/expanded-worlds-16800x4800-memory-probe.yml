@@ -65,7 +65,18 @@ jobs:
 
           $gloader = Join-Path $PWD 'src/GLoader/bin/Release/net48/gloader.exe'
           if (-not (Test-Path $gloader)) { throw "gloader.exe not found: $gloader" }
+
+          # The host executable, not the Terraria assembly loaded into it, controls
+          # the 32-bit process address-space flags. Record LARGEADDRESSAWARE so the
+          # memory result is interpretable rather than just a mysterious OOM.
+          $bytes = [System.IO.File]::ReadAllBytes($gloader)
+          $peOffset = [BitConverter]::ToInt32($bytes, 0x3c)
+          $characteristics = [BitConverter]::ToUInt16($bytes, $peOffset + 22)
+          $largeAddressAware = (($characteristics -band 0x20) -ne 0)
+          Write-Host ("gloader PE Characteristics=0x{0:X4}; LARGEADDRESSAWARE={1}" -f $characteristics, $largeAddressAware)
+
           "GLOADER_EXE=$gloader" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "GLOADER_LAA=$largeAddressAware" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Prepare isolated 16800x4800 probe mod
         shell: pwsh
@@ -76,24 +87,54 @@ jobs:
           New-Item -ItemType Directory -Force $modsRoot | Out-Null
           Copy-Item -Path (Join-Path $PWD 'gmods/ExpandedWorlds') -Destination $modDestination -Recurse -Force
 
-          # This is intentionally a runner-only staging mutation. The shipping Huge
-          # preset remains 16800x2400 in the repository. We only replace the server
-          # runtime's physical-height constant in the isolated copied mod.
+          function Replace-ExactlyOnce([string]$path, [string]$needle, [string]$replacement) {
+            $source = Get-Content -Raw $path
+            $count = ([regex]::Matches($source, [regex]::Escape($needle))).Count
+            if ($count -ne 1) {
+              throw "Expected exactly one match in $path for '$needle'; found $count."
+            }
+            Set-Content -Path $path -Value ($source.Replace($needle, $replacement)) -Encoding UTF8
+          }
+
+          # Stage the complete physical-height contract. The first probe changed
+          # only ServerRuntime, leaving HugeHeight/static section backing at 2400;
+          # clearWorld therefore indexed beyond those arrays before memory could
+          # actually be tested.
+          $math = Join-Path $modDestination 'GenerationMath.cs'
+          Replace-ExactlyOnce $math `
+            'public const int HugeHeight = 2400;' `
+            'public const int HugeHeight = 4800;'
+
           $runtime = Join-Path $modDestination 'ServerRuntime.cs'
-          $source = Get-Content -Raw $runtime
-          $needle = 'internal const int VanillaLargeHeight = 2400;'
-          $count = ([regex]::Matches($source, [regex]::Escape($needle))).Count
-          if ($count -ne 1) {
-            throw "Expected exactly one server height constant to patch; found $count."
-          }
-          $source = $source.Replace($needle, 'internal const int VanillaLargeHeight = 4800;')
-          Set-Content -Path $runtime -Value $source -Encoding UTF8
+          Replace-ExactlyOnce $runtime `
+            'internal const int VanillaLargeHeight = 2400;' `
+            'internal const int VanillaLargeHeight = 4800;'
 
+          $storage = Join-Path $modDestination 'WorldStorage.cs'
+          $storageSource = Get-Content -Raw $storage
+          $pattern = 'return\s+height\s*==\s*ExpandedWorldMath\.LargeHeight\s*&&\s*\(width\s*==\s*ExpandedWorldMath\.XLWidth\s*\|\|\s*width\s*==\s*ExpandedWorldMath\.HugeWidth\s*\);'
+          $matches = [regex]::Matches($storageSource, $pattern)
+          if ($matches.Count -ne 1) {
+            throw "Expected exactly one expanded-world dimension guard in WorldStorage.cs; found $($matches.Count)."
+          }
+          $replacement = @'
+return (width == ExpandedWorldMath.XLWidth && height == ExpandedWorldMath.XLHeight) ||
+               (width == ExpandedWorldMath.HugeWidth && height == ExpandedWorldMath.HugeHeight);
+'@
+          $storageSource = [regex]::Replace($storageSource, $pattern, $replacement, 1)
+          Set-Content -Path $storage -Value $storageSource -Encoding UTF8
+
+          if (-not (Select-String -Path $math -SimpleMatch 'public const int HugeHeight = 4800;' -Quiet)) {
+            throw 'HugeHeight staging patch did not stick.'
+          }
           if (-not (Select-String -Path $runtime -SimpleMatch 'internal const int VanillaLargeHeight = 4800;' -Quiet)) {
-            throw 'Probe height patch did not stick.'
+            throw 'Server height staging patch did not stick.'
+          }
+          if (-not (Select-String -Path $storage -SimpleMatch 'height == ExpandedWorldMath.HugeHeight' -Quiet)) {
+            throw 'Backing-storage height-pair staging patch did not stick.'
           }
 
-          Write-Host 'Probe mod prepared: Huge = 16800x4800 for this runner only.'
+          Write-Host 'Probe mod prepared: only ExpandedWorlds is present; Huge = 16800x4800 for this runner only.'
           "EXPANDED_MODS=$modsRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Generate, save, and fresh-process reload 16800x4800
@@ -136,12 +177,8 @@ jobs:
               if (-not $task.Wait(250)) { return $false }
               return $client.Connected
             }
-            catch {
-              return $false
-            }
-            finally {
-              $client.Dispose()
-            }
+            catch { return $false }
+            finally { $client.Dispose() }
           }
 
           function Start-GLoaderServer([string]$phase, [int]$port, [bool]$autocreate) {
@@ -157,7 +194,6 @@ jobs:
               '-maxplayers', '1',
               '-noupnp'
             )
-
             if ($autocreate) {
               $gameArgs += @(
                 '-autocreate', '3',
@@ -175,7 +211,6 @@ jobs:
 
             $argumentString = $arguments -join ' '
             Write-Host "Starting ${phase}: $env:GLOADER_EXE $argumentString"
-
             $process = Start-Process `
               -FilePath $env:GLOADER_EXE `
               -ArgumentList $argumentString `
@@ -188,7 +223,7 @@ jobs:
             return @($process, $stdoutPath, $stderrPath, $memoryPath)
           }
 
-          function Wait-ForServerReady(
+          function Wait-ForReady(
             [System.Diagnostics.Process]$process,
             [int]$port,
             [string]$stdoutPath,
@@ -199,11 +234,10 @@ jobs:
 
             $sw = [System.Diagnostics.Stopwatch]::StartNew()
             $nextConsoleReport = 0
-
             while ($sw.Elapsed.TotalSeconds -lt $maxSeconds) {
               if ($process.HasExited) {
                 Show-ProcessLogs $stdoutPath $stderrPath
-                throw "$phase process exited with code $($process.ExitCode) before opening TCP port $port."
+                throw "$phase process exited with code $($process.ExitCode) before completing."
               }
 
               try {
@@ -224,48 +258,54 @@ jobs:
                 Write-Host "Memory sample failed: $($_.Exception.Message)"
               }
 
+              if (Test-Path $stdoutPath) {
+                $liveLog = Get-Content -Raw $stdoutPath
+                if ($liveLog.Contains('Dedicated-server generation failed:') -or $liveLog.Contains('Mod failed:')) {
+                  Show-ProcessLogs $stdoutPath $stderrPath
+                  throw "$phase reported a Terraria/mod failure before completion."
+                }
+              }
+
               if (Test-LocalPort $port) {
-                Write-Host "$phase is listening on TCP $port. World load is complete."
+                Write-Host "$phase is listening on TCP $port."
                 return $true
               }
 
               Start-Sleep -Seconds 5
             }
 
-            Write-Warning "$phase exceeded the probe's runner-time budget after $maxSeconds seconds. Slowness alone is NOT classified as failure; result is INCONCLUSIVE."
+            Write-Warning "$phase exceeded the hosted-runner probe budget after $maxSeconds seconds. Slowness alone is NOT a failure; result is INCONCLUSIVE."
             return $false
           }
 
           function Get-Peaks([string]$memoryPath) {
-            $rows = Import-Csv $memoryPath
+            $rows = @(Import-Csv $memoryPath)
             if ($rows.Count -eq 0) {
               return [pscustomobject]@{ WorkingSet = 0; Private = 0; Virtual = 0; PeakWorkingSet = 0 }
             }
-            $ws = ($rows | ForEach-Object { [double]$_.working_set_mb } | Measure-Object -Maximum).Maximum
-            $private = ($rows | ForEach-Object { [double]$_.private_mb } | Measure-Object -Maximum).Maximum
-            $virtual = ($rows | ForEach-Object { [double]$_.virtual_mb } | Measure-Object -Maximum).Maximum
-            $peakWs = ($rows | ForEach-Object { [double]$_.peak_working_set_mb } | Measure-Object -Maximum).Maximum
-            return [pscustomobject]@{ WorkingSet = $ws; Private = $private; Virtual = $virtual; PeakWorkingSet = $peakWs }
+            return [pscustomobject]@{
+              WorkingSet = ($rows | ForEach-Object { [double]$_.working_set_mb } | Measure-Object -Maximum).Maximum
+              Private = ($rows | ForEach-Object { [double]$_.private_mb } | Measure-Object -Maximum).Maximum
+              Virtual = ($rows | ForEach-Object { [double]$_.virtual_mb } | Measure-Object -Maximum).Maximum
+              PeakWorkingSet = ($rows | ForEach-Object { [double]$_.peak_working_set_mb } | Measure-Object -Maximum).Maximum
+            }
           }
 
-          # Generation gets almost the entire useful hosted-runner window. Hitting
-          # this ceiling is reported as INCONCLUSIVE, never as a functional failure.
           $generation = Start-GLoaderServer 'generate' $generationPort $true
           $generationProcess = $generation[0]
           $generationStdout = [string]$generation[1]
           $generationStderr = [string]$generation[2]
           $generationMemory = [string]$generation[3]
 
-          $generationReady = Wait-ForServerReady $generationProcess $generationPort $generationStdout $generationStderr $generationMemory 17000 'generation'
+          $generationReady = Wait-ForReady $generationProcess $generationPort $generationStdout $generationStderr $generationMemory 17000 'generation'
           $generationPeaks = Get-Peaks $generationMemory
-
           if (-not $generationReady) {
             try { Stop-Process -Id $generationProcess.Id -Force -ErrorAction SilentlyContinue } catch {}
             Show-ProcessLogs $generationStdout $generationStderr
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '### Expanded Worlds 16800x4800 memory probe'
-            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '- Result: **INCONCLUSIVE — hosted runner time ceiling reached; slowness is not a failure condition.**'
-            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Generation max sampled working set: **$($generationPeaks.WorkingSet) MiB**"
-            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Generation max sampled private bytes: **$($generationPeaks.Private) MiB**"
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '- Result: **INCONCLUSIVE — runner time ceiling reached; slowness is not a failure condition.**'
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Generation max sampled working set/private: **$($generationPeaks.WorkingSet) / $($generationPeaks.Private) MiB**"
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- gloader LARGEADDRESSAWARE: **$env:GLOADER_LAA**"
             exit 0
           }
 
@@ -277,7 +317,6 @@ jobs:
           if (-not (Test-Path $world)) {
             throw "Terraria reached server-ready state without creating $world"
           }
-
           $worldInfo = Get-Item $world
           if ($worldInfo.Length -lt 1MB) {
             throw "Generated world is unexpectedly small: $($worldInfo.Length) bytes"
@@ -296,33 +335,26 @@ jobs:
               throw "Generation log is missing required marker: $marker"
             }
           }
-          if ($generateLog.Contains('Mod failed:')) {
-            throw 'gloader reported a source-mod failure during generation.'
-          }
 
           $worldHash = (Get-FileHash $world -Algorithm SHA256).Hash
           Copy-Item $world (Join-Path $outputRoot 'expanded-16800x4800.wld') -Force
           Write-Host "PASS generation: $expectedWidth`x$expectedHeight, $($worldInfo.Length) bytes, SHA256 $worldHash"
-          Write-Host "Generation max sampled: WS $($generationPeaks.WorkingSet) MiB; private $($generationPeaks.Private) MiB; virtual $($generationPeaks.Virtual) MiB; process peak WS $($generationPeaks.PeakWorkingSet) MiB"
+          Write-Host "Generation max sampled: WS $($generationPeaks.WorkingSet) MiB; private $($generationPeaks.Private) MiB; virtual $($generationPeaks.Virtual) MiB"
 
-          # Fresh process reload. A timeout is again INCONCLUSIVE, not a failure.
           $reload = Start-GLoaderServer 'reload' $reloadPort $false
           $reloadProcess = $reload[0]
           $reloadStdout = [string]$reload[1]
           $reloadStderr = [string]$reload[2]
           $reloadMemory = [string]$reload[3]
 
-          $reloadReady = Wait-ForServerReady $reloadProcess $reloadPort $reloadStdout $reloadStderr $reloadMemory 2400 'reload'
+          $reloadReady = Wait-ForReady $reloadProcess $reloadPort $reloadStdout $reloadStderr $reloadMemory 2400 'reload'
           $reloadPeaks = Get-Peaks $reloadMemory
-
           if (-not $reloadReady) {
             try { Stop-Process -Id $reloadProcess.Id -Force -ErrorAction SilentlyContinue } catch {}
             Show-ProcessLogs $reloadStdout $reloadStderr
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '### Expanded Worlds 16800x4800 memory probe'
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '- Generation: **PASS**'
-            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '- Fresh reload: **INCONCLUSIVE — hosted runner time ceiling reached; slowness is not a failure condition.**'
-            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- World bytes: **$($worldInfo.Length)**"
-            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- SHA256: ``$worldHash``"
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '- Fresh reload: **INCONCLUSIVE — runner time ceiling reached; slowness is not a failure condition.**'
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Generation max sampled working set/private: **$($generationPeaks.WorkingSet) / $($generationPeaks.Private) MiB**"
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Reload max sampled working set/private: **$($reloadPeaks.WorkingSet) / $($reloadPeaks.Private) MiB**"
             exit 0
@@ -341,9 +373,6 @@ jobs:
           if ($reloadLog.Contains('GenerateWorld: using Huge')) {
             throw 'Reload unexpectedly regenerated the world instead of loading the saved .wld.'
           }
-          if ($reloadLog.Contains('Mod failed:')) {
-            throw 'gloader reported a source-mod failure during reload.'
-          }
 
           $reloadedHash = (Get-FileHash $world -Algorithm SHA256).Hash
           if ($reloadedHash -ne $worldHash) {
@@ -351,19 +380,16 @@ jobs:
           }
 
           Write-Host "PASS reload: Terraria reopened $expectedWidth`x$expectedHeight from the saved .wld."
-          Write-Host "Reload max sampled: WS $($reloadPeaks.WorkingSet) MiB; private $($reloadPeaks.Private) MiB; virtual $($reloadPeaks.Virtual) MiB; process peak WS $($reloadPeaks.PeakWorkingSet) MiB"
+          Write-Host "Reload max sampled: WS $($reloadPeaks.WorkingSet) MiB; private $($reloadPeaks.Private) MiB; virtual $($reloadPeaks.Virtual) MiB"
 
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '### Expanded Worlds 16800x4800 memory probe'
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '- Result: **PASS — generated, saved, and fresh-process reloaded.**'
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Dimensions: **$expectedWidth x $expectedHeight**"
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- World bytes: **$($worldInfo.Length)**"
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- SHA256: ``$worldHash``"
-          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Generation max sampled working set: **$($generationPeaks.WorkingSet) MiB**"
-          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Generation max sampled private bytes: **$($generationPeaks.Private) MiB**"
-          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Generation max sampled virtual bytes: **$($generationPeaks.Virtual) MiB**"
-          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Reload max sampled working set: **$($reloadPeaks.WorkingSet) MiB**"
-          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Reload max sampled private bytes: **$($reloadPeaks.Private) MiB**"
-          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Reload max sampled virtual bytes: **$($reloadPeaks.Virtual) MiB**"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- gloader LARGEADDRESSAWARE: **$env:GLOADER_LAA**"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Generation max sampled working set/private/virtual: **$($generationPeaks.WorkingSet) / $($generationPeaks.Private) / $($generationPeaks.Virtual) MiB**"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Reload max sampled working set/private/virtual: **$($reloadPeaks.WorkingSet) / $($reloadPeaks.Private) / $($reloadPeaks.Virtual) MiB**"
 
       - name: Upload probe evidence
         if: always()
