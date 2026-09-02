@@ -1,0 +1,149 @@
+name: Expanded Worlds live headless generation
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/expanded-world-sizes
+    paths:
+      - .github/workflows/expanded-worlds-headless-live.yml
+
+jobs:
+  live-worldgen:
+    name: ${{ matrix.preset }} live worldgen
+    runs-on: windows-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - preset: XL
+            width: 12600
+            port: 7792
+          - preset: Huge
+            width: 16800
+            port: 7794
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install XNA 4.0
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msi = Join-Path $env:RUNNER_TEMP 'xnafx40_redist.msi'
+          Invoke-WebRequest 'https://download.microsoft.com/download/a/c/2/ac2c903b-e6e8-42c2-9fd7-bebac362a930/xnafx40_redist.msi' -OutFile $msi
+          $p = Start-Process msiexec.exe -ArgumentList @('/i', ('"' + $msi + '"'), '/qn', '/norestart') -Wait -PassThru
+          if ($p.ExitCode -notin @(0,3010)) { throw "XNA install failed: $($p.ExitCode)" }
+
+      - name: Download TerrariaServer 1.4.5.8 and build x86 gloader
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Join-Path $env:RUNNER_TEMP 'terraria-server-1458.zip'
+          $root = Join-Path $env:RUNNER_TEMP 'terraria-server-1458'
+          Invoke-WebRequest 'https://terraria.org/api/download/pc-dedicated-server/terraria-server-1458.zip' -OutFile $zip
+          Expand-Archive $zip $root -Force
+          $server = Join-Path $root '1458/Windows/TerrariaServer.exe'
+          if (-not (Test-Path $server)) { throw 'Official TerrariaServer.exe missing.' }
+          dotnet build src/GLoader/GLoader.csproj -c Release -p:PlatformTarget=x86 -p:Prefer32Bit=true
+          $gloader = Join-Path $PWD 'src/GLoader/bin/Release/net48/gloader.exe'
+          "TERRARIA_SERVER=$server" >> $env:GITHUB_ENV
+          "SERVER_DIR=$(Split-Path -Parent $server)" >> $env:GITHUB_ENV
+          "GLOADER_EXE=$gloader" >> $env:GITHUB_ENV
+
+      - name: Stage Expanded Worlds only
+        shell: pwsh
+        run: |
+          $mods = Join-Path $env:RUNNER_TEMP 'gmods'
+          New-Item -ItemType Directory -Force $mods | Out-Null
+          Copy-Item 'gmods/ExpandedWorlds' (Join-Path $mods 'ExpandedWorlds') -Recurse -Force
+          "MODS_DIR=$mods" >> $env:GITHUB_ENV
+
+      - name: Generate real ${{ matrix.preset }} world
+        shell: pwsh
+        env:
+          GLOADER_EXPANDED_WORLD: ${{ matrix.preset }}
+          PRESET: ${{ matrix.preset }}
+          EXPECTED_WIDTH: ${{ matrix.width }}
+          PORT: ${{ matrix.port }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $preset = $env:PRESET
+          $width = [int]$env:EXPECTED_WIDTH
+          $port = [int]$env:PORT
+          $save = Join-Path $env:RUNNER_TEMP ("ew-" + $preset.ToLowerInvariant())
+          $worlds = Join-Path $save 'Worlds'
+          New-Item -ItemType Directory -Force $worlds | Out-Null
+          $world = Join-Path $worlds ("live-" + $preset.ToLowerInvariant() + '.wld')
+          $outDir = Join-Path $PWD ("live-" + $preset.ToLowerInvariant())
+          New-Item -ItemType Directory -Force $outDir | Out-Null
+          $stdout = Join-Path $outDir 'stdout.txt'
+          $stderr = Join-Path $outDir 'stderr.txt'
+
+          $game = @(
+            '-savedirectory', ('"' + $save + '"'),
+            '-world', ('"' + $world + '"'),
+            '-autocreate', '3',
+            '-worldname', ('ExpandedWorld' + $preset),
+            '-seed', '123456789',
+            '-difficulty', '0',
+            '-port', $port,
+            '-maxplayers', '1',
+            '-noupnp'
+          )
+          $loader = @('--target', ('"' + $env:TERRARIA_SERVER + '"'), '--mods', ('"' + $env:MODS_DIR + '"'), '--')
+          $args = ($loader + $game) -join ' '
+          Write-Host ("Starting " + $preset + " generation")
+          $p = Start-Process -FilePath $env:GLOADER_EXE -ArgumentList $args -WorkingDirectory $env:SERVER_DIR -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+
+          $ready = $false
+          $deadline = (Get-Date).AddMinutes(30)
+          while ((Get-Date) -lt $deadline) {
+            if ($p.HasExited) { break }
+            $client = New-Object System.Net.Sockets.TcpClient
+            try {
+              $task = $client.ConnectAsync('127.0.0.1', $port)
+              if ($task.Wait(300) -and $client.Connected) { $ready = $true; break }
+            } catch {} finally { $client.Dispose() }
+            Start-Sleep 1
+          }
+
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+          try { $p.WaitForExit(10000) | Out-Null } catch {}
+          Write-Host '--- Terraria/gloader stdout ---'
+          if (Test-Path $stdout) { Get-Content -Raw $stdout | Write-Host }
+          Write-Host '--- Terraria/gloader stderr ---'
+          if (Test-Path $stderr) { Get-Content -Raw $stderr | Write-Host }
+
+          if (-not $ready) { throw ("Server never became ready; process exit=" + $p.ExitCode) }
+          if (-not (Test-Path $world)) { throw 'Server became ready but .wld is missing.' }
+          $info = Get-Item $world
+          if ($info.Length -lt 1MB) { throw ("Generated .wld too small: " + $info.Length) }
+          $log = Get-Content -Raw $stdout
+          $need = @(
+            ("Dedicated-server headless preset: " + $preset + " " + $width + 'x2400'),
+            ("GenerateWorld: using " + $preset + " " + $width + 'x2400 (vanilla tier 2)'),
+            ("clearWorld: using " + $preset + " " + $width + 'x2400 (vanilla tier 2)'),
+            ("Dedicated-server generation completed at " + $width + 'x2400'),
+            ("LoadWorld verified " + $preset + " " + $width + 'x2400 (vanilla tier 2)')
+          )
+          foreach ($marker in $need) {
+            if (-not $log.Contains($marker)) { throw ("Missing runtime marker: " + $marker) }
+          }
+          if ($log.Contains('Mod failed:')) { throw 'Expanded Worlds source mod failed.' }
+          $hash = (Get-FileHash $world -Algorithm SHA256).Hash
+          Write-Host ("PASS: generated real " + $preset + " " + $width + "x2400 world; bytes=" + $info.Length + "; SHA256=" + $hash)
+
+      - name: Upload runtime logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: expanded-worlds-live-${{ matrix.preset }}
+          path: live-*/
+          if-no-files-found: warn
+          retention-days: 7
