@@ -48,6 +48,7 @@ jobs:
           dotnet restore tests/ModDiscoveryCompile/ModDiscoveryCompile.csproj
           dotnet restore tests/ExpandedWorldMathCompile/ExpandedWorldMathCompile.csproj
           dotnet restore tests/ExpandedWorldCompile/ExpandedWorldCompile.csproj
+          dotnet restore tests/ExpandedWorldServerCompile/ExpandedWorldServerCompile.csproj
           dotnet restore tests/HostPlayFixture/Client.csproj
           dotnet restore tests/HostPlayFixture/Server.csproj
 
@@ -63,6 +64,7 @@ jobs:
           dotnet build tests/ModDiscoveryCompile/ModDiscoveryCompile.csproj -c Release --no-restore
           dotnet build tests/ExpandedWorldMathCompile/ExpandedWorldMathCompile.csproj -c Release --no-restore
           dotnet build tests/ExpandedWorldCompile/ExpandedWorldCompile.csproj -c Release --no-restore
+          dotnet build tests/ExpandedWorldServerCompile/ExpandedWorldServerCompile.csproj -c Release --no-restore
           dotnet build tests/HostPlayFixture/Client.csproj -c Release --no-restore
           dotnet build tests/HostPlayFixture/Server.csproj -c Release --no-restore
 
@@ -74,12 +76,20 @@ jobs:
             throw "Expanded Worlds mathematical parity regression failed with exit code $LASTEXITCODE"
           }
 
-      - name: Expanded Worlds raw source compile smoke test
+      - name: Expanded Worlds raw client source compile smoke test
         shell: pwsh
         run: |
           & "tests/ExpandedWorldCompile/bin/Release/net48/ExpandedWorldCompile.exe"
           if ($LASTEXITCODE -ne 0) {
-            throw "Expanded Worlds raw source compile fixture failed with exit code $LASTEXITCODE"
+            throw "Expanded Worlds raw client source compile fixture failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Expanded Worlds raw server source compile smoke test
+        shell: pwsh
+        run: |
+          & "tests/ExpandedWorldServerCompile/bin/Release/net48/ExpandedWorldServerCompile.exe"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Expanded Worlds raw server source compile fixture failed with exit code $LASTEXITCODE"
           }
 
       - name: Infinite Angler debug quest-fish regression test
@@ -211,43 +221,3 @@ jobs:
         with:
           name: gloader
           path: dist/gloader/
-
-  expanded-worlds-six-size-comparison:
-    name: Real six-size TEdit comparison
-    runs-on: windows-latest
-    timeout-minutes: 360
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup .NET 8 and 10
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: |
-            8.0.x
-            10.0.x
-
-      - name: Install official Microsoft XNA Framework 4.0
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $msi = Join-Path $env:RUNNER_TEMP 'xnafx40_redist.msi'
-          Invoke-WebRequest -Uri 'https://download.microsoft.com/download/a/c/2/ac2c903b-e6e8-42c2-9fd7-bebac362a930/xnafx40_redist.msi' -OutFile $msi
-          $p = Start-Process -FilePath msiexec.exe -ArgumentList @('/i', ('"' + $msi + '"'), '/qn', '/norestart') -Wait -PassThru
-          if ($p.ExitCode -notin @(0, 3010)) { throw "XNA installer exited $($p.ExitCode)." }
-
-      - name: Generate six real worlds, run TEdit, and compose comparison
-        shell: pwsh
-        run: ./tools/expanded-worlds-six-size-comparison.ps1
-
-      - name: Upload comparison evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: expanded-worlds-six-size-real-tedit-comparison
-          path: |
-            comparison/*.png
-            comparison/*.txt
-          if-no-files-found: warn
-          retention-days: 14
