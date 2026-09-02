@@ -1,0 +1,97 @@
+name: Expanded Worlds server format probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/expanded-world-sizes
+    paths:
+      - .github/workflows/expanded-worlds-server-format-probe.yml
+
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download and inspect official Terraria 1.4.5.8 server
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archiveVersion = '1458'
+          $zip = Join-Path $env:RUNNER_TEMP "terraria-server-$archiveVersion.zip"
+          $root = Join-Path $env:RUNNER_TEMP 'terraria-server-format-probe'
+          $url = "https://terraria.org/api/download/pc-dedicated-server/terraria-server-$archiveVersion.zip"
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $root -Force
+
+          $dir = Join-Path $root "$archiveVersion/Windows"
+          $server = Join-Path $dir 'TerrariaServer.exe'
+
+          Write-Host '=== DIRECTORY ==='
+          Get-ChildItem -Force $dir | Sort-Object Name | ForEach-Object {
+            Write-Host ("{0}`t{1}`t{2}" -f $_.Name, $_.Length, $_.Extension)
+          }
+
+          Write-Host '=== ASSEMBLY IDENTITY ==='
+          try {
+            $name = [System.Reflection.AssemblyName]::GetAssemblyName($server)
+            Write-Host "AssemblyName: $($name.FullName)"
+          } catch {
+            Write-Host "AssemblyName failed: $($_.Exception.GetType().FullName): $($_.Exception.Message)"
+          }
+
+          Write-Host '=== RUNTIMECONFIG / DEPS ==='
+          Get-ChildItem $dir -Filter '*.runtimeconfig.json' -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Host "--- $($_.Name) ---"
+            Get-Content -Raw $_.FullName | Write-Host
+          }
+          Get-ChildItem $dir -Filter '*.deps.json' -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Host "deps: $($_.Name) ($($_.Length) bytes)"
+          }
+
+          Write-Host '=== PE / CLR TOOLS ==='
+          $corflags = Get-Command corflags.exe -ErrorAction SilentlyContinue
+          if ($corflags) {
+            & $corflags.Source $server
+          } else {
+            Write-Host 'corflags.exe not found'
+          }
+
+          $dumpbin = Get-Command dumpbin.exe -ErrorAction SilentlyContinue
+          if ($dumpbin) {
+            & $dumpbin.Source /headers $server | Select-String -Pattern 'machine|CLR Runtime Header|COM descriptor|subsystem|entry point|image base' | ForEach-Object { $_.Line }
+          } else {
+            Write-Host 'dumpbin.exe not found on PATH'
+          }
+
+          Write-Host '=== MANAGED CANDIDATES ==='
+          Get-ChildItem $dir -File | Where-Object { $_.Extension -in '.exe','.dll' } | ForEach-Object {
+            try {
+              $n = [System.Reflection.AssemblyName]::GetAssemblyName($_.FullName)
+              Write-Host ("MANAGED`t{0}`t{1}" -f $_.Name, $n.FullName)
+            } catch {
+              Write-Host ("NATIVE/UNLOADABLE`t{0}`t{1}" -f $_.Name, $_.Length)
+            }
+          }
+
+          Write-Host '=== SERVER DIRECT SMOKE ==='
+          $psi = New-Object System.Diagnostics.ProcessStartInfo
+          $psi.FileName = $server
+          $psi.Arguments = '-version'
+          $psi.WorkingDirectory = $dir
+          $psi.UseShellExecute = $false
+          $psi.RedirectStandardOutput = $true
+          $psi.RedirectStandardError = $true
+          $psi.CreateNoWindow = $true
+          $p = [System.Diagnostics.Process]::Start($psi)
+          if ($p.WaitForExit(10000)) {
+            Write-Host "Direct exit code: $($p.ExitCode)"
+            Write-Host ($p.StandardOutput.ReadToEnd())
+            Write-Host ($p.StandardError.ReadToEnd())
+          } else {
+            try { $p.Kill() } catch {}
+            Write-Host 'Direct server stayed alive for 10s; executable itself launches successfully.'
+          }
