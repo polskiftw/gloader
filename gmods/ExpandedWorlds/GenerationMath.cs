@@ -36,13 +36,25 @@ internal static class ExpandedWorldMath
     // use integer division by 4,200 as a coarse horizontal world-size quantum.
     // 12,000 would still evaluate to the same quotient as Large (2), while
     // 12,600 is the next exact quantum (3). Huge is the following quantum (4).
+    // THICC deliberately keeps Huge's 16,800 width and doubles the physical
+    // height instead, so width-driven and width-tier rules stay Huge-shaped while
+    // height/area rules see the larger 4,800-tile canvas.
     public const int XLWidth = 12600;
     public const int XLHeight = 2400;
     public const int HugeWidth = 16800;
     public const int HugeHeight = 2400;
+    public const int ThiccWidth = 16800;
+    public const int ThiccHeight = 4800;
 
     public const long SmallArea = (long)SmallWidth * SmallHeight;
     public const long LargeArea = (long)LargeWidth * LargeHeight;
+
+    public static bool IsExpandedPresetDimensions(int width, int height)
+    {
+        return (width == XLWidth && height == XLHeight) ||
+               (width == HugeWidth && height == HugeHeight) ||
+               (width == ThiccWidth && height == ThiccHeight);
+    }
 
     public static long TileArea(int width, int height)
     {
