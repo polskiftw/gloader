@@ -48,20 +48,43 @@ $inputStage = Join-Path $work 'input'
 $source = Join-Path $OutputDirectory 'source'
 $audit = Join-Path $OutputDirectory 'audit'
 $versionFile = Join-Path $OutputDirectory 'version.txt'
+$ownershipMarker = Join-Path $OutputDirectory '.terraria-decompiler-output'
 
-# OutputDirectory is user-selectable in the GUI, so never delete the directory itself.
-# Clean only artifacts owned by this tool and leave unrelated files/folders untouched.
+# OutputDirectory is user-selectable in the GUI. Never delete the directory itself,
+# and never delete name-colliding content unless this tool previously marked the
+# directory as one of its output roots.
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
-foreach ($ownedDirectory in @($work, $source, $audit)) {
-    if (Test-Path -LiteralPath $ownedDirectory) {
-        Remove-Item -LiteralPath $ownedDirectory -Recurse -Force
+if (-not (Test-Path -LiteralPath $ownershipMarker -PathType Leaf)) {
+    $collisions = New-Object System.Collections.Generic.List[string]
+    foreach ($ownedDirectory in @($work, $source, $audit)) {
+        if (Test-Path -LiteralPath $ownedDirectory) {
+            $collisions.Add((Split-Path $ownedDirectory -Leaf))
+        }
     }
+    if (Test-Path -LiteralPath $versionFile) {
+        $collisions.Add('version.txt')
+    }
+    Get-ChildItem -LiteralPath $OutputDirectory -File -Filter 'TerrariaDecomp-*-clean.zip' -ErrorAction SilentlyContinue |
+        ForEach-Object { $collisions.Add($_.Name) }
+
+    if ($collisions.Count -gt 0) {
+        throw "The selected output folder contains files/folders that use Terraria Decompiler output names, but the folder was not created by this tool: $($collisions -join ', '). Choose a clean/dedicated output folder; nothing was deleted."
+    }
+
+    Set-Content -Path $ownershipMarker -Value 'gloader Terraria Decompiler output directory' -Encoding ASCII
 }
-if (Test-Path -LiteralPath $versionFile -PathType Leaf) {
-    Remove-Item -LiteralPath $versionFile -Force
+else {
+    foreach ($ownedDirectory in @($work, $source, $audit)) {
+        if (Test-Path -LiteralPath $ownedDirectory) {
+            Remove-Item -LiteralPath $ownedDirectory -Recurse -Force
+        }
+    }
+    if (Test-Path -LiteralPath $versionFile -PathType Leaf) {
+        Remove-Item -LiteralPath $versionFile -Force
+    }
+    Get-ChildItem -LiteralPath $OutputDirectory -File -Filter 'TerrariaDecomp-*-clean.zip' -ErrorAction SilentlyContinue |
+        Remove-Item -Force
 }
-Get-ChildItem -LiteralPath $OutputDirectory -File -Filter 'TerrariaDecomp-*-clean.zip' -ErrorAction SilentlyContinue |
-    Remove-Item -Force
 
 New-Item -ItemType Directory -Force -Path $work, $bootstrap, $refs, $inputStage, $source, $audit | Out-Null
 Copy-Item -Path (Join-Path $baseRefs '*') -Destination $refs -Recurse -Force
@@ -113,9 +136,6 @@ function Invoke-Ilspy {
     }
 }
 
-# Terraria's install directory is the preferred source for game-specific managed
-# references. This picks up the genuine Content Pipeline assembly (and any future
-# managed sibling DLLs) without redistributing those files in this bundle.
 $managedInstallRefs = New-Object System.Collections.Generic.List[object]
 $nativeInstallDlls = New-Object System.Collections.Generic.List[object]
 Get-ChildItem -LiteralPath $terrariaRoot -File -Filter '*.dll' | Sort-Object Name | ForEach-Object {
