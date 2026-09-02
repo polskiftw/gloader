@@ -1,0 +1,130 @@
+name: Terraria Decompiler
+
+on:
+  workflow_dispatch:
+    inputs:
+      terraria_url:
+        description: 'Direct HTTPS URL to Terraria.exe or a ZIP containing it. Leave blank for dependency smoke test.'
+        required: false
+        type: string
+      expected_version:
+        description: 'Optional expected version, for example 1.4.5.8.'
+        required: false
+        type: string
+      terraria_sha256:
+        description: 'Optional SHA-256 for the downloaded EXE/ZIP. Prefer the secret for private use.'
+        required: false
+        type: string
+  push:
+    branches: [main]
+    paths:
+      - 'tools/terraria-decompiler/**'
+      - '.github/workflows/terraria-decompiler.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  decompiler:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    env:
+      TERRARIA_URL_SECRET: ${{ secrets.TERRARIA_BINARY_URL }}
+      TERRARIA_SHA_SECRET: ${{ secrets.TERRARIA_BINARY_SHA256 }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Prepare exact decompiler references
+        shell: pwsh
+        run: |
+          ./tools/terraria-decompiler/Prepare-References.ps1 `
+            -OutputDirectory "$env:GITHUB_WORKSPACE\artifacts\terraria-refs" `
+            -WorkDirectory "$env:RUNNER_TEMP\terraria-ref-work"
+
+      - name: Resolve Terraria input
+        id: input
+        shell: pwsh
+        env:
+          INPUT_URL: ${{ inputs.terraria_url }}
+          INPUT_SHA: ${{ inputs.terraria_sha256 }}
+        run: |
+          $url = $env:INPUT_URL
+          if ([string]::IsNullOrWhiteSpace($url)) { $url = $env:TERRARIA_URL_SECRET }
+
+          if ([string]::IsNullOrWhiteSpace($url)) {
+            "has_input=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            Write-Host 'No Terraria URL supplied. Dependency smoke test only.'
+            exit 0
+          }
+
+          if ($url -notmatch '^https://') {
+            throw 'Terraria input URL must use HTTPS.'
+          }
+
+          $download = Join-Path $env:RUNNER_TEMP 'TerrariaInput.bin'
+          Invoke-WebRequest -Uri $url -OutFile $download
+
+          $expectedSha = $env:INPUT_SHA
+          if ([string]::IsNullOrWhiteSpace($expectedSha)) { $expectedSha = $env:TERRARIA_SHA_SECRET }
+          if (-not [string]::IsNullOrWhiteSpace($expectedSha)) {
+            $actual = (Get-FileHash -LiteralPath $download -Algorithm SHA256).Hash
+            if ($actual -ne $expectedSha) {
+              throw "Terraria input SHA-256 mismatch. Expected $expectedSha, got $actual"
+            }
+          }
+
+          $header = ([System.IO.File]::ReadAllBytes($download))[0..3]
+          $isZip = ($header[0] -eq 0x50 -and $header[1] -eq 0x4B)
+          $final = if ($isZip) { Join-Path $env:RUNNER_TEMP 'TerrariaInput.zip' } else { Join-Path $env:RUNNER_TEMP 'Terraria.exe' }
+          Move-Item -LiteralPath $download -Destination $final -Force
+
+          "has_input=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "path=$final" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Run clean decompile and audit
+        if: steps.input.outputs.has_input == 'true'
+        shell: pwsh
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+        run: |
+          $args = @{
+            TerrariaInput = '${{ steps.input.outputs.path }}'
+            OutputDirectory = "$env:GITHUB_WORKSPACE\artifacts\terraria-result"
+            ReferencesDirectory = "$env:GITHUB_WORKSPACE\artifacts\terraria-refs"
+            NoSourceZip = $true
+          }
+          if (-not [string]::IsNullOrWhiteSpace($env:EXPECTED_VERSION)) {
+            $args.ExpectedVersion = $env:EXPECTED_VERSION
+          }
+          ./tools/terraria-decompiler/Invoke-TerrariaDecompile.ps1 @args
+
+          Get-Content "$env:GITHUB_WORKSPACE\artifacts\terraria-result\audit\audit.md" |
+            Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+
+      - name: Write smoke-test summary
+        if: steps.input.outputs.has_input != 'true'
+        shell: pwsh
+        run: |
+          $manifest = Get-Content "$env:GITHUB_WORKSPACE\artifacts\terraria-refs\references.json" -Raw | ConvertFrom-Json
+          "# Terraria Decompiler dependency smoke test" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "Prepared **$($manifest.Count)** reference assemblies successfully." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+
+      - name: Upload audit report
+        if: steps.input.outputs.has_input == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraria-decompile-audit
+          path: |
+            artifacts/terraria-result/audit/**
+            artifacts/terraria-result/version.txt
+          if-no-files-found: error
+          retention-days: 30
