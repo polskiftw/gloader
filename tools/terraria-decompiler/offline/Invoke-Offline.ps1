@@ -99,7 +99,7 @@ $inputItem = Get-Item -LiteralPath $TerrariaInput
 if ($inputItem.PSIsContainer) {
     $terrariaRoot = $inputItem.FullName
 }
-elif ([System.IO.Path]::GetExtension($inputItem.FullName).Equals('.zip', [System.StringComparison]::OrdinalIgnoreCase)) {
+elseif ([System.IO.Path]::GetExtension($inputItem.FullName).Equals('.zip', [System.StringComparison]::OrdinalIgnoreCase)) {
     Expand-Archive -Path $inputItem.FullName -DestinationPath $inputStage -Force
     $anchor = $null
     if ($TargetMode -ne 'Server') {
