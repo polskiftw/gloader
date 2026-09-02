@@ -1,6 +1,7 @@
 #if GLOADER
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
 using HarmonyLib;
@@ -224,4 +225,183 @@ internal static class ExpandedWorldSectionStorageInitializerPatch
         }
     }
 }
+
+#if GLOADER_CLIENT
+/// <summary>
+/// Terraria's client map has a second world-width ceiling independent of
+/// WorldMap._tiles. In exact 1.4.5.8 MapRenderer allocates a 5x2 render-target
+/// grid and DrawMap literally iterates X target indices 0..4. Large fits because
+/// 8400 tiles occupies targets 0..4 at 2000 tiles each; XL requires 0..6 and
+/// Huge requires 0..8.
+///
+/// The renderer also treats its final allocated X column specially as a 400-tile
+/// tail. Huge's actual tail at index 8 is 800 tiles, so simply changing 5 -> 9
+/// would retain a hidden truncation. We allocate one unused guard column (10
+/// total) so target 8 takes the ordinary full-width path. No RenderTarget2D is
+/// created for guard column 9 because current-world loops stop at the physical
+/// world-derived target index.
+/// </summary>
+internal static class ExpandedWorldMapRendererContract
+{
+    public const int VanillaTargetColumns = 5;
+    public const int HugeLastRenderableTargetIndex = ExpandedWorldMath.HugeWidth / 2000;
+    public const int BackingTargetColumns = HugeLastRenderableTargetIndex + 2;
+
+    public static Type RequireMapRendererType()
+    {
+        Type type = AccessTools.TypeByName("Terraria.MapRenderer");
+        if (type == null)
+            throw new TypeLoadException("[Expanded Worlds] Terraria.MapRenderer was not found.");
+        return type;
+    }
+
+    public static FieldInfo RequireTargetColumnsField()
+    {
+        Type type = RequireMapRendererType();
+        FieldInfo field = AccessTools.Field(type, "numTargetsX");
+        if (field == null || field.FieldType != typeof(int) || !field.IsStatic)
+        {
+            throw new InvalidOperationException(
+                "[Expanded Worlds] MapRenderer.numTargetsX no longer matches the audited static Int32 field.");
+        }
+        return field;
+    }
+
+    public static bool IsIntConstant(CodeInstruction instruction, int expected)
+    {
+        if (instruction.opcode == OpCodes.Ldc_I4 && instruction.operand is int)
+            return (int)instruction.operand == expected;
+        if (instruction.opcode == OpCodes.Ldc_I4_S && instruction.operand is sbyte)
+            return (sbyte)instruction.operand == expected;
+        if (expected == -1 && instruction.opcode == OpCodes.Ldc_I4_M1) return true;
+        if (expected == 0 && instruction.opcode == OpCodes.Ldc_I4_0) return true;
+        if (expected == 1 && instruction.opcode == OpCodes.Ldc_I4_1) return true;
+        if (expected == 2 && instruction.opcode == OpCodes.Ldc_I4_2) return true;
+        if (expected == 3 && instruction.opcode == OpCodes.Ldc_I4_3) return true;
+        if (expected == 4 && instruction.opcode == OpCodes.Ldc_I4_4) return true;
+        if (expected == 5 && instruction.opcode == OpCodes.Ldc_I4_5) return true;
+        if (expected == 6 && instruction.opcode == OpCodes.Ldc_I4_6) return true;
+        if (expected == 7 && instruction.opcode == OpCodes.Ldc_I4_7) return true;
+        if (expected == 8 && instruction.opcode == OpCodes.Ldc_I4_8) return true;
+        return false;
+    }
+
+    public static void ReplaceWithIntConstant(CodeInstruction instruction, int value)
+    {
+        instruction.opcode = OpCodes.Ldc_I4;
+        instruction.operand = value;
+    }
+}
+
+[HarmonyPatch]
+internal static class ExpandedWorldMapRendererInitializerPatch
+{
+    private static readonly FieldInfo TargetColumnsField =
+        ExpandedWorldMapRendererContract.RequireTargetColumnsField();
+
+    private static MethodBase TargetMethod()
+    {
+        Type type = ExpandedWorldMapRendererContract.RequireMapRendererType();
+        ConstructorInfo initializer = type.TypeInitializer;
+        if (initializer == null)
+            throw new MissingMethodException(type.FullName, ".cctor");
+        return initializer;
+    }
+
+    [HarmonyTranspiler]
+    private static IEnumerable<CodeInstruction> Transpiler(
+        IEnumerable<CodeInstruction> instructions,
+        MethodBase __originalMethod)
+    {
+        var code = instructions.ToList();
+        int patched = 0;
+
+        for (int i = 1; i < code.Count; i++)
+        {
+            if (code[i].opcode != OpCodes.Stsfld || !Equals(code[i].operand, TargetColumnsField))
+                continue;
+
+            if (!ExpandedWorldMapRendererContract.IsIntConstant(
+                    code[i - 1],
+                    ExpandedWorldMapRendererContract.VanillaTargetColumns))
+            {
+                throw new InvalidOperationException(
+                    "[Expanded Worlds] MapRenderer.numTargetsX initializer no longer stores audited value 5.");
+            }
+
+            ExpandedWorldMapRendererContract.ReplaceWithIntConstant(
+                code[i - 1],
+                ExpandedWorldMapRendererContract.BackingTargetColumns);
+            patched++;
+        }
+
+        if (patched != 1)
+        {
+            throw new InvalidOperationException(
+                "[Expanded Worlds] MapRenderer initializer shape changed in " +
+                (__originalMethod?.DeclaringType?.FullName ?? "Terraria.MapRenderer") +
+                ": expected one numTargetsX assignment, found " + patched + ".");
+        }
+
+        return code;
+    }
+}
+
+[HarmonyPatch]
+internal static class ExpandedWorldMapRendererDrawPatch
+{
+    private static MethodBase TargetMethod()
+    {
+        Type type = ExpandedWorldMapRendererContract.RequireMapRendererType();
+        MethodInfo method = AccessTools.Method(
+            type,
+            "DrawMap",
+            new[]
+            {
+                typeof(float), typeof(float), typeof(float), typeof(float), typeof(float),
+                typeof(float), typeof(float), typeof(float), typeof(float), typeof(byte)
+            });
+        if (method == null)
+        {
+            throw new MissingMethodException(
+                type.FullName,
+                "DrawMap(float,float,float,float,float,float,float,float,float,byte)");
+        }
+        return method;
+    }
+
+    [HarmonyTranspiler]
+    private static IEnumerable<CodeInstruction> Transpiler(
+        IEnumerable<CodeInstruction> instructions,
+        MethodBase __originalMethod)
+    {
+        var code = instructions.ToList();
+        int patched = 0;
+
+        // Exact 1.4.5.8 source contains exactly one integer literal 4 here:
+        //   for (int i = 0; i <= 4; i++)
+        // Continue the renderer through Huge's final physical target index 8.
+        for (int i = 0; i < code.Count; i++)
+        {
+            if (!ExpandedWorldMapRendererContract.IsIntConstant(code[i], 4))
+                continue;
+
+            ExpandedWorldMapRendererContract.ReplaceWithIntConstant(
+                code[i],
+                ExpandedWorldMapRendererContract.HugeLastRenderableTargetIndex);
+            patched++;
+        }
+
+        if (patched != 1)
+        {
+            throw new InvalidOperationException(
+                "[Expanded Worlds] MapRenderer.DrawMap source shape changed in " +
+                (__originalMethod?.DeclaringType?.FullName ?? "Terraria.MapRenderer") +
+                ": expected exactly one integer literal 4 loop bound, found " + patched + ".");
+        }
+
+        return code;
+    }
+}
+#endif
 #endif
