@@ -6,9 +6,39 @@ internal static class Program
     {
         // Reaching Main means every source file under gmods/ExpandedWorlds
         // compiled against the intentional Terraria API surface above.
-        if (ExpandedWorldMath.XLWidth != 12600 || ExpandedWorldMath.HugeWidth != 16800)
+        if (ExpandedWorldMath.XLWidth != 12600 || ExpandedWorldMath.XLHeight != 2400 ||
+            ExpandedWorldMath.HugeWidth != 16800 || ExpandedWorldMath.HugeHeight != 2400 ||
+            ExpandedWorldMath.ThiccWidth != 16800 || ExpandedWorldMath.ThiccHeight != 4800)
         {
             Console.Error.WriteLine("Expanded Worlds compile fixture: preset constants changed unexpectedly.");
+            return 1;
+        }
+
+        if (!ExpandedWorldMath.IsExpandedPresetDimensions(12600, 2400) ||
+            !ExpandedWorldMath.IsExpandedPresetDimensions(16800, 2400) ||
+            !ExpandedWorldMath.IsExpandedPresetDimensions(16800, 4800) ||
+            ExpandedWorldMath.IsExpandedPresetDimensions(16800, 3600) ||
+            ExpandedWorldMath.IsExpandedPresetDimensions(8400, 2400))
+        {
+            Console.Error.WriteLine("Expanded Worlds compile fixture: supported preset dimension contract changed unexpectedly.");
+            return 1;
+        }
+
+        if (ExpandedWorldState.WidthFor(ExpandedWorldPreset.Thicc) != 16800 ||
+            ExpandedWorldState.HeightFor(ExpandedWorldPreset.Thicc) != 4800 ||
+            ExpandedWorldState.DiscreteTierFor(ExpandedWorldPreset.Thicc) != 5 ||
+            ExpandedWorldState.LabelFor(ExpandedWorldPreset.Thicc) != "THICC")
+        {
+            Console.Error.WriteLine("Expanded Worlds compile fixture: THICC client preset wiring changed unexpectedly.");
+            return 1;
+        }
+
+        if (ExpandedWorldMapRendererContract.BackingTargetColumns != 10 ||
+            ExpandedWorldMapRendererContract.BackingTargetRows != 4 ||
+            ExpandedWorldMapRendererContract.HugeLastRenderableTargetIndex != 8 ||
+            ExpandedWorldMapRendererContract.ThiccLastRenderableTargetRowIndex != 2)
+        {
+            Console.Error.WriteLine("Expanded Worlds compile fixture: THICC MapRenderer backing-grid contract changed unexpectedly.");
             return 1;
         }
 
@@ -93,7 +123,8 @@ internal static class Program
             ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(ExpandedWorldMath.XLWidth, true, false) != 96 ||
             ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(ExpandedWorldMath.HugeWidth, false, false) != 64 ||
             ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(ExpandedWorldMath.HugeWidth, true, false) != 128 ||
-            ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(ExpandedWorldMath.HugeWidth, true, true) != 64)
+            ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(ExpandedWorldMath.HugeWidth, true, true) != 64 ||
+            ExpandedWorldCapacityMath.CrimsonHeartRecordUpperBound(ExpandedWorldMath.ThiccWidth, true, false) != 128)
         {
             Console.Error.WriteLine("Expanded Worlds compile fixture: Crimson heart capacity regression changed unexpectedly.");
             return 1;
@@ -102,7 +133,8 @@ internal static class Program
         if (ExpandedWorldCapacityMath.CrimsonHeartScratchCapacity(ExpandedWorldMath.XLWidth) != 96 ||
             ExpandedWorldCapacityMath.CrimsonHeartScratchCapacity(ExpandedWorldMath.XLWidth) > 100 ||
             ExpandedWorldCapacityMath.CrimsonHeartScratchCapacity(ExpandedWorldMath.HugeWidth) != 128 ||
-            ExpandedWorldCapacityMath.CrimsonHeartScratchCapacity(ExpandedWorldMath.HugeWidth) <= 100)
+            ExpandedWorldCapacityMath.CrimsonHeartScratchCapacity(ExpandedWorldMath.HugeWidth) <= 100 ||
+            ExpandedWorldCapacityMath.CrimsonHeartScratchCapacity(ExpandedWorldMath.ThiccWidth) != 128)
         {
             Console.Error.WriteLine("Expanded Worlds compile fixture: Crimson heart overflow guard is not preserved.");
             return 1;
@@ -119,7 +151,9 @@ internal static class Program
 
         if (ExpandedWorldSecretSeedMath.DontStarveWavyCaveBaseCount(12600, 2400) != 210 ||
             ExpandedWorldSecretSeedMath.DontStarveWavyCaveBaseCount(16800, 2400) != 280 ||
-            ExpandedWorldSecretSeedMath.DontStarveWavyCaveCount(16800, 2400, true) != 93)
+            ExpandedWorldSecretSeedMath.DontStarveWavyCaveBaseCount(16800, 4800) != 560 ||
+            ExpandedWorldSecretSeedMath.DontStarveWavyCaveCount(16800, 2400, true) != 93 ||
+            ExpandedWorldSecretSeedMath.DontStarveWavyCaveCount(16800, 4800, true) != 186)
         {
             Console.Error.WriteLine(
                 "Expanded Worlds compile fixture: expanded Don't Starve Wavy Cave area continuation changed unexpectedly.");
@@ -129,18 +163,20 @@ internal static class Program
         double vanillaMediumLinear = 6400d / 4200d;
         double xlLinear = ExpandedWorldFeatureGeometryMath.AxisNeutralLinearScale(12600, 2400);
         double hugeLinear = ExpandedWorldFeatureGeometryMath.AxisNeutralLinearScale(16800, 2400);
+        double thiccLinear = ExpandedWorldFeatureGeometryMath.AxisNeutralLinearScale(16800, 4800);
         if (Math.Abs(ExpandedWorldFeatureGeometryMath.AxisNeutralLinearScale(4200, 1200) - 1d) > 1e-12 ||
             Math.Abs(ExpandedWorldFeatureGeometryMath.AxisNeutralLinearScale(6400, 1800) - vanillaMediumLinear) > 1e-12 ||
             Math.Abs(ExpandedWorldFeatureGeometryMath.AxisNeutralLinearScale(8400, 2400) - 2d) > 1e-12 ||
             Math.Abs(xlLinear - Math.Sqrt(6d)) > 1e-12 ||
-            Math.Abs(hugeLinear - Math.Sqrt(8d)) > 1e-12)
+            Math.Abs(hugeLinear - Math.Sqrt(8d)) > 1e-12 ||
+            Math.Abs(thiccLinear - 4d) > 1e-12)
         {
             Console.Error.WriteLine(
                 "Expanded Worlds compile fixture: axis-neutral feature geometry scale changed unexpectedly.");
             return 1;
         }
 
-        Console.WriteLine("PASS: Expanded Worlds raw source compile fixture, capacity/seed/tier regressions, and feature geometry regressions.");
+        Console.WriteLine("PASS: Expanded Worlds raw source compile fixture, THICC client/storage contracts, capacity/seed/tier regressions, and feature geometry regressions.");
         return 0;
     }
 }
