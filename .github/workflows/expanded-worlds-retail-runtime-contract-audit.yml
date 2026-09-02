@@ -114,9 +114,14 @@ jobs:
           }
 
           Assert-Contract `
-            'Main.tile remains a fixed rectangular world backing array' `
+            'Main.tile remains a rectangular Tile[,] field' `
             $sources.Main `
-            'Tile\[,]\s+tile\s*=\s*new Tile\[maxTilesX,\s*maxTilesY\]'
+            'Tile\[,]\s+tile\s*;'
+
+          Assert-Contract `
+            'Main.tile backing storage is initialized from maxTilesX/maxTilesY' `
+            $sources.Main `
+            'tile\s*=\s*new Tile\[maxTilesX,\s*maxTilesY\]'
 
           Assert-Contract `
             'JunglePass._worldScale remains Double' `
