@@ -8,9 +8,9 @@
     <Deterministic>true</Deterministic>
     <Nullable>disable</Nullable>
     <LangVersion>latest</LangVersion>
-    <SignAssembly Condition="'$(XnaPublicKeyFile)' != ''">true</SignAssembly>
-    <DelaySign Condition="'$(XnaPublicKeyFile)' != ''">true</DelaySign>
-    <AssemblyOriginatorKeyFile Condition="'$(XnaPublicKeyFile)' != ''">$(XnaPublicKeyFile)</AssemblyOriginatorKeyFile>
+    <SignAssembly>true</SignAssembly>
+    <DelaySign>true</DelaySign>
+    <AssemblyOriginatorKeyFile>$(MSBuildThisFileDirectory)XnaPublicKey.snk</AssemblyOriginatorKeyFile>
   </PropertyGroup>
 
   <ItemGroup>
