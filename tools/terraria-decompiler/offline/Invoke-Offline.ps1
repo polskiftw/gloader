@@ -47,11 +47,23 @@ $refs = Join-Path $work 'refs'
 $inputStage = Join-Path $work 'input'
 $source = Join-Path $OutputDirectory 'source'
 $audit = Join-Path $OutputDirectory 'audit'
+$versionFile = Join-Path $OutputDirectory 'version.txt'
 
-if (Test-Path -LiteralPath $OutputDirectory) {
-    Remove-Item -LiteralPath $OutputDirectory -Recurse -Force
+# OutputDirectory is user-selectable in the GUI, so never delete the directory itself.
+# Clean only artifacts owned by this tool and leave unrelated files/folders untouched.
+New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
+foreach ($ownedDirectory in @($work, $source, $audit)) {
+    if (Test-Path -LiteralPath $ownedDirectory) {
+        Remove-Item -LiteralPath $ownedDirectory -Recurse -Force
+    }
 }
-New-Item -ItemType Directory -Force -Path $OutputDirectory, $work, $bootstrap, $refs, $inputStage, $source, $audit | Out-Null
+if (Test-Path -LiteralPath $versionFile -PathType Leaf) {
+    Remove-Item -LiteralPath $versionFile -Force
+}
+Get-ChildItem -LiteralPath $OutputDirectory -File -Filter 'TerrariaDecomp-*-clean.zip' -ErrorAction SilentlyContinue |
+    Remove-Item -Force
+
+New-Item -ItemType Directory -Force -Path $work, $bootstrap, $refs, $inputStage, $source, $audit | Out-Null
 Copy-Item -Path (Join-Path $baseRefs '*') -Destination $refs -Recurse -Force
 
 $inputItem = Get-Item -LiteralPath $TerrariaInput
@@ -83,7 +95,7 @@ $fileVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($terrariaExe
 if ([string]::IsNullOrWhiteSpace($fileVersion)) {
     $fileVersion = 'unknown'
 }
-Set-Content -Path (Join-Path $OutputDirectory 'version.txt') -Value $fileVersion -Encoding ASCII
+Set-Content -Path $versionFile -Value $fileVersion -Encoding ASCII
 Write-Host "Terraria file version: $fileVersion"
 Write-Host "Terraria install/reference root: $terrariaRoot"
 Write-Host 'Offline bundle mode: no dependency downloads will be performed.'
