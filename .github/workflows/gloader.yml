@@ -158,6 +158,10 @@ jobs:
             throw "Published package must contain the General Radio mod."
           }
 
+          if (-not (Test-Path "dist/gloader/gmods/ExpandedWorlds/Main.cs")) {
+            throw "Published package must contain the Expanded Worlds mod."
+          }
+
           if (Test-Path "dist/gloader/gmods/VGMRadio") {
             throw "VGMRadio is retired and must not be shipped as a separate mod."
           }
@@ -193,7 +197,7 @@ jobs:
           Remove-Item "dist/gloader/gdeps/logs" -Recurse -Force -ErrorAction SilentlyContinue
 
       - name: Package release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release ')
+        if: github.event_name == 'push' && ((github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release ')) || (github.ref == 'refs/heads/feat/expanded-world-sizes' && startsWith(github.event.head_commit.message, 'Refresh release ')))
         shell: pwsh
         run: |
           [xml]$project = Get-Content "src/GLoader/GLoader.csproj"
@@ -204,17 +208,29 @@ jobs:
           "RELEASE_VERSION=$version" >> $env:GITHUB_ENV
           Compress-Archive -Path "dist/gloader/*" -DestinationPath "gloader-$version.zip" -Force
 
-      - name: Publish GitHub release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release ')
+      - name: Publish or refresh GitHub release
+        if: github.event_name == 'push' && ((github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release ')) || (github.ref == 'refs/heads/feat/expanded-world-sizes' && startsWith(github.event.head_commit.message, 'Refresh release ')))
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v$env:RELEASE_VERSION" "gloader-$env:RELEASE_VERSION.zip" `
-            --repo "${{ github.repository }}" `
-            --target "${{ github.sha }}" `
-            --title "gloader v$env:RELEASE_VERSION" `
-            --notes "Adds a small Infinite Angler debug function."
+          $tag = "v$env:RELEASE_VERSION"
+          $asset = "gloader-$env:RELEASE_VERSION.zip"
+
+          gh release view $tag --repo "${{ github.repository }}" *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $asset --clobber --repo "${{ github.repository }}"
+            gh release edit $tag `
+              --repo "${{ github.repository }}" `
+              --notes "## Downloads`n`n- **gloader-$env:RELEASE_VERSION.zip** — gloader itself. Extract it into the Terraria install folder. This refreshed package includes the current `gmods` folder, Expanded Worlds XL/Huge/THICC support, and a Large Address Aware gloader.exe for the 32-bit Terraria host.`n- **TerrariaDecompilerOffline-win-x64.zip** — optional standalone GUI reference decompiler. It is not required to use gloader.`n`nThe decompiler is self-contained for Windows x64 and performs no dependency downloads while you use it."
+          }
+          else {
+            gh release create $tag $asset `
+              --repo "${{ github.repository }}" `
+              --target "${{ github.sha }}" `
+              --title "gloader v$env:RELEASE_VERSION" `
+              --notes "Includes the current gmods package, Expanded Worlds XL/Huge/THICC support, and Large Address Aware gloader.exe."
+          }
 
       - name: Upload
         uses: actions/upload-artifact@v4
