@@ -14,7 +14,8 @@ using Terraria;
 ///
 /// These are intentionally separate from GenerationMath's width/height/area
 /// families. A discrete tier rule is only extended when the source itself gives
-/// an unambiguous per-tier sequence.
+/// an unambiguous per-tier sequence. THICC shares Huge's horizontal/tier term;
+/// its extra vertical canvas is handled only by physical height/area rules.
 /// </summary>
 [HarmonyPatch]
 internal static class ExpandedWorldDiscreteTierGenerationPatch
@@ -33,11 +34,6 @@ internal static class ExpandedWorldDiscreteTierGenerationPatch
 
     private static MethodBase TargetMethod()
     {
-        // In decompiled C# the FinalCleanup pass is textually inside GenerateWorld,
-        // but the runtime IL normally stores anonymous delegates in compiler-
-        // generated methods/types. Do not hardcode a compiler-generated name.
-        // Instead locate the one implementation body that actually calls
-        // GetWorldSize and contains the audited 3/6/9 Dirtiest Block switch.
         List<MethodBase> matches = EnumerateImplementationMethods(typeof(WorldGen))
             .Where(ContainsDirtiestBlockSwitchShape)
             .ToList();
@@ -92,9 +88,6 @@ internal static class ExpandedWorldDiscreteTierGenerationPatch
         if (callOffset < 0)
             return false;
 
-        // All switch arms occur very close to the call in the audited 1.4.5-era
-        // method. Limit the fingerprint window so unrelated constants elsewhere
-        // in a large generated method cannot make a false candidate.
         int end = Math.Min(il.Length, callOffset + 160);
         return ContainsIntConstant(il, callOffset, end, 3) &&
                ContainsIntConstant(il, callOffset, end, 6) &&
@@ -106,8 +99,6 @@ internal static class ExpandedWorldDiscreteTierGenerationPatch
         int token = GetWorldSizeMethod.MetadataToken;
         for (int i = 0; i + 4 < il.Length; i++)
         {
-            // call = 0x28, callvirt = 0x6f. GetWorldSize is static, but accepting
-            // both makes the resolver resilient to harmless compiler changes.
             if (il[i] != 0x28 && il[i] != 0x6f)
                 continue;
 
@@ -120,7 +111,6 @@ internal static class ExpandedWorldDiscreteTierGenerationPatch
 
     private static bool ContainsIntConstant(byte[] il, int start, int end, int value)
     {
-        // ldc.i4.0 .. ldc.i4.8 = 0x16 .. 0x1e
         if (value >= 0 && value <= 8)
         {
             byte shortOpcode = (byte)(0x16 + value);
@@ -133,11 +123,9 @@ internal static class ExpandedWorldDiscreteTierGenerationPatch
 
         for (int i = start; i < end; i++)
         {
-            // ldc.i4.s
             if (il[i] == 0x1f && i + 1 < end && unchecked((sbyte)il[i + 1]) == value)
                 return true;
 
-            // ldc.i4
             if (il[i] == 0x20 && i + 4 < end && BitConverter.ToInt32(il, i + 1) == value)
                 return true;
         }
@@ -153,20 +141,6 @@ internal static class ExpandedWorldDiscreteTierGenerationPatch
         var code = instructions.ToList();
         int patched = 0;
 
-        // Audited 1.4.5-era source shape for The Dirtiest Block:
-        //
-        //   int target = 3;
-        //   target = GetWorldSize() switch {
-        //       1 => 6,
-        //       2 => 9,
-        //       _ => 3,
-        //   };
-        //   if (tenthAnniversaryWorldGen)
-        //       target *= 5;
-        //
-        // Inject directly before the switch result is stored. At that point the
-        // int result is already on the evaluation stack, so the helper can
-        // transform it without reconstructing compiler locals by index.
         for (int callIndex = 0; callIndex < code.Count; callIndex++)
         {
             if (!Calls(code[callIndex], GetWorldSizeMethod))
@@ -187,10 +161,6 @@ internal static class ExpandedWorldDiscreteTierGenerationPatch
                     continue;
 
                 var adjust = new CodeInstruction(OpCodes.Call, AdjustDirtiestBlockCountMethod);
-
-                // Switch branches may target the join/store instruction. Move
-                // branch labels and EH boundaries to our injected call so every
-                // incoming path is adjusted before the original store executes.
                 adjust.labels.AddRange(code[i].labels);
                 code[i].labels.Clear();
                 adjust.blocks.AddRange(code[i].blocks);
@@ -221,9 +191,6 @@ internal static class ExpandedWorldDiscreteTierGenerationPatch
         if (!ExpandedWorldState.GenerationArmed)
             return vanillaCount;
 
-        // XL/Huge intentionally report Large categorically, so the source switch
-        // must have produced Large's base 9 before we generalize it. Fail closed
-        // if current Terraria changed that rule.
         if (vanillaCount != 9)
         {
             throw new InvalidOperationException(
@@ -234,9 +201,10 @@ internal static class ExpandedWorldDiscreteTierGenerationPatch
         switch (ExpandedWorldState.GenerationPreset)
         {
             case ExpandedWorldPreset.XL:
-                return ExpandedWorldTierMath.DirtiestBlockBaseCount(4);
             case ExpandedWorldPreset.Huge:
-                return ExpandedWorldTierMath.DirtiestBlockBaseCount(5);
+            case ExpandedWorldPreset.Thicc:
+                return ExpandedWorldTierMath.DirtiestBlockBaseCount(
+                    ExpandedWorldState.DiscreteTierFor(ExpandedWorldState.GenerationPreset));
             default:
                 return vanillaCount;
         }
@@ -279,10 +247,6 @@ internal static class ExpandedWorldDiscreteTierGenerationPatch
 }
 #endif
 
-/// <summary>
-/// Pure discrete-tier rules which can be compiled by the Terraria-independent
-/// regression project.
-/// </summary>
 internal static class ExpandedWorldTierMath
 {
     public static int DirtiestBlockBaseCount(int oneBasedWorldTier)
@@ -290,7 +254,6 @@ internal static class ExpandedWorldTierMath
         if (oneBasedWorldTier < 1)
             throw new ArgumentOutOfRangeException(nameof(oneBasedWorldTier));
 
-        // Vanilla Small/Medium/Large are exactly 3/6/9.
         return checked(3 * oneBasedWorldTier);
     }
 
