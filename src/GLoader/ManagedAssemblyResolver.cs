@@ -13,10 +13,8 @@ namespace GLoader
 
         // AssemblyResolve may be serviced by more than one ManagedAssemblyResolver
         // instance at once (the bootstrap resolver and the Terraria/resource resolver).
-        // Assembly.LoadFrom/Assembly.Load can themselves raise AssemblyResolve, so a
-        // same-identity request must not be allowed to ping-pong between handlers.
-        // ThreadStatic keeps the guard scoped to the synchronous bind chain while
-        // still sharing it across resolver instances on that thread.
+        // Loading a dependency can itself raise AssemblyResolve, so a same-identity
+        // request must not be allowed to ping-pong between handlers until the stack dies.
         [ThreadStatic]
         private static HashSet<string> _resolvingIdentities;
 
@@ -114,7 +112,15 @@ namespace GLoader
                             continue;
                         }
 
-                        return Assembly.LoadFrom(candidate);
+                        // Do not use Assembly.LoadFrom here. We are already inside the
+                        // AssemblyResolve event precisely because normal probing did not
+                        // find this file (the release package keeps dependencies in gdeps).
+                        // LoadFrom can re-enter the binder for the same strong-name identity,
+                        // which previously caused both a resolver stack overflow and a
+                        // false FileNotFound for an exact System.Memory.dll that was present.
+                        // Loading the selected bytes binds this request directly; dependent
+                        // assemblies still come back through this resolver normally.
+                        return Assembly.Load(File.ReadAllBytes(candidate));
                     }
                     catch (BadImageFormatException)
                     {
@@ -139,10 +145,9 @@ namespace GLoader
             }
 
             // Weak-named assemblies historically bind by simple name in gloader.
-            // Preserve that behavior. Strong-named dependencies, however, must
-            // not be substituted across versions: Roslyn 5.9, for example,
-            // requires System.Collections.Immutable 10.x and will fail if an
-            // older strong-named copy from Terraria or another dependency wins.
+            // Preserve that behavior. Strong-named dependencies stay exact here;
+            // package-version roll-forward, if ever needed, should be explicit rather
+            // than accidentally selecting a different Terraria/game dependency.
             var requestedToken = requested.GetPublicKeyToken();
             if (requestedToken == null || requestedToken.Length == 0)
             {
