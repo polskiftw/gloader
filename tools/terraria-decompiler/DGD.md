@@ -7,26 +7,26 @@ Use **TerrariaDecompilerOffline-win-x64.zip** from the rolling **Terraria Decomp
 You do **not** need to install ILSpy, .NET 10, PowerShell 7, 7-Zip, XNA, or reference packs.
 
 1. Extract the ZIP.
-2. Drag `Terraria.exe` **or the whole Terraria install folder** onto `RUN-DECOMPILER.cmd`.
-3. Open `output\` when it finishes.
+2. Double-click `TerrariaDecompiler.exe`.
+3. Pick `Terraria.exe` if it was not auto-detected.
+4. Pick the output folder.
+5. Click **DECOMPILE**.
 
-If Terraria is installed in the normal Steam location, you can also just double-click `RUN-DECOMPILER.cmd`.
+That is the normal workflow. No dragging EXEs onto CMD files.
 
-The source is:
+The GUI shows the Terraria version, how many sibling DLLs are managed/native, progress, final audit status, and buttons for **Open Output** and **View Audit**. **Show Details** exposes the captured engine log when needed.
 
-`output\source\`
+The selected output folder contains:
 
-The source ZIP is:
+`source\`
 
-`output\TerrariaDecomp-<detected-version>-clean.zip`
+`TerrariaDecomp-<detected-version>-clean.zip`
 
-The audit is:
+`audit\audit.md`
 
-`output\audit\audit.md`
+`audit\audit.json`
 
-The reference report is:
-
-`output\audit\reference-sources.json`
+`audit\reference-sources.json`
 
 The bundle does **not** fetch dependencies while you use it.
 
@@ -37,7 +37,7 @@ Before decompiling, it scans DLLs sitting next to `Terraria.exe`.
 - Managed .NET DLLs are copied into a temporary ILSpy reference directory.
 - Native DLLs are ignored for ILSpy type resolution and recorded in `reference-sources.json`.
 - The genuine `Microsoft.Xna.Framework.Content.Pipeline.dll` that current Terraria ships is used directly from your own install.
-- There is **no Content Pipeline shim** in the bundle anymore.
+- There is **no Content Pipeline shim** in the bundle.
 
 Then it extracts Terraria's embedded managed DLLs and runs the clean second ILSpy pass.
 
@@ -45,23 +45,25 @@ Nothing harvested from your Terraria install is added to the generated source ZI
 
 ## Terraria updated
 
-Run the same offline bundle against the new install / new `Terraria.exe`.
+Open the same `TerrariaDecompiler.exe` and point it at the updated `Terraria.exe`.
 
-The version is detected automatically and used in the new source ZIP filename. New managed sibling DLLs should be picked up automatically. Check `audit\audit.md` afterward. Zeroes are good; if a future Terraria version adds some dependency the tool still cannot resolve, update the decompiler bundle instead of ignoring the diagnostics.
+The version is detected automatically. New managed sibling DLLs should be picked up automatically. Check the final GUI audit status or `audit\audit.md`. Zeroes are good; if a future Terraria version adds something the tool still cannot resolve, update the decompiler bundle instead of ignoring the diagnostics.
 
-## Maintainer mode
+## Internal / maintainer mode
 
-The older script path still exists:
+The GUI launches `Run-TerrariaDecompiler.ps1` internally. You normally never touch it.
+
+The older repository maintainer path still exists:
 
 ```powershell
 pwsh ./tools/terraria-decompiler/Invoke-TerrariaDecompile.ps1 -TerrariaInput 'C:\path\to\Terraria.exe' -OutputDirectory './artifacts/terraria-decompile'
 ```
 
-That mode now also harvests sibling managed DLLs first, but it is for rebuilding/debugging the tool and **can download fallback dependencies**. It is not the recommended everyday local path.
+That mode also harvests sibling managed DLLs first, but it is for rebuilding/debugging the tool and **can download fallback dependencies**.
 
 ## Phone / GitHub Actions
 
-- **Terraria Decompiler Offline Bundle** builds and republishes the portable Windows package.
+- **Terraria Decompiler Offline Bundle** builds, self-tests, and republishes the GUI Windows package.
 - **Terraria Decompiler** is the decompile/reference smoke tester. Its public workflow uploads only the audit, not Terraria's decompiled source.
 
 ## What a good audit looks like
