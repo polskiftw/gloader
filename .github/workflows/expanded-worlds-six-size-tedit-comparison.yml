@@ -1,0 +1,386 @@
+name: Expanded Worlds six-size TEdit comparison
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/expanded-world-sizes
+    paths:
+      - .github/workflows/expanded-worlds-six-size-tedit-comparison.yml
+
+permissions:
+  contents: read
+
+jobs:
+  comparison:
+    name: Generate six real worlds and render with TEdit
+    runs-on: windows-latest
+    timeout-minutes: 240
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8 and 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Install official Microsoft XNA Framework 4.0
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msi = Join-Path $env:RUNNER_TEMP 'xnafx40_redist.msi'
+          Invoke-WebRequest -Uri 'https://download.microsoft.com/download/a/c/2/ac2c903b-e6e8-42c2-9fd7-bebac362a930/xnafx40_redist.msi' -OutFile $msi
+          $p = Start-Process -FilePath msiexec.exe -ArgumentList @('/i', ('"' + $msi + '"'), '/qn', '/norestart') -Wait -PassThru
+          if ($p.ExitCode -notin @(0, 3010)) { throw "XNA installer exited $($p.ExitCode)." }
+
+      - name: Pick one fresh seed for all six sizes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $seed = [int](100000000 + ([int64]$env:GITHUB_RUN_ID % 1900000000))
+          "EW_SEED=$seed" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          New-Item -ItemType Directory -Force comparison | Out-Null
+          "seed=$seed" | Set-Content comparison/seed.txt -Encoding ascii
+          Write-Host "Same seed for Small, Medium, Large, XL, Huge and THICC: $seed"
+          Add-Content $env:GITHUB_STEP_SUMMARY "### Expanded Worlds six-size comparison"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Same fresh seed: **$seed**"
+
+      - name: Download official TerrariaServer 1.4.5.8 and build LAA x86 gloader
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Join-Path $env:RUNNER_TEMP 'terraria-server-1458.zip'
+          $root = Join-Path $env:RUNNER_TEMP 'terraria-server-1458'
+          Invoke-WebRequest 'https://terraria.org/api/download/pc-dedicated-server/terraria-server-1458.zip' -OutFile $zip
+          Expand-Archive $zip $root -Force
+          $server = Join-Path $root '1458/Windows/TerrariaServer.exe'
+          if (-not (Test-Path $server)) { throw 'Official TerrariaServer.exe missing.' }
+
+          dotnet build src/GLoader/GLoader.csproj -c Release -p:PlatformTarget=x86 -p:Prefer32Bit=true
+          $gloader = Join-Path $PWD 'src/GLoader/bin/Release/net48/gloader.exe'
+          if (-not (Test-Path $gloader)) { throw 'gloader.exe missing.' }
+
+          # THICC has already passed the isolated 16,800x4,800 LAA probe. Use the
+          # same PE flag here so this comparison exercises the proven address-space path.
+          $bytes = [IO.File]::ReadAllBytes($gloader)
+          $pe = [BitConverter]::ToInt32($bytes, 0x3c)
+          $offset = $pe + 22
+          $characteristics = [BitConverter]::ToUInt16($bytes, $offset)
+          $characteristics = [uint16]($characteristics -bor 0x20)
+          [BitConverter]::GetBytes($characteristics).CopyTo($bytes, $offset)
+          [IO.File]::WriteAllBytes($gloader, $bytes)
+
+          "TERRARIA_SERVER=$server" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "SERVER_DIR=$(Split-Path -Parent $server)" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "GLOADER_EXE=$gloader" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Stage normal Expanded Worlds and isolated THICC preset
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $normalRoot = Join-Path $env:RUNNER_TEMP 'ew-normal-gmods'
+          New-Item -ItemType Directory -Force $normalRoot | Out-Null
+          Copy-Item 'gmods/ExpandedWorlds' (Join-Path $normalRoot 'ExpandedWorlds') -Recurse -Force
+
+          # THICC is deliberately staged independently from Huge. This is the same
+          # physical 16,800x4,800 configuration that already passed generation,
+          # save and fresh-process reload, while preserving normal Huge at 16,800x2,400.
+          $thiccRoot = Join-Path $env:RUNNER_TEMP 'ew-thicc-gmods'
+          $thiccMod = Join-Path $thiccRoot 'ExpandedWorlds'
+          New-Item -ItemType Directory -Force $thiccRoot | Out-Null
+          Copy-Item 'gmods/ExpandedWorlds' $thiccMod -Recurse -Force
+
+          function Replace-Once([string]$path, [string]$old, [string]$new) {
+            $text = Get-Content -Raw $path
+            $count = ([regex]::Matches($text, [regex]::Escape($old))).Count
+            if ($count -ne 1) { throw "Expected one '$old' in $path; found $count." }
+            Set-Content $path ($text.Replace($old, $new)) -Encoding UTF8
+          }
+
+          Replace-Once (Join-Path $thiccMod 'GenerationMath.cs') 'public const int HugeHeight = 2400;' 'public const int HugeHeight = 4800;'
+          Replace-Once (Join-Path $thiccMod 'ServerRuntime.cs') 'internal const int VanillaLargeHeight = 2400;' 'internal const int VanillaLargeHeight = 4800;'
+
+          $storage = Join-Path $thiccMod 'WorldStorage.cs'
+          $text = Get-Content -Raw $storage
+          $pattern = 'return\s+height\s*==\s*ExpandedWorldMath\.LargeHeight\s*&&\s*\(width\s*==\s*ExpandedWorldMath\.XLWidth\s*\|\|\s*width\s*==\s*ExpandedWorldMath\.HugeWidth\s*\);'
+          if ([regex]::Matches($text, $pattern).Count -ne 1) { throw 'WorldStorage dimension guard shape changed.' }
+          $replacement = 'return (width == ExpandedWorldMath.XLWidth && height == ExpandedWorldMath.XLHeight) ||' + [Environment]::NewLine + '               (width == ExpandedWorldMath.HugeWidth && height == ExpandedWorldMath.HugeHeight);'
+          Set-Content $storage ([regex]::Replace($text, $pattern, $replacement, 1)) -Encoding UTF8
+
+          "NORMAL_MODS=$normalRoot" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "THICC_MODS=$thiccRoot" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Generate Small Medium Large XL Huge and THICC from the same seed
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $out = Join-Path $PWD 'comparison'
+          $worldRoot = Join-Path $env:RUNNER_TEMP 'ew-six-size-worlds'
+          New-Item -ItemType Directory -Force $worldRoot | Out-Null
+
+          function Test-Port([int]$port) {
+            $client = New-Object System.Net.Sockets.TcpClient
+            try {
+              $task = $client.ConnectAsync('127.0.0.1', $port)
+              if (-not $task.Wait(300)) { return $false }
+              return $client.Connected
+            } catch { return $false } finally { $client.Dispose() }
+          }
+
+          function Generate-World(
+            [string]$name,
+            [int]$autocreate,
+            [int]$width,
+            [int]$height,
+            [int]$port,
+            [string]$expanded,
+            [string]$mods
+          ) {
+            $save = Join-Path $worldRoot $name
+            $worlds = Join-Path $save 'Worlds'
+            New-Item -ItemType Directory -Force $worlds | Out-Null
+            $world = Join-Path $worlds ($name + '.wld')
+            $stdout = Join-Path $out ($name + '-stdout.txt')
+            $stderr = Join-Path $out ($name + '-stderr.txt')
+
+            $game = @(
+              '-savedirectory', ('"' + $save + '"'),
+              '-world', ('"' + $world + '"'),
+              '-autocreate', $autocreate,
+              '-worldname', ('EW-' + $name),
+              '-seed', $env:EW_SEED,
+              '-difficulty', '0',
+              '-port', $port,
+              '-maxplayers', '1',
+              '-noupnp'
+            )
+
+            if ([string]::IsNullOrWhiteSpace($expanded)) {
+              $exe = $env:TERRARIA_SERVER
+              $args = $game -join ' '
+            } else {
+              $exe = $env:GLOADER_EXE
+              $env:GLOADER_EXPANDED_WORLD = $expanded
+              $loader = @('--target', ('"' + $env:TERRARIA_SERVER + '"'), '--mods', ('"' + $mods + '"'), '--')
+              $args = ($loader + $game) -join ' '
+            }
+
+            Write-Host "Generating $name at $width x $height using seed $env:EW_SEED"
+            $p = Start-Process -FilePath $exe -ArgumentList $args -WorkingDirectory $env:SERVER_DIR -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+            $ready = $false
+            $deadline = (Get-Date).AddMinutes(90)
+            while ((Get-Date) -lt $deadline) {
+              if ($p.HasExited) { break }
+              if (Test-Path $stdout) {
+                $live = Get-Content -Raw $stdout -ErrorAction SilentlyContinue
+                if ($live -and ($live.Contains('Mod failed: ExpandedWorlds') -or $live.Contains('Dedicated-server generation failed:'))) { break }
+              }
+              if (Test-Port $port) { $ready = $true; break }
+              Start-Sleep -Seconds 2
+            }
+
+            if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+            try { $p.WaitForExit(10000) | Out-Null } catch {}
+            Remove-Item Env:GLOADER_EXPANDED_WORLD -ErrorAction SilentlyContinue
+
+            if (-not $ready) {
+              if (Test-Path $stdout) { Get-Content -Raw $stdout | Write-Host }
+              if (Test-Path $stderr) { Get-Content -Raw $stderr | Write-Host }
+              throw "$name server never became ready."
+            }
+            if (-not (Test-Path $world)) { throw "$name .wld is missing." }
+            $info = Get-Item $world
+            if ($info.Length -lt 512KB) { throw "$name .wld is unexpectedly small: $($info.Length)" }
+
+            $dest = Join-Path $out ($name + '.wld')
+            Copy-Item $world $dest -Force
+            $hash = (Get-FileHash $dest -Algorithm SHA256).Hash
+            Add-Content (Join-Path $out 'manifest.txt') "$name|$width|$height|$env:EW_SEED|$($info.Length)|$hash"
+            Write-Host "PASS $name: $width x $height, $($info.Length) bytes, SHA256 $hash"
+          }
+
+          Generate-World 'Small' 1 4200 1200 7841 '' ''
+          Generate-World 'Medium' 2 6400 1800 7842 '' ''
+          Generate-World 'Large' 3 8400 2400 7843 '' ''
+          Generate-World 'XL' 3 12600 2400 7844 'XL' $env:NORMAL_MODS
+          Generate-World 'Huge' 3 16800 2400 7845 'HUGE' $env:NORMAL_MODS
+          # The isolated THICC staging copy uses the already-proven Huge runtime hook
+          # with its own 4,800-tile height, so Huge itself remains 16,800x2,400.
+          Generate-World 'THICC' 3 16800 4800 7846 'HUGE' $env:THICC_MODS
+
+      - name: Clone pinned TEdit and build a headless TEdit minimap renderer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tedit = Join-Path $env:RUNNER_TEMP 'tedit'
+          git clone --depth 1 https://github.com/TEdit/Terraria-Map-Editor.git $tedit
+          git -C $tedit fetch --depth 1 origin cbf7b3876e408cf45240b5d792e0d8e57ba78e3f
+          git -C $tedit checkout cbf7b3876e408cf45240b5d792e0d8e57ba78e3f
+
+          $renderer = Join-Path $env:RUNNER_TEMP 'tedit-headless-renderer'
+          New-Item -ItemType Directory -Force $renderer | Out-Null
+          $teditProj = (Join-Path $tedit 'src/TEdit/TEdit.csproj').Replace('\','/')
+
+          @"
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <OutputType>Exe</OutputType>
+              <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+              <UseWPF>true</UseWPF>
+              <EnableWindowsTargeting>true</EnableWindowsTargeting>
+              <ImplicitUsings>enable</ImplicitUsings>
+              <Nullable>enable</Nullable>
+            </PropertyGroup>
+            <ItemGroup>
+              <ProjectReference Include="$teditProj" />
+            </ItemGroup>
+          </Project>
+          "@ | Set-Content -Encoding UTF8 (Join-Path $renderer 'Renderer.csproj')
+
+          @'
+          using System;
+          using System.IO;
+          using System.Windows.Media.Imaging;
+          using TEdit.Render;
+          using TEdit.Terraria;
+
+          internal static class Program
+          {
+              [STAThread]
+              static int Main(string[] args)
+              {
+                  if (args.Length != 2) throw new ArgumentException("world.wld output.png");
+                  WorldConfiguration.Initialize();
+                  var (world, error) = World.LoadWorld(args[0]);
+                  if (error != null) throw new Exception("TEdit failed to load world", error);
+                  if (world == null) throw new InvalidOperationException("TEdit returned null world");
+
+                  // Exactly 1 output pixel per 8 Terraria tiles for every size.
+                  // This preserves true relative dimensions across all six panels.
+                  int targetWidth = world.TilesWide / 8;
+                  int targetHeight = world.TilesHigh / 8;
+                  var bmp = RenderMiniMap.Render(world, useFilter: false, showBackground: true,
+                      targetWidth: targetWidth, targetHeight: targetHeight);
+
+                  var encoder = new PngBitmapEncoder();
+                  encoder.Frames.Add(BitmapFrame.Create(bmp));
+                  using var stream = File.Create(args[1]);
+                  encoder.Save(stream);
+                  Console.WriteLine($"TEdit rendered {world.Title}: {world.TilesWide}x{world.TilesHigh} -> {bmp.PixelWidth}x{bmp.PixelHeight}");
+                  return 0;
+              }
+          }
+          '@ | Set-Content -Encoding UTF8 (Join-Path $renderer 'Program.cs')
+
+          dotnet build (Join-Path $renderer 'Renderer.csproj') -c Release
+          "TEDIT_RENDERER=$(Join-Path $renderer 'bin/Release/net10.0-windows10.0.19041.0/Renderer.dll')" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Render all six real .wld files through TEdit
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($name in @('Small','Medium','Large','XL','Huge','THICC')) {
+            dotnet $env:TEDIT_RENDERER (Join-Path $PWD "comparison/$name.wld") (Join-Path $PWD "comparison/$name-map.png")
+            if (-not (Test-Path "comparison/$name-map.png")) { throw "TEdit render missing for $name" }
+          }
+
+      - name: Compose the six real TEdit maps at one consistent scale
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName System.Drawing
+
+          $rows = @(
+            @{ Name='Small';  Label='1. Small — 4200 × 1200' },
+            @{ Name='Medium'; Label='2. Medium — 6400 × 1800' },
+            @{ Name='Large';  Label='3. Large — 8400 × 2400' },
+            @{ Name='XL';     Label='4. XL — 12600 × 2400' },
+            @{ Name='Huge';   Label='5. Huge — 16800 × 2400' },
+            @{ Name='THICC';  Label='6. THICC — 16800 × 4800' }
+          )
+
+          $images = @{}
+          foreach ($row in $rows) {
+            $images[$row.Name] = [System.Drawing.Image]::FromFile((Join-Path $PWD "comparison/$($row.Name)-map.png"))
+          }
+
+          $canvasW = 2300
+          $top = 125
+          $labelH = 38
+          $gap = 28
+          $bottomPad = 50
+          $canvasH = $top + $bottomPad
+          foreach ($row in $rows) { $canvasH += $labelH + $images[$row.Name].Height + $gap }
+
+          $bmp = New-Object System.Drawing.Bitmap($canvasW, $canvasH, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          $g.Clear([System.Drawing.Color]::FromArgb(16,22,31))
+          $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+          $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::ClearTypeGridFit
+
+          $titleFont = New-Object System.Drawing.Font('Segoe UI', 34, [System.Drawing.FontStyle]::Bold)
+          $subFont = New-Object System.Drawing.Font('Segoe UI', 18, [System.Drawing.FontStyle]::Regular)
+          $labelFont = New-Object System.Drawing.Font('Segoe UI', 20, [System.Drawing.FontStyle]::Bold)
+          $white = [System.Drawing.Brushes]::White
+          $blue = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(105,175,255))
+          $border = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(210,220,230), 2)
+          $center = New-Object System.Drawing.StringFormat
+          $center.Alignment = [System.Drawing.StringAlignment]::Center
+
+          $g.DrawString('Expanded Worlds — Same Seed, All Sizes', $titleFont, $white, [System.Drawing.RectangleF]::new(0,20,$canvasW,55), $center)
+          $g.DrawString(('Real Terraria 1.4.5.8 worldgen • TEdit render • seed ' + $env:EW_SEED), $subFont, $blue, [System.Drawing.RectangleF]::new(0,78,$canvasW,35), $center)
+
+          $y = $top
+          foreach ($row in $rows) {
+            $img = $images[$row.Name]
+            $g.DrawString($row.Label, $labelFont, $white, [System.Drawing.RectangleF]::new(0,$y,$canvasW,$labelH), $center)
+            $y += $labelH
+            $x = [int](($canvasW - $img.Width) / 2)
+            $g.DrawImageUnscaled($img, $x, $y)
+            $g.DrawRectangle($border, $x, $y, $img.Width - 1, $img.Height - 1)
+            $y += $img.Height + $gap
+          }
+
+          $path = Join-Path $PWD 'comparison/ExpandedWorlds-SameSeed-AllSizes-TEdit.png'
+          $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+
+          foreach ($img in $images.Values) { $img.Dispose() }
+          $border.Dispose(); $blue.Dispose(); $titleFont.Dispose(); $subFont.Dispose(); $labelFont.Dispose(); $g.Dispose(); $bmp.Dispose()
+          Write-Host "Final real comparison: $path"
+
+      - name: Verify output dimensions and write summary
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName System.Drawing
+          $expected = @{
+            Small='525x150'; Medium='800x225'; Large='1050x300'; XL='1575x300'; Huge='2100x300'; THICC='2100x600'
+          }
+          foreach ($name in $expected.Keys) {
+            $img = [System.Drawing.Image]::FromFile((Join-Path $PWD "comparison/$name-map.png"))
+            $actual = "$($img.Width)x$($img.Height)"
+            $img.Dispose()
+            if ($actual -ne $expected[$name]) { throw "$name TEdit map expected $($expected[$name]), got $actual" }
+          }
+          Add-Content $env:GITHUB_STEP_SUMMARY '- World generation: **PASS for all six sizes**'
+          Add-Content $env:GITHUB_STEP_SUMMARY '- TEdit rendering: **PASS for all six .wld files**'
+          Add-Content $env:GITHUB_STEP_SUMMARY '- Render scale: **1 pixel = 8 Terraria tiles for every panel**'
+          Add-Content $env:GITHUB_STEP_SUMMARY '- Final image: **ExpandedWorlds-SameSeed-AllSizes-TEdit.png**'
+
+      - name: Remove large .wld files before image artifact upload
+        shell: pwsh
+        run: |
+          Remove-Item comparison/*.wld -Force
+
+      - name: Upload real six-size TEdit comparison
+        uses: actions/upload-artifact@v4
+        with:
+          name: expanded-worlds-six-size-tedit-comparison
+          path: comparison/
+          if-no-files-found: error
+          retention-days: 14
