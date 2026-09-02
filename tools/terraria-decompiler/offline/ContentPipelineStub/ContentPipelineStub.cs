@@ -47,6 +47,11 @@ namespace Microsoft.Xna.Framework.Content.Pipeline
         public abstract ExternalReference<TOutput> BuildAsset<TInput, TOutput>(ExternalReference<TInput> sourceAsset, string processorName, OpaqueDataDictionary processorParameters, string importerName, string assetName);
         public abstract TOutput Convert<TInput, TOutput>(TInput input, string processorName, OpaqueDataDictionary processorParameters);
     }
+
+    public abstract class ContentProcessor<TInput, TOutput>
+    {
+        public abstract TOutput Process(TInput input, ContentProcessorContext context);
+    }
 }
 
 namespace Microsoft.Xna.Framework.Content.Pipeline.Graphics
@@ -73,9 +78,9 @@ namespace Microsoft.Xna.Framework.Content.Pipeline.Processors
 {
     using Microsoft.Xna.Framework.Content.Pipeline.Graphics;
 
-    public class EffectProcessor
+    public class EffectProcessor : ContentProcessor<EffectContent, CompiledEffectContent>
     {
-        public CompiledEffectContent Process(EffectContent input, ContentProcessorContext context)
+        public override CompiledEffectContent Process(EffectContent input, ContentProcessorContext context)
         {
             throw new NotSupportedException("Metadata-only compatibility shim.");
         }
