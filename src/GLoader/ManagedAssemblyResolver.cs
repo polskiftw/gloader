@@ -30,6 +30,10 @@ namespace GLoader
                 .Where(path => !string.IsNullOrWhiteSpace(path))
                 .Select(Path.GetFullPath)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
+                // The packaged support set is authoritative for compiler/runtime
+                // dependencies. Prefer gdeps ahead of Terraria's own directory so an
+                // older game-shipped strong-name assembly cannot win by path order.
+                .OrderBy(path => IsSupportDirectory(path) ? 0 : 1)
                 .ToArray();
 
             AppDomain.CurrentDomain.AssemblyResolve += Resolve;
@@ -81,7 +85,7 @@ namespace GLoader
                 {
                     try
                     {
-                        return MatchesRequestedIdentity(assembly.GetName(), requested);
+                        return IsCompatibleIdentity(assembly.GetName(), requested);
                     }
                     catch
                     {
@@ -107,7 +111,7 @@ namespace GLoader
                     try
                     {
                         var candidateName = AssemblyName.GetAssemblyName(candidate);
-                        if (!MatchesRequestedIdentity(candidateName, requested))
+                        if (!IsCompatibleIdentity(candidateName, requested))
                         {
                             continue;
                         }
@@ -115,11 +119,7 @@ namespace GLoader
                         // Do not use Assembly.LoadFrom here. We are already inside the
                         // AssemblyResolve event precisely because normal probing did not
                         // find this file (the release package keeps dependencies in gdeps).
-                        // LoadFrom can re-enter the binder for the same strong-name identity,
-                        // which previously caused both a resolver stack overflow and a
-                        // false FileNotFound for an exact System.Memory.dll that was present.
-                        // Loading the selected bytes binds this request directly; dependent
-                        // assemblies still come back through this resolver normally.
+                        // LoadFrom can re-enter the binder for the same strong-name identity.
                         return Assembly.Load(File.ReadAllBytes(candidate));
                     }
                     catch (BadImageFormatException)
@@ -136,7 +136,7 @@ namespace GLoader
             return ResolveEmbedded(requested);
         }
 
-        private static bool MatchesRequestedIdentity(AssemblyName candidate, AssemblyName requested)
+        private static bool IsCompatibleIdentity(AssemblyName candidate, AssemblyName requested)
         {
             if (candidate == null || requested == null ||
                 !string.Equals(candidate.Name, requested.Name, StringComparison.OrdinalIgnoreCase))
@@ -145,9 +145,7 @@ namespace GLoader
             }
 
             // Weak-named assemblies historically bind by simple name in gloader.
-            // Preserve that behavior. Strong-named dependencies stay exact here;
-            // package-version roll-forward, if ever needed, should be explicit rather
-            // than accidentally selecting a different Terraria/game dependency.
+            // Preserve that behavior.
             var requestedToken = requested.GetPublicKeyToken();
             if (requestedToken == null || requestedToken.Length == 0)
             {
@@ -155,19 +153,69 @@ namespace GLoader
             }
 
             var candidateToken = candidate.GetPublicKeyToken();
-            if (candidateToken == null || !candidateToken.SequenceEqual(requestedToken))
-            {
-                return false;
-            }
-
-            if (requested.Version != null && candidate.Version != requested.Version)
+            if (!PublicKeyTokensEqual(candidateToken, requestedToken))
             {
                 return false;
             }
 
             var requestedCulture = requested.CultureName ?? string.Empty;
             var candidateCulture = candidate.CultureName ?? string.Empty;
-            return string.Equals(candidateCulture, requestedCulture, StringComparison.OrdinalIgnoreCase);
+            if (!string.Equals(candidateCulture, requestedCulture, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (requested.Version == null || candidate.Version == null)
+            {
+                return true;
+            }
+
+            // NuGet servicing releases can intentionally ship a strong-named assembly
+            // whose revision is newer than the compile-time reference. Example: Roslyn
+            // 5.9 requests System.Collections.Immutable 10.0.0.0 while the packaged
+            // System.Collections.Immutable 10.0.1 asset has assembly version 10.0.0.1.
+            // Exact version equality rejects a compatible package and breaks startup.
+            // Allow forward servicing within the same major/minor line, never backward
+            // or across a major/minor boundary where API compatibility is not implied.
+            if (candidate.Version.Major != requested.Version.Major ||
+                candidate.Version.Minor != requested.Version.Minor)
+            {
+                return false;
+            }
+
+            return candidate.Version.CompareTo(requested.Version) >= 0;
+        }
+
+        private static bool PublicKeyTokensEqual(byte[] candidate, byte[] requested)
+        {
+            if (candidate == null || requested == null || candidate.Length != requested.Length)
+            {
+                return false;
+            }
+
+            for (var i = 0; i < candidate.Length; i++)
+            {
+                if (candidate[i] != requested[i])
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static bool IsSupportDirectory(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return false;
+            }
+
+            var trimmed = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            return string.Equals(
+                Path.GetFileName(trimmed),
+                "gdeps",
+                StringComparison.OrdinalIgnoreCase);
         }
 
         private Assembly ResolveEmbedded(AssemblyName requested)
@@ -218,7 +266,7 @@ namespace GLoader
                             }
 
                             var assembly = Assembly.Load(memory.ToArray());
-                            return MatchesRequestedIdentity(assembly.GetName(), requested)
+                            return IsCompatibleIdentity(assembly.GetName(), requested)
                                 ? assembly
                                 : null;
                         }
