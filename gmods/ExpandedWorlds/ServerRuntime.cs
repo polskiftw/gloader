@@ -4,7 +4,6 @@ using System.Linq;
 using System.Reflection;
 using HarmonyLib;
 using Terraria;
-using Terraria.IO;
 
 /// <summary>
 /// Dedicated-server entry point for Expanded Worlds.
@@ -289,9 +288,13 @@ internal static class ExpandedWorldServerLoadVerificationPatch
 {
     private static MethodBase TargetMethod()
     {
-        MethodBase method = AccessTools.Method(typeof(WorldFile), "LoadWorld", new[] { typeof(bool) });
+        Type worldFileType = typeof(Main).Assembly.GetType("Terraria.IO.WorldFile", false);
+        if (worldFileType == null)
+            throw new TypeLoadException("Terraria.IO.WorldFile was not found in the loaded Terraria assembly.");
+
+        MethodBase method = AccessTools.Method(worldFileType, "LoadWorld", new[] { typeof(bool) });
         if (method == null)
-            throw new MissingMethodException(typeof(WorldFile).FullName, "LoadWorld(bool)");
+            throw new MissingMethodException(worldFileType.FullName, "LoadWorld(bool)");
 
         return method;
     }
