@@ -8,10 +8,11 @@ using Terraria;
 /// <summary>
 /// Dedicated-server entry point for Expanded Worlds.
 ///
-/// The normal client UI remains the primary way to select XL/Huge. For headless
-/// generation, set GLOADER_EXPANDED_WORLD to XL or HUGE and launch the vanilla
-/// dedicated server with its normal Large autocreate path. Terraria still sees
-/// the custom world categorically as Large; only the physical dimensions change.
+/// The normal client UI remains the primary way to select XL/Huge/THICC. For
+/// headless generation, set GLOADER_EXPANDED_WORLD to XL, HUGE, or THICC and
+/// launch the vanilla dedicated server with its normal Large autocreate path.
+/// Terraria still sees every custom world categorically as Large; only the
+/// physical dimensions change.
 /// </summary>
 public static class Mod
 {
@@ -26,6 +27,7 @@ internal enum ExpandedWorldServerPreset
     None = 0,
     XL = 1,
     Huge = 2,
+    Thicc = 3,
 }
 
 internal static class ExpandedWorldServerState
@@ -33,7 +35,11 @@ internal static class ExpandedWorldServerState
     internal const int VanillaLargeWidth = 8400;
     internal const int VanillaLargeHeight = 2400;
     internal const int XLWidth = 12600;
+    internal const int XLHeight = 2400;
     internal const int HugeWidth = 16800;
+    internal const int HugeHeight = 2400;
+    internal const int ThiccWidth = 16800;
+    internal const int ThiccHeight = 4800;
 
     internal static ExpandedWorldServerPreset Requested { get; private set; }
     internal static bool GenerationArmed { get; private set; }
@@ -56,14 +62,17 @@ internal static class ExpandedWorldServerState
             case "HUGE":
                 Requested = ExpandedWorldServerPreset.Huge;
                 break;
+            case "THICC":
+                Requested = ExpandedWorldServerPreset.Thicc;
+                break;
             default:
                 throw new ArgumentException(
-                    "GLOADER_EXPANDED_WORLD must be XL or HUGE; received '" + raw + "'.");
+                    "GLOADER_EXPANDED_WORLD must be XL, HUGE, or THICC; received '" + raw + "'.");
         }
 
         Console.WriteLine(
             "[Expanded Worlds] Dedicated-server headless preset: " +
-            LabelFor(Requested) + " " + WidthFor(Requested) + "x" + VanillaLargeHeight + ".");
+            LabelFor(Requested) + " " + WidthFor(Requested) + "x" + HeightFor(Requested) + ".");
     }
 
     internal static void BeginGeneration()
@@ -88,8 +97,25 @@ internal static class ExpandedWorldServerState
                 return XLWidth;
             case ExpandedWorldServerPreset.Huge:
                 return HugeWidth;
+            case ExpandedWorldServerPreset.Thicc:
+                return ThiccWidth;
             default:
                 return VanillaLargeWidth;
+        }
+    }
+
+    internal static int HeightFor(ExpandedWorldServerPreset preset)
+    {
+        switch (preset)
+        {
+            case ExpandedWorldServerPreset.XL:
+                return XLHeight;
+            case ExpandedWorldServerPreset.Huge:
+                return HugeHeight;
+            case ExpandedWorldServerPreset.Thicc:
+                return ThiccHeight;
+            default:
+                return VanillaLargeHeight;
         }
     }
 
@@ -101,6 +127,8 @@ internal static class ExpandedWorldServerState
                 return "XL";
             case ExpandedWorldServerPreset.Huge:
                 return "Huge";
+            case ExpandedWorldServerPreset.Thicc:
+                return "THICC";
             default:
                 return "Vanilla";
         }
@@ -112,15 +140,16 @@ internal static class ExpandedWorldServerState
             return;
 
         int width = WidthFor(Requested);
+        int height = HeightFor(Requested);
         Main.maxTilesX = width;
-        Main.maxTilesY = VanillaLargeHeight;
+        Main.maxTilesY = height;
 
         // Mirror Terraria.WorldGen.setWorldSize's directly-audited derived state
         // before clearWorld allocates/clears world storage.
         Main.rightWorld = width * 16f;
-        Main.bottomWorld = VanillaLargeHeight * 16f;
+        Main.bottomWorld = height * 16f;
         Main.maxSectionsX = width / 200;
-        Main.maxSectionsY = VanillaLargeHeight / 150;
+        Main.maxSectionsY = height / 150;
 
         MethodInfo setWorldSizeDerived = AccessTools.Method(typeof(WorldGen), "setWorldSize", Type.EmptyTypes);
         if (setWorldSizeDerived == null)
@@ -143,7 +172,7 @@ internal static class ExpandedWorldServerState
                     "SetWorldSize(int,int)");
             }
 
-            setMetadataSize.Invoke(worldFileData, new object[] { width, VanillaLargeHeight });
+            setMetadataSize.Invoke(worldFileData, new object[] { width, height });
         }
 
         int vanillaTier = WorldGen.GetWorldSize();
@@ -156,7 +185,7 @@ internal static class ExpandedWorldServerState
 
         Console.WriteLine(
             "[Expanded Worlds] " + stage + ": using " + LabelFor(Requested) +
-            " " + width + "x" + VanillaLargeHeight + " (vanilla tier " + vanillaTier + ").");
+            " " + width + "x" + height + " (vanilla tier " + vanillaTier + ").");
     }
 
     internal static void VerifyLoadedDimensions(string stage)
@@ -165,11 +194,12 @@ internal static class ExpandedWorldServerState
             return;
 
         int expectedWidth = WidthFor(Requested);
-        if (Main.maxTilesX != expectedWidth || Main.maxTilesY != VanillaLargeHeight)
+        int expectedHeight = HeightFor(Requested);
+        if (Main.maxTilesX != expectedWidth || Main.maxTilesY != expectedHeight)
         {
             throw new InvalidOperationException(
                 "[Expanded Worlds] " + stage + " dimension verification failed. Expected " +
-                expectedWidth + "x" + VanillaLargeHeight + ", got " +
+                expectedWidth + "x" + expectedHeight + ", got " +
                 Main.maxTilesX + "x" + Main.maxTilesY + ".");
         }
 
