@@ -112,8 +112,6 @@ $WorkDirectory = Resolve-FullPath $WorkDirectory
 New-Item -ItemType Directory -Force -Path $OutputDirectory, $WorkDirectory | Out-Null
 
 try {
-    # .NET Framework 4.0 reference assemblies. These remove the last WinForms/System.Drawing
-    # resolution scars that remain when ILSpy runs only against modern .NET runtime assemblies.
     $netPkg = Join-Path $WorkDirectory 'net40.nupkg'
     $netZip = Join-Path $WorkDirectory 'net40.zip'
     $netExtract = Join-Path $WorkDirectory 'net40'
@@ -133,8 +131,6 @@ try {
     Get-ChildItem -Path $mscorlib.Directory.FullName -File -Filter '*.dll' |
         ForEach-Object { Copy-Item $_.FullName (Join-Path $OutputDirectory $_.Name) -Force }
 
-    # XNA Game Studio 4.0 Refresh contains the exact XNA assemblies Terraria 1.4.x references,
-    # including Content.Pipeline, which is not part of the runtime-only redistributable.
     if ([string]::IsNullOrWhiteSpace($XnaInstaller)) {
         $XnaInstaller = Join-Path $WorkDirectory 'XNAGS40_setup.exe'
         Write-Host 'Downloading Microsoft XNA Game Studio 4.0 Refresh...'
@@ -159,8 +155,6 @@ try {
     Extract-SfxCab -ExePath $XnaInstaller -CabPath $xnaCab
     New-Item -ItemType Directory -Force -Path $xnaTop | Out-Null
 
-    # GitHub's Windows image includes 7-Zip, which handles the old LZX CAB and the
-    # nested MSI/Cabinet data without invoking or installing any 2011 setup package.
     $sevenZip = Get-Command '7z.exe' -ErrorAction SilentlyContinue
     if (-not $sevenZip) {
         $sevenZipPath = Join-Path $env:ProgramFiles '7-Zip\7z.exe'
@@ -181,9 +175,6 @@ try {
         throw 'The XNA bootstrap payload did not contain redists.msi.'
     }
 
-    # Do not run these 2011 MSI packages. Modern Windows Installer can reject the old
-    # wrapper even though its archive data is intact. 7-Zip understands MSI/CFB plus
-    # the embedded Cabinet streams, so extract the payload as data only.
     $redistsUnpacked = Join-Path $WorkDirectory 'xna-redists-unpacked'
     New-Item -ItemType Directory -Force -Path $redistsUnpacked | Out-Null
     & $sevenZipExe x $redistsMsi.FullName "-o$redistsUnpacked" -y | Out-Host
@@ -207,6 +198,33 @@ try {
         throw "7-Zip failed to unpack '$($sharedInstaller.Name)' with exit code $LASTEXITCODE."
     }
 
+    $sharedCab = Get-ChildItem -Path $sharedUnpacked -Recurse -File |
+        Where-Object {
+            if ($_.Length -lt 36) { return $false }
+            $stream = [System.IO.File]::OpenRead($_.FullName)
+            try {
+                $header = New-Object byte[] 4
+                if ($stream.Read($header, 0, 4) -ne 4) { return $false }
+                return ($header[0] -eq 0x4D -and $header[1] -eq 0x53 -and $header[2] -eq 0x43 -and $header[3] -eq 0x46)
+            }
+            finally {
+                $stream.Dispose()
+            }
+        } |
+        Sort-Object Length -Descending |
+        Select-Object -First 1
+    if (-not $sharedCab) {
+        $available = Get-ChildItem -Path $sharedUnpacked -Recurse -File | Select-Object -First 80 -ExpandProperty FullName
+        throw "Could not locate the embedded Cabinet stream in the XNA shared-components MSI. Files found:`n$($available -join "`n")"
+    }
+
+    $sharedCabUnpacked = Join-Path $WorkDirectory 'xna-shared-cab-unpacked'
+    New-Item -ItemType Directory -Force -Path $sharedCabUnpacked | Out-Null
+    & $sevenZipExe x $sharedCab.FullName "-o$sharedCabUnpacked" -y | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw "7-Zip failed to unpack the XNA shared-components Cabinet stream with exit code $LASTEXITCODE."
+    }
+
     $requiredXna = @(
         'Microsoft.Xna.Framework.dll',
         'Microsoft.Xna.Framework.Game.dll',
@@ -217,7 +235,7 @@ try {
 
     foreach ($name in $requiredXna) {
         $logicalName = $name.Replace('.', '_')
-        $candidate = Get-ChildItem -Path $sharedUnpacked -Recurse -File -Filter $logicalName |
+        $candidate = Get-ChildItem -Path $sharedCabUnpacked -Recurse -File -Filter $logicalName |
             Sort-Object Length -Descending |
             Select-Object -First 1
         if (-not $candidate) {
