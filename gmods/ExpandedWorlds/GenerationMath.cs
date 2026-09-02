@@ -285,14 +285,15 @@ internal static class ExpandedWorldMath
 
     public static double DrunkHiveLinearScale(int width)
     {
-        // HiveBiome's Drunk-world tunnel/radius scale is intentionally discrete:
-        //   ((Main.maxTilesX / 4200) + 1) / 2
-        // where maxTilesX / 4200 is integer division in the audited source.
-        // Exact 4200-tile width quanta therefore preserve the source's intended
-        // step sequence instead of replacing a special-seed rule with our normal
-        // isotropic geometry policy.
-        int widthTier = width / SmallWidth;
-        return (widthTier + 1) / 2d;
+        // Exact Terraria 1.4.5.8 source-width multiplier before Expanded Worlds'
+        // aspect-ratio repair:
+        //   (((double)Main.maxTilesX / 4200.0) + 1.0) / 2.0
+        //
+        // This helper deliberately records that raw source baseline. The live
+        // BeeScaling patch preserves it for Small/Medium/Large and switches to
+        // area-equivalent linear continuation only beyond Large.
+        double sourceWidthScale = width / (double)SmallWidth;
+        return (sourceWidthScale + 1d) / 2d;
     }
 
     public static int MaximumLarvaRecordsFromBeeHives(int width, bool drunkWorld)
