@@ -7,26 +7,27 @@ on:
       - feat/expanded-world-sizes
     paths:
       - .github/workflows/expanded-worlds-six-size-tedit-comparison.yml
+      - tools/ci/TEditHeadlessRenderer/**
 
 permissions:
   contents: read
 
 jobs:
-  comparison:
-    name: Generate six real worlds and render with TEdit
+  generate-worlds:
+    name: Generate and preserve six real worlds
     runs-on: windows-latest
-    timeout-minutes: 240
+    timeout-minutes: 220
+    outputs:
+      seed: ${{ steps.seed.outputs.seed }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup .NET 8 and 10
+      - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: |
-            8.0.x
-            10.0.x
+          dotnet-version: 8.0.x
 
       - name: Install official Microsoft XNA Framework 4.0
         shell: pwsh
@@ -38,13 +39,16 @@ jobs:
           if ($p.ExitCode -notin @(0, 3010)) { throw "XNA installer exited $($p.ExitCode)." }
 
       - name: Pick one fresh seed for all six sizes
+        id: seed
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $seed = [int](100000000 + ([int64]$env:GITHUB_RUN_ID % 1900000000))
           "EW_SEED=$seed" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "seed=$seed" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
           New-Item -ItemType Directory -Force comparison | Out-Null
           "seed=$seed" | Set-Content comparison/seed.txt -Encoding ascii
+          "name|width|height|seed|bytes|sha256" | Set-Content comparison/manifest.txt -Encoding ascii
           Write-Host "Same seed for Small, Medium, Large, XL, Huge and THICC: $seed"
           Add-Content $env:GITHUB_STEP_SUMMARY "### Expanded Worlds six-size comparison"
           Add-Content $env:GITHUB_STEP_SUMMARY "- Same fresh seed: **$seed**"
@@ -87,9 +91,7 @@ jobs:
           New-Item -ItemType Directory -Force $normalRoot | Out-Null
           Copy-Item 'gmods/ExpandedWorlds' (Join-Path $normalRoot 'ExpandedWorlds') -Recurse -Force
 
-          # THICC is deliberately staged independently from Huge. This is the same
-          # physical 16,800x4,800 configuration that already passed generation,
-          # save and fresh-process reload, while preserving normal Huge at 16,800x2,400.
+          # THICC remains an additional sixth size. Huge stays 16,800x2,400.
           $thiccRoot = Join-Path $env:RUNNER_TEMP 'ew-thicc-gmods'
           $thiccMod = Join-Path $thiccRoot 'ExpandedWorlds'
           New-Item -ItemType Directory -Force $thiccRoot | Out-Null
@@ -209,87 +211,95 @@ jobs:
           Generate-World 'Large' 3 8400 2400 7843 '' ''
           Generate-World 'XL' 3 12600 2400 7844 'XL' $env:NORMAL_MODS
           Generate-World 'Huge' 3 16800 2400 7845 'HUGE' $env:NORMAL_MODS
-          # The isolated THICC staging copy uses the already-proven Huge runtime hook
-          # with its own 4,800-tile height, so Huge itself remains 16,800x2,400.
           Generate-World 'THICC' 3 16800 4800 7846 'HUGE' $env:THICC_MODS
 
-      - name: Clone pinned TEdit and build a headless TEdit minimap renderer
+          Add-Content $env:GITHUB_STEP_SUMMARY '- World generation: **PASS for all six sizes**'
+          Add-Content $env:GITHUB_STEP_SUMMARY '- Raw `.wld` files are uploaded before rendering starts.'
+
+      - name: Upload six real worlds before any renderer runs
+        uses: actions/upload-artifact@v4
+        with:
+          name: expanded-worlds-six-size-worlds
+          path: |
+            comparison/*.wld
+            comparison/manifest.txt
+            comparison/seed.txt
+            comparison/*-stdout.txt
+            comparison/*-stderr.txt
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload generation diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: expanded-worlds-six-size-generation-diagnostics
+          path: |
+            comparison/manifest.txt
+            comparison/seed.txt
+            comparison/*-stdout.txt
+            comparison/*-stderr.txt
+          if-no-files-found: warn
+          retention-days: 7
+
+  render-comparison:
+    name: Render preserved worlds with pinned TEdit core
+    needs: generate-worlds
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      EW_SEED: ${{ needs.generate-worlds.outputs.seed }}
+      TEDIT_COMMIT: cbf7b3876e408cf45240b5d792e0d8e57ba78e3f
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Download the already-preserved six worlds
+        uses: actions/download-artifact@v4
+        with:
+          name: expanded-worlds-six-size-worlds
+          path: comparison
+
+      - name: Clone pinned TEdit source
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $tedit = Join-Path $env:RUNNER_TEMP 'tedit'
-          git clone --depth 1 https://github.com/TEdit/Terraria-Map-Editor.git $tedit
-          git -C $tedit fetch --depth 1 origin cbf7b3876e408cf45240b5d792e0d8e57ba78e3f
-          git -C $tedit checkout cbf7b3876e408cf45240b5d792e0d8e57ba78e3f
+          git clone --filter=blob:none --no-checkout https://github.com/TEdit/Terraria-Map-Editor.git $tedit
+          git -C $tedit fetch --depth 1 origin $env:TEDIT_COMMIT
+          git -C $tedit checkout --detach $env:TEDIT_COMMIT
+          "TEDIT_ROOT=$tedit" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Pinned TEdit: $env:TEDIT_COMMIT"
 
-          $renderer = Join-Path $env:RUNNER_TEMP 'tedit-headless-renderer'
-          New-Item -ItemType Directory -Force $renderer | Out-Null
-          $teditProj = (Join-Path $tedit 'src/TEdit/TEdit.csproj').Replace('\','/')
+      - name: Build narrow headless renderer without TEdit WPF app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $project = Join-Path $PWD 'tools/ci/TEditHeadlessRenderer/TEditHeadlessRenderer.csproj'
+          dotnet build $project -c Release -p:TEditRoot="$env:TEDIT_ROOT"
+          $renderer = Join-Path $PWD 'tools/ci/TEditHeadlessRenderer/bin/Release/net10.0/TEditHeadlessRenderer.dll'
+          if (-not (Test-Path $renderer)) { throw 'TEditHeadlessRenderer.dll missing after build.' }
+          "TEDIT_RENDERER=$renderer" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
-          @"
-          <Project Sdk="Microsoft.NET.Sdk">
-            <PropertyGroup>
-              <OutputType>Exe</OutputType>
-              <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
-              <UseWPF>true</UseWPF>
-              <EnableWindowsTargeting>true</EnableWindowsTargeting>
-              <ImplicitUsings>enable</ImplicitUsings>
-              <Nullable>enable</Nullable>
-            </PropertyGroup>
-            <ItemGroup>
-              <ProjectReference Include="$teditProj" />
-            </ItemGroup>
-          </Project>
-          "@ | Set-Content -Encoding UTF8 (Join-Path $renderer 'Renderer.csproj')
-
-          @'
-          using System;
-          using System.IO;
-          using System.Windows.Media.Imaging;
-          using TEdit.Render;
-          using TEdit.Terraria;
-
-          internal static class Program
-          {
-              [STAThread]
-              static int Main(string[] args)
-              {
-                  if (args.Length != 2) throw new ArgumentException("world.wld output.png");
-                  WorldConfiguration.Initialize();
-                  var (world, error) = World.LoadWorld(args[0]);
-                  if (error != null) throw new Exception("TEdit failed to load world", error);
-                  if (world == null) throw new InvalidOperationException("TEdit returned null world");
-
-                  // Exactly 1 output pixel per 8 Terraria tiles for every size.
-                  // This preserves true relative dimensions across all six panels.
-                  int targetWidth = world.TilesWide / 8;
-                  int targetHeight = world.TilesHigh / 8;
-                  var bmp = RenderMiniMap.Render(world, useFilter: false, showBackground: true,
-                      targetWidth: targetWidth, targetHeight: targetHeight);
-
-                  var encoder = new PngBitmapEncoder();
-                  encoder.Frames.Add(BitmapFrame.Create(bmp));
-                  using var stream = File.Create(args[1]);
-                  encoder.Save(stream);
-                  Console.WriteLine($"TEdit rendered {world.Title}: {world.TilesWide}x{world.TilesHigh} -> {bmp.PixelWidth}x{bmp.PixelHeight}");
-                  return 0;
-              }
-          }
-          '@ | Set-Content -Encoding UTF8 (Join-Path $renderer 'Program.cs')
-
-          dotnet build (Join-Path $renderer 'Renderer.csproj') -c Release
-          "TEDIT_RENDERER=$(Join-Path $renderer 'bin/Release/net10.0-windows10.0.19041.0/Renderer.dll')" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-
-      - name: Render all six real .wld files through TEdit
+      - name: Render all six real .wld files with TEdit world and color logic
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           foreach ($name in @('Small','Medium','Large','XL','Huge','THICC')) {
-            dotnet $env:TEDIT_RENDERER (Join-Path $PWD "comparison/$name.wld") (Join-Path $PWD "comparison/$name-map.png")
-            if (-not (Test-Path "comparison/$name-map.png")) { throw "TEdit render missing for $name" }
+            $world = Join-Path $PWD "comparison/$name.wld"
+            $png = Join-Path $PWD "comparison/$name-map.png"
+            if (-not (Test-Path $world)) { throw "Preserved world missing: $world" }
+            dotnet $env:TEDIT_RENDERER $world $png
+            if (-not (Test-Path $png)) { throw "TEdit render missing for $name" }
           }
 
-      - name: Compose the six real TEdit maps at one consistent scale
+      - name: Compose the six real maps at one consistent scale
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -333,7 +343,7 @@ jobs:
           $center.Alignment = [System.Drawing.StringAlignment]::Center
 
           $g.DrawString('Expanded Worlds — Same Seed, All Sizes', $titleFont, $white, [System.Drawing.RectangleF]::new(0,20,$canvasW,55), $center)
-          $g.DrawString(('Real Terraria 1.4.5.8 worldgen • TEdit render • seed ' + $env:EW_SEED), $subFont, $blue, [System.Drawing.RectangleF]::new(0,78,$canvasW,35), $center)
+          $g.DrawString(('Real Terraria 1.4.5.8 worldgen • pinned TEdit core render • seed ' + $env:EW_SEED), $subFont, $blue, [System.Drawing.RectangleF]::new(0,78,$canvasW,35), $center)
 
           $y = $top
           foreach ($row in $rows) {
@@ -367,20 +377,31 @@ jobs:
             $img.Dispose()
             if ($actual -ne $expected[$name]) { throw "$name TEdit map expected $($expected[$name]), got $actual" }
           }
-          Add-Content $env:GITHUB_STEP_SUMMARY '- World generation: **PASS for all six sizes**'
-          Add-Content $env:GITHUB_STEP_SUMMARY '- TEdit rendering: **PASS for all six .wld files**'
+          Add-Content $env:GITHUB_STEP_SUMMARY '- TEdit core rendering: **PASS for all six preserved `.wld` files**'
+          Add-Content $env:GITHUB_STEP_SUMMARY '- Renderer dependency surface: **TEdit.Common + TEdit.Terraria + TEdit.Png only; no TEdit WPF app project**'
           Add-Content $env:GITHUB_STEP_SUMMARY '- Render scale: **1 pixel = 8 Terraria tiles for every panel**'
           Add-Content $env:GITHUB_STEP_SUMMARY '- Final image: **ExpandedWorlds-SameSeed-AllSizes-TEdit.png**'
-
-      - name: Remove large .wld files before image artifact upload
-        shell: pwsh
-        run: |
-          Remove-Item comparison/*.wld -Force
 
       - name: Upload real six-size TEdit comparison
         uses: actions/upload-artifact@v4
         with:
           name: expanded-worlds-six-size-tedit-comparison
-          path: comparison/
+          path: |
+            comparison/ExpandedWorlds-SameSeed-AllSizes-TEdit.png
+            comparison/*-map.png
+            comparison/manifest.txt
+            comparison/seed.txt
           if-no-files-found: error
           retention-days: 14
+
+      - name: Upload render diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: expanded-worlds-six-size-render-diagnostics
+          path: |
+            comparison/*-map.png
+            comparison/manifest.txt
+            comparison/seed.txt
+          if-no-files-found: warn
+          retention-days: 7
