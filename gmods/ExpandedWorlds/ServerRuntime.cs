@@ -292,9 +292,9 @@ internal static class ExpandedWorldServerLoadVerificationPatch
         if (worldFileType == null)
             throw new TypeLoadException("Terraria.IO.WorldFile was not found in the loaded Terraria assembly.");
 
-        MethodBase method = AccessTools.Method(worldFileType, "LoadWorld", new[] { typeof(bool) });
+        MethodBase method = AccessTools.Method(worldFileType, "LoadWorld", Type.EmptyTypes);
         if (method == null)
-            throw new MissingMethodException(worldFileType.FullName, "LoadWorld(bool)");
+            throw new MissingMethodException(worldFileType.FullName, "LoadWorld()");
 
         return method;
     }
