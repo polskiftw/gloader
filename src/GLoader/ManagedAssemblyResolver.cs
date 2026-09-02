@@ -9,6 +9,7 @@ namespace GLoader
     internal sealed class ManagedAssemblyResolver : IDisposable
     {
         private readonly string[] _directories;
+        private readonly Assembly _resourceAssembly;
 
         // AssemblyResolve may be serviced by more than one ManagedAssemblyResolver
         // instance at once (the bootstrap resolver and the Terraria/resource resolver).
@@ -24,10 +25,7 @@ namespace GLoader
 
         public ManagedAssemblyResolver(Assembly resourceAssembly, params string[] directories)
         {
-            // resourceAssembly is retained in the constructor signature for call-site
-            // compatibility. gloader no longer executes managed assemblies directly
-            // from embedded byte arrays; all runtime dependencies must resolve from an
-            // explicit on-disk package/game/mod directory.
+            _resourceAssembly = resourceAssembly;
             _directories = (directories ?? Array.Empty<string>())
                 .Where(path => !string.IsNullOrWhiteSpace(path))
                 .Select(Path.GetFullPath)
@@ -118,11 +116,11 @@ namespace GLoader
                             continue;
                         }
 
-                        // Load the exact dependency as a conventional file-backed
-                        // assembly. The reentrancy guard above prevents resolver loops,
-                        // and avoiding Assembly.Load(byte[]) keeps gloader out of the
-                        // fileless-loader behavior class that Defender was flagging.
-                        return Assembly.LoadFile(Path.GetFullPath(candidate));
+                        // Do not use Assembly.LoadFrom here. We are already inside the
+                        // AssemblyResolve event precisely because normal probing did not
+                        // find this file (the release package keeps dependencies in gdeps).
+                        // LoadFrom can re-enter the binder for the same strong-name identity.
+                        return Assembly.Load(File.ReadAllBytes(candidate));
                     }
                     catch (BadImageFormatException)
                     {
@@ -135,7 +133,7 @@ namespace GLoader
                 }
             }
 
-            return null;
+            return ResolveEmbedded(requested);
         }
 
         private static bool IsCompatibleIdentity(AssemblyName candidate, AssemblyName requested)
@@ -218,6 +216,73 @@ namespace GLoader
                 Path.GetFileName(trimmed),
                 "gdeps",
                 StringComparison.OrdinalIgnoreCase);
+        }
+
+        private Assembly ResolveEmbedded(AssemblyName requested)
+        {
+            if (_resourceAssembly == null || string.IsNullOrWhiteSpace(requested.Name))
+            {
+                return null;
+            }
+
+            string[] resourceNames;
+            try
+            {
+                resourceNames = _resourceAssembly.GetManifestResourceNames();
+            }
+            catch
+            {
+                return null;
+            }
+
+            foreach (var extension in new[] { ".dll", ".exe" })
+            {
+                var fileName = requested.Name + extension;
+                var suffix = "." + fileName;
+                var resourceName = resourceNames.FirstOrDefault(name =>
+                    string.Equals(name, fileName, StringComparison.OrdinalIgnoreCase) ||
+                    name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
+
+                if (resourceName == null)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    using (var stream = _resourceAssembly.GetManifestResourceStream(resourceName))
+                    {
+                        if (stream == null)
+                        {
+                            continue;
+                        }
+
+                        using (var memory = new MemoryStream())
+                        {
+                            stream.CopyTo(memory);
+                            if (memory.Length == 0)
+                            {
+                                continue;
+                            }
+
+                            var assembly = Assembly.Load(memory.ToArray());
+                            return IsCompatibleIdentity(assembly.GetName(), requested)
+                                ? assembly
+                                : null;
+                        }
+                    }
+                }
+                catch (BadImageFormatException)
+                {
+                    // Embedded native library; not a managed assembly candidate.
+                }
+                catch (FileLoadException)
+                {
+                    // Continue searching other embedded candidates.
+                }
+            }
+
+            return null;
         }
     }
 }
