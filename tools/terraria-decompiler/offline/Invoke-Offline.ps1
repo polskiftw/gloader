@@ -149,7 +149,6 @@ function Get-FileVersionSafe {
 
 $clientVersion = if (Test-Path -LiteralPath $clientExePath -PathType Leaf) { Get-FileVersionSafe $clientExePath } else { '' }
 $serverVersion = if (Test-Path -LiteralPath $serverExePath -PathType Leaf) { Get-FileVersionSafe $serverExePath } else { '' }
-$detectedVersion = if ($clientRequired) { $clientVersion } else { $serverVersion }
 
 if ($TargetMode -eq 'Pair' -and -not $clientVersion.Equals($serverVersion, [System.StringComparison]::OrdinalIgnoreCase)) {
     throw "Terraria client/server version mismatch. Terraria.exe is '$clientVersion' but TerrariaServer.exe is '$serverVersion'. Update the install so they match before decompiling."
@@ -182,23 +181,24 @@ function Invoke-Ilspy {
 
 $managedInstallRefs = New-Object System.Collections.Generic.List[object]
 $nativeInstallDlls = New-Object System.Collections.Generic.List[object]
-Get-ChildItem -LiteralPath $terrariaRoot -File -Filter '*.dll' | Sort-Object Name | ForEach-Object {
+$installDllFiles = @(Get-ChildItem -LiteralPath $terrariaRoot -File -Filter '*.dll' | Sort-Object Name)
+foreach ($dllFile in $installDllFiles) {
     try {
-        $assembly = [System.Reflection.AssemblyName]::GetAssemblyName($_.FullName)
+        $assembly = [System.Reflection.AssemblyName]::GetAssemblyName($dllFile.FullName)
         $targetName = $assembly.Name + '.dll'
-        Copy-Item $_.FullName (Join-Path $refsBase $targetName) -Force
+        Copy-Item $dllFile.FullName (Join-Path $refsBase $targetName) -Force
         $managedInstallRefs.Add([pscustomobject]@{
-            file = $_.Name
+            file = $dllFile.Name
             assembly = $assembly.Name
             version = $assembly.Version.ToString()
             target = $targetName
-            sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            sha256 = (Get-FileHash -LiteralPath $dllFile.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
         })
     }
     catch {
         $nativeInstallDlls.Add([pscustomobject]@{
-            file = $_.Name
-            bytes = $_.Length
+            file = $dllFile.Name
+            bytes = $dllFile.Length
         })
     }
 }
@@ -259,14 +259,15 @@ function Invoke-TargetDecompile {
     )
 
     $embeddedRefs = New-Object System.Collections.Generic.List[object]
-    Get-ChildItem -Path $bootstrap -Recurse -File -Filter '*.dll' | ForEach-Object {
+    $embeddedDllFiles = @(Get-ChildItem -Path $bootstrap -Recurse -File -Filter '*.dll')
+    foreach ($embeddedDll in $embeddedDllFiles) {
         try {
-            $assembly = [System.Reflection.AssemblyName]::GetAssemblyName($_.FullName)
+            $assembly = [System.Reflection.AssemblyName]::GetAssemblyName($embeddedDll.FullName)
             if ($assembly.Name) {
                 $targetName = $assembly.Name + '.dll'
-                Copy-Item $_.FullName (Join-Path $refs $targetName) -Force
+                Copy-Item $embeddedDll.FullName (Join-Path $refs $targetName) -Force
                 $embeddedRefs.Add([pscustomobject]@{
-                    file = $_.Name
+                    file = $embeddedDll.Name
                     assembly = $assembly.Name
                     version = $assembly.Version.ToString()
                     target = $targetName
@@ -274,7 +275,7 @@ function Invoke-TargetDecompile {
             }
         }
         catch {
-            Write-Verbose "Skipping non-managed DLL resource: $($_.FullName)"
+            Write-Verbose "Skipping non-managed DLL resource: $($embeddedDll.FullName)"
         }
     }
     Write-Host "$label recovered $($embeddedRefs.Count) embedded managed reference assemblies."
