@@ -298,20 +298,24 @@ internal static class ExpandedWorldCapacityMath
     }
 
     /// <summary>
-    /// The audited makeTemple source computes:
-    ///   tier = maxTilesX / 4200       (integer division)
-    ///   roomCount = Next(10*tier, 16*tier)
-    /// and historically stores those room rectangles in a fixed 40-slot array.
-    /// The exclusive upper bound itself is therefore the exact scratch capacity
-    /// required to represent every possible room-count roll for a width tier.
+    /// Exact Terraria 1.4.5.8 makeTemple source computes:
+    ///   scale = (double)maxTilesX / 4200.0
+    ///   roomCount = Next((int)(10*scale), (int)(16*scale))
+    /// and then allocates its modern room arrays dynamically from roomCount + 10.
+    ///
+    /// Modern Terraria therefore does not need this scratch-capacity value at
+    /// runtime. The value is retained for the legacy fixed-array compatibility
+    /// fallback, but its source range must still preserve the real floating-point
+    /// scale for Small/Medium/Large rather than the old integer-tier decompile.
     /// </summary>
     public static int JungleTempleRoomScratchCapacity(int width)
     {
         if (width <= 0)
             throw new ArgumentOutOfRangeException(nameof(width));
 
-        int tier = width / ExpandedWorldMath.SmallWidth;
-        return Math.Max(40, checked(16 * tier));
+        double scale = width / (double)ExpandedWorldMath.SmallWidth;
+        int exclusiveMaximum = (int)(16d * scale);
+        return Math.Max(40, exclusiveMaximum);
     }
 
     public static IntRange JungleTempleRoomCountRange(int width)
@@ -319,9 +323,9 @@ internal static class ExpandedWorldCapacityMath
         if (width <= 0)
             throw new ArgumentOutOfRangeException(nameof(width));
 
-        int tier = width / ExpandedWorldMath.SmallWidth;
-        int minimum = 10 * tier;
-        int maximumInclusive = 16 * tier - 1;
-        return new IntRange(minimum, maximumInclusive);
+        double scale = width / (double)ExpandedWorldMath.SmallWidth;
+        int minimum = (int)(10d * scale);
+        int exclusiveMaximum = (int)(16d * scale);
+        return new IntRange(minimum, exclusiveMaximum - 1);
     }
 }
