@@ -12,6 +12,11 @@ using Terraria.WorldBuilding;
 /// <summary>
 /// Axis-aware continuation of Terraria's JunglePass for worlds wider than Large.
 ///
+/// Exact Terraria 1.4.5.8 retail source stores JunglePass._worldScale as double.
+/// Keep that type end-to-end: using float here would both make reflection reads
+/// fail on a boxed Double and make the ApplyPass transpiler emit an invalid call
+/// signature at the double stfld use site.
+///
 /// Vanilla JunglePass carries one private _worldScale through several different
 /// dimensional jobs because vanilla width and height grow together. Expanded
 /// Worlds separates those jobs:
@@ -36,45 +41,50 @@ using Terraria.WorldBuilding;
 /// </summary>
 internal static class ExpandedWorldJungleScales
 {
-    private static readonly FieldInfo WorldScaleField =
-        AccessTools.Field(typeof(JunglePass), "_worldScale")
-        ?? throw new MissingFieldException(typeof(JunglePass).FullName, "_worldScale");
+    internal static readonly FieldInfo WorldScaleField = RequireWorldScaleField();
 
     public static bool Active =>
         ExpandedWorldState.GenerationArmed && Main.maxTilesX > ExpandedWorldMath.LargeWidth;
 
-    public static float ReadIsotropicScale(JunglePass instance)
+    public static double ReadIsotropicScale(JunglePass instance)
     {
-        return (float)WorldScaleField.GetValue(instance);
+        object value = WorldScaleField.GetValue(instance);
+        if (!(value is double))
+        {
+            throw new InvalidOperationException(
+                "[Expanded Worlds] JunglePass._worldScale did not return the audited Double value.");
+        }
+
+        return (double)value;
     }
 
-    public static float LargeAnchorFromIsotropic(float isotropicScale)
+    public static double LargeAnchorFromIsotropic(double isotropicScale)
     {
         double relative = ExpandedWorldMath.IsotropicLinearRelativeToLarge(Main.maxTilesX, Main.maxTilesY);
         if (relative <= 0d)
             throw new InvalidOperationException("[Expanded Worlds] Invalid Jungle isotropic scale ratio.");
 
-        return (float)(isotropicScale / relative);
+        return isotropicScale / relative;
     }
 
-    public static float Horizontal(JunglePass instance)
+    public static double Horizontal(JunglePass instance)
     {
-        float large = LargeAnchorFromIsotropic(ReadIsotropicScale(instance));
-        return (float)ExpandedWorldMath.ScaleLargeLinearByWidth(large, Main.maxTilesX);
+        double large = LargeAnchorFromIsotropic(ReadIsotropicScale(instance));
+        return ExpandedWorldMath.ScaleLargeLinearByWidth(large, Main.maxTilesX);
     }
 
-    public static float Vertical(JunglePass instance)
+    public static double Vertical(JunglePass instance)
     {
-        float large = LargeAnchorFromIsotropic(ReadIsotropicScale(instance));
-        return (float)ExpandedWorldMath.ScaleLargeLinearByHeight(large, Main.maxTilesY);
+        double large = LargeAnchorFromIsotropic(ReadIsotropicScale(instance));
+        return ExpandedWorldMath.ScaleLargeLinearByHeight(large, Main.maxTilesY);
     }
 
-    public static float Scalar(JunglePass instance)
+    public static double Scalar(JunglePass instance)
     {
         return ReadIsotropicScale(instance);
     }
 
-    public static float ConvertVanillaOverallToIsotropic(float vanillaOverallScale)
+    public static double ConvertVanillaOverallToIsotropic(double vanillaOverallScale)
     {
         if (!Active)
             return vanillaOverallScale;
@@ -87,19 +97,33 @@ internal static class ExpandedWorldJungleScales
         // this expanded width. Divide that back to the Large boundary condition,
         // then extend the same Large value through sqrt(area ratio).
         double largeAnchor = vanillaOverallScale / widthRelative;
-        return (float)ExpandedWorldMath.ScaleLargeLinearIsotropically(
+        return ExpandedWorldMath.ScaleLargeLinearIsotropically(
             largeAnchor,
             Main.maxTilesX,
             Main.maxTilesY);
     }
 
-    public static float ConvertIsotropicToHorizontal(float isotropicScale)
+    public static double ConvertIsotropicToHorizontal(double isotropicScale)
     {
         if (!Active)
             return isotropicScale;
 
-        float large = LargeAnchorFromIsotropic(isotropicScale);
-        return (float)ExpandedWorldMath.ScaleLargeLinearByWidth(large, Main.maxTilesX);
+        double large = LargeAnchorFromIsotropic(isotropicScale);
+        return ExpandedWorldMath.ScaleLargeLinearByWidth(large, Main.maxTilesX);
+    }
+
+    private static FieldInfo RequireWorldScaleField()
+    {
+        FieldInfo field = AccessTools.Field(typeof(JunglePass), "_worldScale");
+        if (field == null)
+            throw new MissingFieldException(typeof(JunglePass).FullName, "_worldScale");
+        if (field.FieldType != typeof(double))
+        {
+            throw new InvalidOperationException(
+                "[Expanded Worlds] JunglePass._worldScale is no longer the audited Double field; refusing to patch it.");
+        }
+
+        return field;
     }
 }
 
@@ -112,9 +136,7 @@ internal static class ExpandedWorldJungleScales
 [HarmonyPatch]
 internal static class ExpandedWorldJungleApplyPassPatch
 {
-    private static readonly FieldInfo WorldScaleField =
-        AccessTools.Field(typeof(JunglePass), "_worldScale")
-        ?? throw new MissingFieldException(typeof(JunglePass).FullName, "_worldScale");
+    private static readonly FieldInfo WorldScaleField = ExpandedWorldJungleScales.WorldScaleField;
 
     private static readonly MethodInfo ToIsotropicMethod =
         AccessTools.Method(typeof(ExpandedWorldJungleScales), nameof(ExpandedWorldJungleScales.ConvertVanillaOverallToIsotropic))
@@ -147,6 +169,8 @@ internal static class ExpandedWorldJungleApplyPassPatch
             if (code[i].opcode != OpCodes.Stfld || !Equals(code[i].operand, WorldScaleField))
                 continue;
 
+            // Exact 1.4.5.8 stack type here is Double; ToIsotropicMethod also
+            // accepts/returns Double so the inserted call preserves valid IL.
             code.Insert(i, new CodeInstruction(OpCodes.Call, ToIsotropicMethod));
             worldScaleStores++;
             i++;
@@ -300,8 +324,8 @@ internal static class ExpandedWorldJungleRandomMovementPatch
         if (!ExpandedWorldJungleScales.Active)
             return true;
 
-        float horizontal = ExpandedWorldJungleScales.Horizontal(__instance);
-        float vertical = ExpandedWorldJungleScales.Vertical(__instance);
+        double horizontal = ExpandedWorldJungleScales.Horizontal(__instance);
+        double vertical = ExpandedWorldJungleScales.Vertical(__instance);
 
         x += WorldGen.genRand.Next(
             (int)(-xRange * horizontal),
@@ -331,9 +355,9 @@ internal static class ExpandedWorldJungleGemPatch
         if (!ExpandedWorldJungleScales.Active)
             return true;
 
-        float horizontal = ExpandedWorldJungleScales.Horizontal(__instance);
-        float vertical = ExpandedWorldJungleScales.Vertical(__instance);
-        float scalar = ExpandedWorldJungleScales.Scalar(__instance);
+        double horizontal = ExpandedWorldJungleScales.Horizontal(__instance);
+        double vertical = ExpandedWorldJungleScales.Vertical(__instance);
+        double scalar = ExpandedWorldJungleScales.Scalar(__instance);
 
         for (int index = 0; index < 6d * scalar; index++)
         {
@@ -372,16 +396,16 @@ internal static class ExpandedWorldJungleFinishingTouchesPatch
         if (!ExpandedWorldJungleScales.Active)
             return true;
 
-        float horizontal = ExpandedWorldJungleScales.Horizontal(__instance);
-        float vertical = ExpandedWorldJungleScales.Vertical(__instance);
-        float scalar = ExpandedWorldJungleScales.Scalar(__instance);
+        double horizontal = ExpandedWorldJungleScales.Horizontal(__instance);
+        double vertical = ExpandedWorldJungleScales.Vertical(__instance);
+        double scalar = ExpandedWorldJungleScales.Scalar(__instance);
 
         int walkX = oldX;
         int walkY = oldY;
 
         for (int index = 0; index <= 20d * scalar; index++)
         {
-            progress.Set((float)((60d + index / (double)scalar) * 0.01d));
+            progress.Set((float)((60d + index / scalar) * 0.01d));
             walkX += WorldGen.genRand.Next((int)(-5d * horizontal), (int)(6d * horizontal));
             walkY += WorldGen.genRand.Next((int)(-5d * vertical), (int)(6d * vertical));
             WorldGen.TileRunner(
@@ -400,7 +424,7 @@ internal static class ExpandedWorldJungleFinishingTouchesPatch
 
         for (int index = 0; index <= 10d * scalar; index++)
         {
-            progress.Set((float)((80d + index / (double)scalar * 2d) * 0.01d));
+            progress.Set((float)((80d + index / scalar * 2d) * 0.01d));
 
             int i = oldX + WorldGen.genRand.Next(
                 (int)(-600d * horizontal),
