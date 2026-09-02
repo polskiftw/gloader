@@ -13,6 +13,10 @@ using Terraria.GameContent.Biomes.Desert;
 /// DesertDescription.CreateFromPlacement derives one overall-size scalar from
 /// maxTilesX / 4200 and uses it for both horizontal and vertical geometry.
 ///
+/// Exact Terraria 1.4.5.8 retail source stores that scalar as a double. Keep the
+/// helper signature double->double so the transpiler preserves the real IL stack
+/// type instead of relying on the old float-shaped stub.
+///
 /// Expanded Worlds intentionally changes the aspect ratio. Keep the source's
 /// horizontal uses on maxTilesX / 4200, but replace only the vertical uses with
 /// maxTilesY / 1200. Everything else in CreateFromPlacement remains vanilla.
@@ -48,9 +52,9 @@ internal static class ExpandedWorldDesertAxisScalingPatch
             if (!LoadsLocal(code[i], scaleLocal) || !IsVerticalScaleUse(code, i))
                 continue;
 
-            // The identified scale local is a float in Terraria. Insert a
-            // float->float transformation immediately after ldloc so any
-            // compiler-emitted conv.r8 remains in its original position.
+            // Exact 1.4.5.8 stores the identified scale local as Double. Insert
+            // a Double->Double transformation immediately after ldloc so the
+            // original arithmetic and any following conversions stay intact.
             code.Insert(i + 1, new CodeInstruction(OpCodes.Call, AdjustVerticalScaleMethod));
             replacements++;
             i++;
@@ -69,18 +73,18 @@ internal static class ExpandedWorldDesertAxisScalingPatch
         return code;
     }
 
-    private static float AdjustVerticalScale(float vanillaOverallScale)
+    private static double AdjustVerticalScale(double vanillaOverallScale)
     {
         if (!ExpandedWorldState.GenerationArmed || Main.maxTilesX <= ExpandedWorldMath.LargeWidth)
             return vanillaOverallScale;
 
-        return (float)ExpandedWorldMath.VerticalScale(Main.maxTilesY);
+        return ExpandedWorldMath.VerticalScale(Main.maxTilesY);
     }
 
     private static int FindVanillaOverallScaleLocal(IReadOnlyList<CodeInstruction> code)
     {
-        // Source anchor:
-        //   float scale = (float)Main.maxTilesX / 4200f;
+        // Exact source anchor:
+        //   double scale = (double)Main.maxTilesX / 4200.0;
         // Locate the local from the physical-width calculation instead of
         // assuming a compiler-specific local index.
         for (int i = 0; i < code.Count; i++)
