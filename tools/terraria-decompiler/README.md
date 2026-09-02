@@ -13,7 +13,14 @@ It then writes a machine-readable and human-readable audit of common decompiler 
 
 ## Local use
 
-Requires Windows and .NET 10.
+Requires:
+
+- Windows
+- PowerShell 7
+- .NET 10
+- 7-Zip (`7z.exe` on `PATH` or installed at `C:\Program Files\7-Zip\7z.exe`)
+
+You do **not** need XNA installed. The tool downloads Microsoft's original XNA Game Studio 4.0 Refresh package, verifies it, and extracts the needed assemblies as archive data without installing the old MSI packages.
 
 ```powershell
 pwsh ./tools/terraria-decompiler/Invoke-TerrariaDecompile.ps1 `
@@ -34,6 +41,8 @@ The clean source is written to `source/`, the audit to `audit/`, and a clean sou
 - With a Terraria URL, it downloads the EXE/ZIP, performs the full decompile, and uploads **only the audit report**. The decompiled game source is intentionally not published as an artifact from this public repository.
 
 For private input URLs, prefer the repository secret `TERRARIA_BINARY_URL` instead of a workflow input, because workflow input values can be visible in run metadata. An optional `TERRARIA_BINARY_SHA256` secret can pin the exact input bytes.
+
+The Windows runner path has been smoke-tested against the current `windows-latest`/Windows Server 2025 image, including the legacy XNA LZX CAB/MSI extraction chain.
 
 ## Versions currently pinned
 
