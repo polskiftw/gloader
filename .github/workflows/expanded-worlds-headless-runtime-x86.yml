@@ -1,4 +1,4 @@
-name: Expanded Worlds headless runtime x86
+name: Expanded Worlds headless runtime
 
 on:
   workflow_dispatch:
@@ -11,9 +11,22 @@ on:
       - gmods/ExpandedWorlds/**
 
 jobs:
-  vanilla-server-smoke-x86:
+  generate-and-reload:
+    name: ${{ matrix.preset }} generate + reload
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - preset: XL
+            expected_width: 12600
+            generation_port: 7782
+            reload_port: 7783
+          - preset: Huge
+            expected_width: 16800
+            generation_port: 7784
+            reload_port: 7785
 
     steps:
       - name: Checkout
@@ -52,7 +65,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $archiveVersion = '1458'
           $zip = Join-Path $env:RUNNER_TEMP "terraria-server-$archiveVersion.zip"
-          $root = Join-Path $env:RUNNER_TEMP 'terraria-server-runtime-x86'
+          $root = Join-Path $env:RUNNER_TEMP 'terraria-server-runtime'
           $url = "https://terraria.org/api/download/pc-dedicated-server/terraria-server-$archiveVersion.zip"
           Invoke-WebRequest -Uri $url -OutFile $zip
           Expand-Archive -Path $zip -DestinationPath $root -Force
@@ -68,7 +81,7 @@ jobs:
           "TERRARIA_SERVER=$server" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "TERRARIA_SERVER_DIR=$(Split-Path -Parent $server)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Build x86 gloader runtime
+      - name: Build matching x86 gloader runtime
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -78,77 +91,227 @@ jobs:
           if (-not (Test-Path $gloader)) { throw "gloader.exe not found: $gloader" }
           "GLOADER_EXE=$gloader" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Generate vanilla Small world through gloader
+      - name: Prepare isolated Expanded Worlds mod directory
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $saveRoot = Join-Path $env:RUNNER_TEMP 'terraria-headless-x86-save'
+          $modsRoot = Join-Path $env:RUNNER_TEMP 'expanded-worlds-gmods'
+          $modDestination = Join-Path $modsRoot 'ExpandedWorlds'
+          New-Item -ItemType Directory -Force $modsRoot | Out-Null
+          Copy-Item -Path (Join-Path $PWD 'gmods/ExpandedWorlds') -Destination $modDestination -Recurse -Force
+          "EXPANDED_MODS=$modsRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Generate and reload real ${{ matrix.preset }} world
+        shell: pwsh
+        env:
+          PRESET: ${{ matrix.preset }}
+          EXPECTED_WIDTH: ${{ matrix.expected_width }}
+          GENERATION_PORT: ${{ matrix.generation_port }}
+          RELOAD_PORT: ${{ matrix.reload_port }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expectedHeight = 2400
+          $expectedWidth = [int]$env:EXPECTED_WIDTH
+          $generationPort = [int]$env:GENERATION_PORT
+          $reloadPort = [int]$env:RELOAD_PORT
+          $preset = $env:PRESET
+          $env:GLOADER_EXPANDED_WORLD = $preset
+
+          $outputRoot = Join-Path $PWD "headless-runtime-$($preset.ToLowerInvariant())"
+          New-Item -ItemType Directory -Force $outputRoot | Out-Null
+
+          $saveRoot = Join-Path $env:RUNNER_TEMP "terraria-expanded-$($preset.ToLowerInvariant())"
           $worldDir = Join-Path $saveRoot 'Worlds'
-          $world = Join-Path $worldDir 'vanilla-smoke.wld'
           New-Item -ItemType Directory -Force $worldDir | Out-Null
+          $world = Join-Path $worldDir "expanded-$($preset.ToLowerInvariant()).wld"
 
-          $logDir = Join-Path $PWD 'headless-runtime-x86-output'
-          New-Item -ItemType Directory -Force $logDir | Out-Null
-          $stdoutPath = Join-Path $logDir 'vanilla-server-stdout.txt'
-          $stderrPath = Join-Path $logDir 'vanilla-server-stderr.txt'
-
-          $arguments = @(
-            '--target', ('"' + $env:TERRARIA_SERVER + '"'),
-            '--no-mods',
-            '--',
-            '-savedirectory', ('"' + $saveRoot + '"'),
-            '-autocreate', '1',
-            '-world', ('"' + $world + '"'),
-            '-worldname', 'GLoaderVanillaSmoke',
-            '-seed', '123456789',
-            '-difficulty', '0',
-            '-nosteam',
-            '-noupnp'
-          ) -join ' '
-
-          $si = New-Object System.Diagnostics.ProcessStartInfo
-          $si.FileName = $env:GLOADER_EXE
-          $si.Arguments = $arguments
-          $si.WorkingDirectory = $env:TERRARIA_SERVER_DIR
-          $si.UseShellExecute = $false
-          $si.RedirectStandardInput = $true
-          $si.RedirectStandardOutput = $true
-          $si.RedirectStandardError = $true
-          $si.CreateNoWindow = $true
-
-          $process = New-Object System.Diagnostics.Process
-          $process.StartInfo = $si
-          if (-not $process.Start()) { throw 'Failed to start gloader/TerrariaServer.' }
-
-          $process.StandardInput.WriteLine('exit')
-          $process.StandardInput.Close()
-          $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-          $stderrTask = $process.StandardError.ReadToEndAsync()
-
-          if (-not $process.WaitForExit(1200000)) {
-            try { $process.Kill() } catch {}
-            throw 'TerrariaServer did not exit within 20 minutes.'
+          function Show-ProcessLogs([string]$stdoutPath, [string]$stderrPath) {
+            if (Test-Path $stdoutPath) {
+              Write-Host '--- stdout ---'
+              Get-Content -Raw $stdoutPath | Write-Host
+            }
+            if (Test-Path $stderrPath) {
+              $stderr = Get-Content -Raw $stderrPath
+              if (-not [string]::IsNullOrWhiteSpace($stderr)) {
+                Write-Host '--- stderr ---'
+                Write-Host $stderr
+              }
+            }
           }
 
-          $stdout = $stdoutTask.Result
-          $stderr = $stderrTask.Result
-          $stdout | Set-Content -Encoding UTF8 $stdoutPath
-          $stderr | Set-Content -Encoding UTF8 $stderrPath
-          Write-Host $stdout
-          if ($stderr) { Write-Host $stderr }
+          function Test-LocalPort([int]$port) {
+            $client = New-Object System.Net.Sockets.TcpClient
+            try {
+              $task = $client.ConnectAsync('127.0.0.1', $port)
+              if (-not $task.Wait(250)) { return $false }
+              return $client.Connected
+            }
+            catch {
+              return $false
+            }
+            finally {
+              $client.Dispose()
+            }
+          }
 
-          if ($process.ExitCode -ne 0) { throw "gloader/TerrariaServer exited with code $($process.ExitCode)." }
-          if (-not (Test-Path $world)) { throw "World was not created: $world" }
+          function Wait-ForServerReady(
+            [System.Diagnostics.Process]$process,
+            [int]$port,
+            [string]$stdoutPath,
+            [string]$stderrPath,
+            [int]$timeoutSeconds) {
+
+            $deadline = (Get-Date).AddSeconds($timeoutSeconds)
+            while ((Get-Date) -lt $deadline) {
+              if ($process.HasExited) {
+                Show-ProcessLogs $stdoutPath $stderrPath
+                throw "TerrariaServer exited with code $($process.ExitCode) before opening TCP port $port."
+              }
+
+              if (Test-LocalPort $port) {
+                Write-Host "Server is listening on TCP $port. World load is complete."
+                return
+              }
+
+              Start-Sleep -Seconds 1
+            }
+
+            try { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue } catch {}
+            Show-ProcessLogs $stdoutPath $stderrPath
+            throw "TerrariaServer did not open TCP port $port within $timeoutSeconds seconds."
+          }
+
+          function Start-GLoaderServer(
+            [string]$phase,
+            [int]$port,
+            [bool]$autocreate) {
+
+            $stdoutPath = Join-Path $outputRoot "$phase-stdout.txt"
+            $stderrPath = Join-Path $outputRoot "$phase-stderr.txt"
+
+            $gameArgs = @(
+              '-savedirectory', ('"' + $saveRoot + '"'),
+              '-world', ('"' + $world + '"'),
+              '-port', $port,
+              '-maxplayers', '1',
+              '-noupnp'
+            )
+
+            if ($autocreate) {
+              $gameArgs += @(
+                '-autocreate', '3',
+                '-worldname', "ExpandedWorld$($preset)",
+                '-seed', '123456789',
+                '-difficulty', '0'
+              )
+            }
+
+            $arguments = @(
+              '--target', ('"' + $env:TERRARIA_SERVER + '"'),
+              '--mods', ('"' + $env:EXPANDED_MODS + '"'),
+              '--'
+            ) + $gameArgs
+
+            $argumentString = $arguments -join ' '
+            Write-Host "Starting $phase: $env:GLOADER_EXE $argumentString"
+
+            $process = Start-Process `
+              -FilePath $env:GLOADER_EXE `
+              -ArgumentList $argumentString `
+              -WorkingDirectory $env:TERRARIA_SERVER_DIR `
+              -NoNewWindow `
+              -PassThru `
+              -RedirectStandardOutput $stdoutPath `
+              -RedirectStandardError $stderrPath
+
+            return @($process, $stdoutPath, $stderrPath)
+          }
+
+          # Phase 1: Terraria's real Large autocreate path, with Expanded Worlds
+          # arming the requested physical width immediately before clearWorld.
+          $generation = Start-GLoaderServer 'generate' $generationPort $true
+          $generationProcess = $generation[0]
+          $generationStdout = [string]$generation[1]
+          $generationStderr = [string]$generation[2]
+          Wait-ForServerReady $generationProcess $generationPort $generationStdout $generationStderr 1800
+          Start-Sleep -Seconds 2
+          try { Stop-Process -Id $generationProcess.Id -Force -ErrorAction SilentlyContinue } catch {}
+          try { $generationProcess.WaitForExit(10000) | Out-Null } catch {}
+          Show-ProcessLogs $generationStdout $generationStderr
+
+          if (-not (Test-Path $world)) {
+            throw "Terraria reached server-ready state without creating $world"
+          }
 
           $worldInfo = Get-Item $world
-          if ($worldInfo.Length -lt 1MB) { throw "World is unexpectedly small: $($worldInfo.Length) bytes" }
-          Write-Host "PASS: generated real vanilla world via in-process gloader/TerrariaServer: $($worldInfo.Length) bytes"
+          if ($worldInfo.Length -lt 1MB) {
+            throw "Generated world is unexpectedly small: $($worldInfo.Length) bytes"
+          }
+
+          $generateLog = Get-Content -Raw $generationStdout
+          $requiredGenerationMarkers = @(
+            "Dedicated-server headless preset: $preset $expectedWidth`x$expectedHeight",
+            "GenerateWorld: using $preset $expectedWidth`x$expectedHeight (vanilla tier 2)",
+            "clearWorld: using $preset $expectedWidth`x$expectedHeight (vanilla tier 2)",
+            "Dedicated-server generation completed at $expectedWidth`x$expectedHeight",
+            "LoadWorld verified $preset $expectedWidth`x$expectedHeight (vanilla tier 2)"
+          )
+          foreach ($marker in $requiredGenerationMarkers) {
+            if (-not $generateLog.Contains($marker)) {
+              throw "Generation log is missing required marker: $marker"
+            }
+          }
+          if ($generateLog.Contains('Mod failed:')) {
+            throw 'gloader reported a source-mod failure during generation.'
+          }
+
+          $worldHash = (Get-FileHash $world -Algorithm SHA256).Hash
+          Write-Host "PASS generation: $preset $expectedWidth`x$expectedHeight, $($worldInfo.Length) bytes, SHA256 $worldHash"
+
+          # Phase 2: fresh Terraria/gloader process, existing .wld, no autocreate.
+          # The server cannot open its port until WorldFile.LoadWorld has completed;
+          # our Harmony postfix throws if Terraria reports any dimensions other than
+          # the physical XL/Huge values saved above.
+          $reload = Start-GLoaderServer 'reload' $reloadPort $false
+          $reloadProcess = $reload[0]
+          $reloadStdout = [string]$reload[1]
+          $reloadStderr = [string]$reload[2]
+          Wait-ForServerReady $reloadProcess $reloadPort $reloadStdout $reloadStderr 600
+          Start-Sleep -Seconds 2
+          try { Stop-Process -Id $reloadProcess.Id -Force -ErrorAction SilentlyContinue } catch {}
+          try { $reloadProcess.WaitForExit(10000) | Out-Null } catch {}
+          Show-ProcessLogs $reloadStdout $reloadStderr
+
+          $reloadLog = Get-Content -Raw $reloadStdout
+          $reloadMarker = "LoadWorld verified $preset $expectedWidth`x$expectedHeight (vanilla tier 2)"
+          if (-not $reloadLog.Contains($reloadMarker)) {
+            throw "Reload log is missing required marker: $reloadMarker"
+          }
+          if ($reloadLog.Contains("GenerateWorld: using $preset")) {
+            throw 'Reload unexpectedly regenerated the world instead of loading the saved .wld.'
+          }
+          if ($reloadLog.Contains('Mod failed:')) {
+            throw 'gloader reported a source-mod failure during reload.'
+          }
+
+          $reloadedHash = (Get-FileHash $world -Algorithm SHA256).Hash
+          if ($reloadedHash -ne $worldHash) {
+            throw "The .wld changed during read-only reload verification: $worldHash -> $reloadedHash"
+          }
+
+          Write-Host "PASS reload: Terraria reopened $preset at $expectedWidth`x$expectedHeight from the saved .wld."
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "### Expanded Worlds $preset"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Generated: **$expectedWidth x $expectedHeight**"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- World bytes: **$($worldInfo.Length)**"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- SHA256: ``$worldHash``"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Fresh-process reload: **PASS**"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Terraria category after generation/load: **Large (2)**"
 
       - name: Upload runtime logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: expanded-worlds-headless-runtime-x86-smoke
-          path: headless-runtime-x86-output/
+          name: expanded-worlds-headless-${{ matrix.preset }}
+          path: headless-runtime-*/
           if-no-files-found: warn
           retention-days: 7
