@@ -14,7 +14,6 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$toolRoot = Split-Path -Parent $scriptRoot
 $OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
 if ([string]::IsNullOrWhiteSpace($WorkDirectory)) {
     $WorkDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ('gloader-terraria-offline-' + [guid]::NewGuid().ToString('N'))
@@ -86,14 +85,12 @@ try {
         throw "7-Zip failed to unpack XNA redistributable with exit code $LASTEXITCODE."
     }
 
-    $xnaCopied = New-Object System.Collections.Generic.HashSet[string]
     Get-ChildItem -Path $xnaExtract -Recurse -File | ForEach-Object {
         try {
             $assembly = [System.Reflection.AssemblyName]::GetAssemblyName($_.FullName)
             if ($assembly.Name -like 'Microsoft.Xna.Framework*') {
                 $targetName = $assembly.Name + '.dll'
                 Copy-Item $_.FullName (Join-Path $refs $targetName) -Force
-                [void]$xnaCopied.Add($targetName)
             }
         }
         catch {
@@ -117,18 +114,13 @@ try {
         Select-Object -First 5 |
         ForEach-Object { Copy-Item $_.FullName (Join-Path $licenses ('xna-' + $_.Name)) -Force }
 
-    Write-Host 'Building metadata-only XNA Content Pipeline compatibility shim...'
-    $stubProject = Join-Path $scriptRoot 'ContentPipelineStub\ContentPipelineStub.csproj'
-    $stubOut = Join-Path $WorkDirectory 'content-pipeline-stub'
-    & dotnet build $stubProject -c Release -o $stubOut "-p:XnaReferenceDirectory=$refs"
-    if ($LASTEXITCODE -ne 0) {
-        throw "Content Pipeline shim build failed with exit code $LASTEXITCODE."
+    # Deliberately do not bundle Microsoft.Xna.Framework.Content.Pipeline.dll or a shim.
+    # Current Terraria ships the genuine assembly next to Terraria.exe. The runtime
+    # decompiler harvests every managed sibling DLL from the user's own install first.
+    $pipelineFallback = Join-Path $refs 'Microsoft.Xna.Framework.Content.Pipeline.dll'
+    if (Test-Path -LiteralPath $pipelineFallback) {
+        Remove-Item -LiteralPath $pipelineFallback -Force
     }
-    $stubDll = Join-Path $stubOut 'Microsoft.Xna.Framework.Content.Pipeline.dll'
-    if (-not (Test-Path -LiteralPath $stubDll)) {
-        throw 'Content Pipeline shim DLL was not produced.'
-    }
-    Copy-Item $stubDll (Join-Path $refs 'Microsoft.Xna.Framework.Content.Pipeline.dll') -Force
 
     Write-Host "Bundling ILSpyCmd $IlspyVersion..."
     $ilspyTool = Join-Path $WorkDirectory 'ilspy-tool'
@@ -162,7 +154,7 @@ if not exist "%INPUT%" (
   echo Terraria input not found:
   echo   %INPUT%
   echo.
-  echo Drag Terraria.exe onto RUN-DECOMPILER.cmd, or pass its path as the first argument.
+  echo Drag Terraria.exe or the Terraria install folder onto RUN-DECOMPILER.cmd.
   pause
   exit /b 1
 )
@@ -185,10 +177,12 @@ This folder already contains:
 - .NET runtime $DotnetRuntimeVersion
 - Microsoft .NET Framework 4.0 reference assemblies
 - Redistributable Microsoft XNA Framework 4.0 Refresh runtime references
-- A gloader-built metadata-only Content Pipeline compatibility shim
+
+Terraria's own install directory is the FIRST reference source.
+The runner scans DLLs sitting next to Terraria.exe, keeps the managed .NET assemblies, and ignores native DLLs for ILSpy reference resolution. This lets it use the genuine Microsoft.Xna.Framework.Content.Pipeline.dll and any other managed dependencies Re-Logic ships with the game.
 
 EASIEST USE:
-1. Drag Terraria.exe onto RUN-DECOMPILER.cmd
+1. Drag Terraria.exe (or the Terraria install folder) onto RUN-DECOMPILER.cmd
 2. Wait for both ILSpy passes and the audit
 3. Open output\
 
@@ -196,6 +190,7 @@ Default Steam install path is used if you double-click RUN-DECOMPILER.cmd with n
 
 The output ZIP is named TerrariaDecomp-<detected-version>-clean.zip.
 The audit is output\audit\audit.md.
+Reference provenance is output\audit\reference-sources.json.
 
 The bundle itself does not contact the network. Future Terraria versions may introduce new dependencies; if the audit stops being zero, update/rebuild this bundle rather than hiding the diagnostic.
 "@
@@ -219,12 +214,11 @@ Microsoft .NET Framework reference assemblies
 Microsoft XNA Framework Redistributable 4.0 Refresh
 - Runtime assemblies are taken from Microsoft's official XNA Framework Redistributable.
 - Microsoft describes these runtime libraries as redistributable with Windows products, subject to the XNA license terms.
-- The XNA Game Studio Content Pipeline developer DLL is NOT redistributed in this bundle.
 
-Microsoft.Xna.Framework.Content.Pipeline.dll in this bundle
-- This is NOT Microsoft's DLL.
-- It is a gloader-built metadata-only compatibility shim containing only the public type/member signatures Terraria currently references, solely so ILSpy can resolve those metadata references during decompilation.
-- It has no Content Pipeline implementation and must not be used as an XNA development/runtime replacement.
+Microsoft.Xna.Framework.Content.Pipeline.dll
+- NOT included in this bundle.
+- Current Terraria installations ship the genuine Microsoft assembly alongside Terraria.exe.
+- At runtime the decompiler temporarily uses managed DLLs from the user's own Terraria installation as metadata references. Those DLLs are not added to the generated source ZIP or redistributed by this bundle.
 '@
     Set-Content -Path (Join-Path $stage 'THIRD-PARTY-NOTICES.txt') -Value $notices -Encoding UTF8
 
