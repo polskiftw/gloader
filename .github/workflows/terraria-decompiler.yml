@@ -49,6 +49,26 @@ jobs:
             -OutputDirectory "$env:GITHUB_WORKSPACE\artifacts\terraria-refs" `
             -WorkDirectory "$env:RUNNER_TEMP\terraria-ref-work"
 
+      - name: Stage .NET Framework 4.0 references
+        if: github.event_name == 'push'
+        shell: pwsh
+        run: |
+          $source = "$env:GITHUB_WORKSPACE\artifacts\terraria-refs"
+          $stage = "$env:GITHUB_WORKSPACE\artifacts\net40-refs"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Get-ChildItem -LiteralPath $source -File -Filter '*.dll' |
+            Where-Object { $_.Name -notlike 'Microsoft.Xna.Framework*' } |
+            ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $stage -Force }
+
+      - name: Upload .NET Framework 4.0 references
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraria-net40-refs
+          path: artifacts/net40-refs/**
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Resolve Terraria input
         id: input
         shell: pwsh
