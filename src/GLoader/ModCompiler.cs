@@ -94,10 +94,9 @@ namespace GLoader
 
                 File.Move(stagingPath, outputPath);
 
-                // Load the compiled mod as a normal on-disk managed assembly. Besides
-                // giving the CLR a conventional load context, this deliberately avoids
-                // the old fileless Assembly.Load(byte[]) pattern that antivirus engines
-                // commonly associate with generic in-memory loaders.
+                // Load compiled mods as normal file-backed assemblies. This keeps the
+                // loader conventional for the CLR and avoids the fileless mod-loading
+                // behavior that was provoking Microsoft Defender's ML heuristic.
                 return Assembly.LoadFrom(outputPath);
             }
             finally
