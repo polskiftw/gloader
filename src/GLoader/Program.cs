@@ -168,10 +168,17 @@ namespace GLoader
             NativeLibrarySearch.UseDirectory(nativeDirectory);
             Log.Info("Native DLL search root: " + nativeDirectory);
 
-            using var runtimeResolver = new ManagedAssemblyResolver(
-                runtimeDirectories
-                    .Concat(new[] { dependenciesDirectory, modsDirectory })
-                    .ToArray());
+            var resolverDirectories = runtimeDirectories
+                .Concat(new[] { dependenciesDirectory, modsDirectory })
+                .ToArray();
+
+            // Modern .NET components describe NuGet/RID-specific dependencies in the
+            // .deps.json next to the managed target. Use that metadata first, then keep
+            // the recursive runtime-tree index as a compatibility fallback.
+            using var runtimeResolver = ManagedAssemblyResolver.ForComponent(
+                targetPath,
+                null,
+                resolverDirectories);
 
             var gameAssembly = GameBootstrap.Load(targetPath);
             var gameArguments = options.GameArguments.ToList();
@@ -181,11 +188,10 @@ namespace GLoader
                 gameArguments.Insert(0, "-server");
             }
 
-            using (var resolver = new ManagedAssemblyResolver(
+            using (var resolver = ManagedAssemblyResolver.ForComponent(
+                targetPath,
                 gameAssembly,
-                runtimeDirectories
-                    .Concat(new[] { dependenciesDirectory, modsDirectory })
-                    .ToArray()))
+                resolverDirectories))
             {
                 if (!options.DisableMods)
                 {
