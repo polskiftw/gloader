@@ -142,6 +142,7 @@ namespace Terraria.UI
         public event UIElementEvent OnMouseOut;
 
         public void Append(UIElement child) { }
+        public void Recalculate() { }
         public void SetSnapPoint(string name, int id) { }
 
         protected void RaiseForStubOnly()
