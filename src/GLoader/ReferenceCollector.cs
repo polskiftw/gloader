@@ -12,6 +12,7 @@ namespace GLoader
         public static IReadOnlyList<MetadataReference> Collect(
             Assembly gameAssembly,
             string gameDirectory,
+            string runtimeDirectory,
             string supportDirectory)
         {
             var paths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -22,8 +23,18 @@ namespace GLoader
                 AddAssemblyLocation(paths, assembly, overwrite: false);
 
             AddManagedFiles(paths, supportDirectory, overwrite: false, recursive: false);
+
+            // The game root contains Content and the original Steam files. The private
+            // CoreCLR/FNA runtime can live elsewhere, so scan both roots independently.
             AddManagedFiles(paths, gameDirectory, overwrite: false, recursive: false);
             AddManagedFiles(paths, Path.Combine(gameDirectory, "Libraries"), overwrite: false, recursive: true);
+
+            if (!PathsEqual(gameDirectory, runtimeDirectory))
+            {
+                AddManagedFiles(paths, runtimeDirectory, overwrite: false, recursive: false);
+                AddManagedFiles(paths, Path.Combine(runtimeDirectory, "Libraries"), overwrite: false, recursive: true);
+                AddManagedFiles(paths, Path.Combine(runtimeDirectory, "runtimes"), overwrite: false, recursive: true);
+            }
 
             // Terraria.exe and TerrariaServer.exe both define Terraria.Main. Never feed
             // the opposite executable to Roslyn or source mods get CS0433 ambiguity.
@@ -51,6 +62,17 @@ namespace GLoader
             }
 
             return references;
+        }
+
+        private static bool PathsEqual(string left, string right)
+        {
+            if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
+                return false;
+
+            return string.Equals(
+                Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                StringComparison.OrdinalIgnoreCase);
         }
 
         private static void AddTrustedPlatformAssemblies(IDictionary<string, string> paths)
