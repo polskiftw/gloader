@@ -122,11 +122,11 @@ namespace Terraria.UI
     public class StyleDimension
     {
         public float Pixels;
-        public float Percent;
-        public void Set(float pixels, float percent)
+        public float Precent;
+        public void Set(float pixels, float precent)
         {
             Pixels = pixels;
-            Percent = percent;
+            Precent = precent;
         }
     }
 
