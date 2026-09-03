@@ -8,6 +8,9 @@ namespace GLoader
 {
     internal sealed class X64RuntimeBuilder
     {
+        private const string SteamworksPackageId = "steamworks.net.anycpu";
+        private const string SteamworksPackageVersion = "2025.162.4";
+
         private readonly string _loaderDirectory;
         private readonly string _logsDirectory;
 
@@ -19,9 +22,35 @@ namespace GLoader
 
         public string RuntimeDirectory => Path.Combine(_loaderDirectory, "gdeps", TargetLocator.X64RuntimeDirectoryName);
         public string ManagedTarget => Path.Combine(RuntimeDirectory, "TerrariaRelease.dll");
+        public string SteamworksPackageDirectory => Path.Combine(
+            RuntimeDirectory,
+            "Libraries",
+            SteamworksPackageId,
+            SteamworksPackageVersion);
+        public string SteamworksManaged => Path.Combine(
+            SteamworksPackageDirectory,
+            "runtimes",
+            "win",
+            "lib",
+            "net8.0",
+            "Steamworks.NET.dll");
+        public string SteamworksNativeX64 => Path.Combine(
+            SteamworksPackageDirectory,
+            "runtimes",
+            "win-x64",
+            "native",
+            "steam_api64.dll");
         public string ScriptPath => Path.Combine(_loaderDirectory, "gdeps", "tools", "x64-runtime", "Build-X64Runtime.ps1");
         public string LogPath => Path.Combine(_logsDirectory, "x64-runtime-build.log");
-        public bool IsReady => File.Exists(ManagedTarget);
+
+        // TerrariaRelease.dll alone is not a usable client runtime. The real game
+        // initializes Steam during startup, so both managed Steamworks.NET and the
+        // x64 Steam native library are part of the minimum ready-state contract.
+        public bool IsReady =>
+            File.Exists(ManagedTarget) &&
+            File.Exists(SteamworksManaged) &&
+            File.Exists(SteamworksNativeX64);
+
         public bool CanBuild => File.Exists(ScriptPath) && File.Exists(Path.Combine(_loaderDirectory, "Terraria.exe"));
 
         public async Task<RuntimeBuildResult> BuildAsync()
