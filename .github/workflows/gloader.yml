@@ -147,7 +147,7 @@ jobs:
 
           $rootDirectories = @(Get-ChildItem "dist/gloader" -Directory | Select-Object -ExpandProperty Name | Sort-Object)
           if (($rootDirectories -join ',') -ne "gdeps,gmods,tools") {
-            throw "dist/gloader root must contain exactly gdeps, gmods, and tools. Found: $($rootDirectories -join ', ')"
+            throw "dist/gloader root must contain exactly gdeps, gmods, and tools. Found: $($rootDirectories.Name -join ', ')"
           }
 
           $modRootFiles = @(Get-ChildItem "dist/gloader/gmods" -File)
@@ -232,6 +232,19 @@ jobs:
           $process = Start-Process -FilePath $loader -ArgumentList $argumentList -Wait -PassThru
           if ($process.ExitCode -ne 0) {
             throw "Steam Host & Play / out-of-process compiler fixture failed with exit code $($process.ExitCode)"
+          }
+
+          $clientLog = Join-Path (Split-Path $loader -Parent) "gdeps/logs/gloader-client.log"
+          if (-not (Test-Path $clientLog)) {
+            throw "Source compiler integration test did not produce gloader-client.log."
+          }
+
+          $clientLogText = Get-Content $clientLog -Raw
+          if ($clientLogText -match '(?m)\[ERROR\] Mod failed: RadioCompilerProbe') {
+            throw "RadioCompilerProbe failed through the real source compiler:`n$clientLogText"
+          }
+          if ($clientLogText -notmatch '(?m)\[INFO\] Loaded mod: RadioCompilerProbe') {
+            throw "RadioCompilerProbe was not confirmed loaded through the real source compiler:`n$clientLogText"
           }
 
       - name: Remove integration-test logs
