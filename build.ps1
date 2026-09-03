@@ -2,12 +2,15 @@ $ErrorActionPreference = "Stop"
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Project = Join-Path $Root "src\GLoader\GLoader.csproj"
+$CompilerProject = Join-Path $Root "src\GLoader.Compiler\GLoader.Compiler.csproj"
 $WorldMakerProject = Join-Path $Root "tools\expanded-world-maker\ExpandedWorldMaker.csproj"
 $DistRoot = Join-Path $Root "dist"
 $Dist = Join-Path $DistRoot "gloader"
 $Publish = Join-Path $DistRoot "publish"
+$CompilerPublish = Join-Path $DistRoot "compiler-publish"
 $WorldMakerPublish = Join-Path $DistRoot "world-maker-publish"
 $Deps = Join-Path $Dist "gdeps"
+$CompilerOut = Join-Path $Deps "compiler"
 $ModsOut = Join-Path $Dist "gmods"
 $ToolsOut = Join-Path $Dist "tools"
 $Mods = Join-Path $Root "gmods"
@@ -50,9 +53,12 @@ if (Test-Path $DistRoot) {
 
 New-Item $Dist -ItemType Directory -Force | Out-Null
 New-Item $Deps -ItemType Directory -Force | Out-Null
+New-Item $CompilerOut -ItemType Directory -Force | Out-Null
 New-Item $ModsOut -ItemType Directory -Force | Out-Null
 New-Item $ToolsOut -ItemType Directory -Force | Out-Null
 
+# Main loader: deliberately no Roslyn package references. It hosts Terraria and
+# Harmony, but source compilation happens in the short-lived helper below.
 dotnet publish $Project -c Release -o $Publish
 
 $PublishedExe = Join-Path $Publish "gloader.exe"
@@ -66,10 +72,22 @@ Move-Item $PublishedExe $DistExe -Force
 Enable-LargeAddressAware $DistExe
 
 Get-ChildItem $Publish -Force | Move-Item -Destination $Deps -Force
+Remove-Item $Publish -Recurse -Force
+
+# Roslyn lives in its own helper process under gdeps\compiler. This avoids the
+# malware-like combination of an in-process arbitrary C# compiler plus runtime
+# patching in gloader.exe. The helper exits before Terraria starts.
+dotnet publish $CompilerProject -c Release -o $CompilerPublish
+$CompilerExe = Join-Path $CompilerPublish "gloader.compiler.exe"
+if (-not (Test-Path $CompilerExe)) {
+    throw "gloader.compiler.exe was not produced."
+}
+Get-ChildItem $CompilerPublish -Force | Move-Item -Destination $CompilerOut -Force
+Remove-Item $CompilerPublish -Recurse -Force
+
 Copy-Item (Join-Path $Mods "*") $ModsOut -Recurse -Force
 Copy-Item (Join-Path $Root "LICENSE.md") (Join-Path $Deps "LICENSE.md") -Force
 Copy-Item (Join-Path $Root "THIRD-PARTY-NOTICES.txt") (Join-Path $Deps "THIRD-PARTY-NOTICES.txt") -Force
-Remove-Item $Publish -Recurse -Force
 
 # Expanded World Maker is part of the normal package, not a post-release overlay.
 # This prevents a later gloader refresh from accidentally publishing a ZIP that
