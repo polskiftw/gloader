@@ -123,7 +123,17 @@ namespace GLoader
 
             ValidateRuntimeTarget(targetPath, runtimeInfo);
 
-            var gameDirectory = Path.GetDirectoryName(targetPath);
+            var runtimeDirectory = Path.GetDirectoryName(targetPath);
+            if (string.IsNullOrWhiteSpace(runtimeDirectory))
+                runtimeDirectory = loaderDirectory;
+            else
+                runtimeDirectory = Path.GetFullPath(runtimeDirectory);
+
+            // The private TerrariaNetCore binaries live under gdeps\x64-runtime, but
+            // vanilla Terraria still uses the relative Content root "Content". Keep
+            // process/game semantics anchored to the normal Steam Terraria directory
+            // while resolving managed/native runtime files from the private runtime.
+            var gameDirectory = ResolveGameDirectory(loaderDirectory, runtimeDirectory);
             var modsDirectory = string.IsNullOrWhiteSpace(options.ModsPath)
                 ? defaultModsDirectory
                 : Path.GetFullPath(options.ModsPath);
@@ -137,18 +147,20 @@ namespace GLoader
             Log.Info("Target: " + targetPath);
             Log.Info("Target version: " + GetFileVersion(targetPath));
             Log.Info("Target runtime: " + runtimeInfo.Description + " (machine " + runtimeInfo.Machine + ")");
+            Log.Info("Game root: " + gameDirectory);
+            Log.Info("Runtime root: " + runtimeDirectory);
             Log.Info("Mode: " + (isServerTarget ? "server" : "client"));
             Log.Info("Mods: " + modsDirectory);
             Log.Info("Dependencies: " + dependenciesDirectory);
 
             Directory.SetCurrentDirectory(gameDirectory);
 
-            var runtimeDirectories = GetRuntimeDirectories(gameDirectory);
+            var runtimeDirectories = GetRuntimeDirectories(runtimeDirectory);
             var nativeDirectory = runtimeDirectories.FirstOrDefault(path =>
                 path.EndsWith(Path.Combine("Native", "Windows"), StringComparison.OrdinalIgnoreCase))
                 ?? runtimeDirectories.FirstOrDefault(path =>
                     path.IndexOf(Path.DirectorySeparatorChar + "native", StringComparison.OrdinalIgnoreCase) >= 0)
-                ?? gameDirectory;
+                ?? runtimeDirectory;
             NativeLibrarySearch.UseDirectory(nativeDirectory);
 
             using var runtimeResolver = new ManagedAssemblyResolver(
@@ -187,6 +199,7 @@ namespace GLoader
                         modsDirectory,
                         gameAssembly,
                         gameDirectory,
+                        runtimeDirectory,
                         dependenciesDirectory,
                         isServerTarget);
                 }
@@ -198,6 +211,39 @@ namespace GLoader
                 Log.Info("Starting Terraria.");
                 return GameBootstrap.InvokeEntryPoint(gameAssembly, gameArguments.ToArray());
             }
+        }
+
+        private static string ResolveGameDirectory(string loaderDirectory, string runtimeDirectory)
+        {
+            var privateRuntimeDirectory = Path.GetFullPath(
+                Path.Combine(loaderDirectory, "gdeps", TargetLocator.X64RuntimeDirectoryName));
+            var normalizedRuntime = Path.GetFullPath(runtimeDirectory);
+
+            if (PathsEqual(normalizedRuntime, privateRuntimeDirectory) ||
+                IsPathWithin(normalizedRuntime, privateRuntimeDirectory))
+            {
+                return Path.GetFullPath(loaderDirectory);
+            }
+
+            return normalizedRuntime;
+        }
+
+        private static bool IsPathWithin(string candidate, string parent)
+        {
+            var normalizedCandidate = Path.GetFullPath(candidate)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var normalizedParent = Path.GetFullPath(parent)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+
+            return normalizedCandidate.StartsWith(normalizedParent, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool PathsEqual(string left, string right)
+        {
+            return string.Equals(
+                Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                StringComparison.OrdinalIgnoreCase);
         }
 
         private static void ValidateRuntimeTarget(string targetPath, TargetRuntimeInfo runtimeInfo)
@@ -226,16 +272,16 @@ namespace GLoader
             }
         }
 
-        private static string[] GetRuntimeDirectories(string gameDirectory)
+        private static string[] GetRuntimeDirectories(string runtimeDirectory)
         {
             var candidates = new[]
             {
-                gameDirectory,
-                Path.Combine(gameDirectory, "Libraries"),
-                Path.Combine(gameDirectory, "Libraries", "Native"),
-                Path.Combine(gameDirectory, "Libraries", "Native", "Windows"),
-                Path.Combine(gameDirectory, "Libraries", "Native", "Windows", "x64"),
-                Path.Combine(gameDirectory, "runtimes", "win-x64", "native")
+                runtimeDirectory,
+                Path.Combine(runtimeDirectory, "Libraries"),
+                Path.Combine(runtimeDirectory, "Libraries", "Native"),
+                Path.Combine(runtimeDirectory, "Libraries", "Native", "Windows"),
+                Path.Combine(runtimeDirectory, "Libraries", "Native", "Windows", "x64"),
+                Path.Combine(runtimeDirectory, "runtimes", "win-x64", "native")
             };
 
             return candidates
