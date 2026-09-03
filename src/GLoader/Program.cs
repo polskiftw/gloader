@@ -12,7 +12,13 @@ namespace GLoader
         [STAThread]
         private static int Main(string[] args)
         {
-            var loaderDirectory = Path.GetFullPath(AppContext.BaseDirectory);
+            var loaderExecutablePath = GetLoaderExecutablePath();
+            var loaderDirectory = Path.GetDirectoryName(loaderExecutablePath);
+            if (string.IsNullOrWhiteSpace(loaderDirectory))
+                loaderDirectory = Path.GetFullPath(AppContext.BaseDirectory);
+            else
+                loaderDirectory = Path.GetFullPath(loaderDirectory);
+
             var defaultModsDirectory = Path.Combine(loaderDirectory, "gmods");
             var dependenciesDirectory = Path.Combine(loaderDirectory, "gdeps");
             var logsDirectory = Path.Combine(dependenciesDirectory, "logs");
