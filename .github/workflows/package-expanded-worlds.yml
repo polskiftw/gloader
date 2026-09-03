@@ -1,0 +1,58 @@
+name: Package Expanded Worlds
+
+on:
+  push:
+    branches:
+      - feat/expanded-world-sizes
+    paths:
+      - 'gmods/ExpandedWorlds/**'
+      - '.github/workflows/package-expanded-worlds.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate Expanded Worlds source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $mod = Join-Path $env:GITHUB_WORKSPACE 'gmods\ExpandedWorlds'
+          if (-not (Test-Path -LiteralPath $mod -PathType Container)) {
+            throw "ExpandedWorlds source directory is missing: $mod"
+          }
+          $main = Join-Path $mod 'Main.cs'
+          if (-not (Test-Path -LiteralPath $main -PathType Leaf)) {
+            throw "ExpandedWorlds Main.cs is missing: $main"
+          }
+          $sources = @(Get-ChildItem -LiteralPath $mod -Filter '*.cs' -File)
+          if ($sources.Count -lt 1) {
+            throw 'ExpandedWorlds contains no C# source files.'
+          }
+          Write-Host "Packaging $($sources.Count) C# source files."
+
+      - name: Create drop-in ZIP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = Join-Path $env:RUNNER_TEMP 'expanded-worlds-package'
+          $dest = Join-Path $stage 'ExpandedWorlds'
+          $zip = Join-Path $env:GITHUB_WORKSPACE 'ExpandedWorlds-x64-ready.zip'
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'gmods\ExpandedWorlds\*') -Destination $dest -Recurse -Force
+          if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
+          Compress-Archive -LiteralPath $dest -DestinationPath $zip -CompressionLevel Optimal
+
+      - name: Upload Expanded Worlds ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: ExpandedWorlds-x64-ready
+          path: ExpandedWorlds-x64-ready.zip
+          if-no-files-found: error
+          retention-days: 30
