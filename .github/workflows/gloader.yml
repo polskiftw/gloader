@@ -64,6 +64,19 @@ jobs:
           dotnet build tests/HostPlayFixture/Client.csproj -c Release --no-restore
           dotnet build tests/HostPlayFixture/Server.csproj -c Release --no-restore
 
+      - name: Validate x64 runtime builder PowerShell
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path "tools/x64-runtime/Build-X64Runtime.ps1").Path,
+            [ref]$tokens,
+            [ref]$errors) | Out-Null
+          if ($errors.Count -ne 0) {
+            throw "x64 runtime builder has PowerShell parse errors:`n$($errors | Out-String)"
+          }
+
       - name: Infinite Angler debug quest-fish regression test
         shell: pwsh
         run: |
@@ -143,6 +156,27 @@ jobs:
 
           if (Test-Path "dist/gloader/gmods/VGMRadio") {
             throw "VGMRadio is retired and must not be shipped as a separate mod."
+          }
+
+      - name: Private x64 runtime uses the Terraria game root
+        shell: pwsh
+        run: |
+          $loader = (Resolve-Path "dist/gloader/gloader.exe").Path
+          $gameRoot = (Resolve-Path "dist/gloader").Path
+          $runtimeRoot = Join-Path $gameRoot "gdeps/x64-runtime"
+          $target = Join-Path $runtimeRoot "TerrariaRelease.dll"
+
+          New-Item -ItemType Directory -Path $runtimeRoot -Force | Out-Null
+          Copy-Item "tests/HostPlayFixture/bin/Release/net10.0-windows/Terraria.dll" $target -Force
+
+          try {
+            & $loader --target $target --no-mods -- --cwd-probe $gameRoot
+            if ($LASTEXITCODE -ne 0) {
+              throw "Private runtime/game-root split fixture failed with exit code $LASTEXITCODE"
+            }
+          }
+          finally {
+            Remove-Item $runtimeRoot -Recurse -Force -ErrorAction SilentlyContinue
           }
 
       - name: Steam Host & Play + Infinite Angler raw packet-82 integration test
