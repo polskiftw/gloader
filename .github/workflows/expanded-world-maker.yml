@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - feat/expanded-world-sizes
+      - feat/world-maker-secret-seeds
     paths:
       - "tools/expanded-world-maker/**"
       - ".github/workflows/expanded-world-maker.yml"
