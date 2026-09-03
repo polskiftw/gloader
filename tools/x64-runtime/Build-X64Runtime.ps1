@@ -68,13 +68,9 @@ function Get-DefaultOutputDirectory {
 
 $TerrariaDirectory = [System.IO.Path]::GetFullPath($TerrariaDirectory)
 $TerrariaExe = Join-Path $TerrariaDirectory "Terraria.exe"
-$TerrariaServerExe = Join-Path $TerrariaDirectory "TerrariaServer.exe"
 
 if (-not (Test-Path $TerrariaExe -PathType Leaf)) {
     throw "Terraria.exe was not found in '$TerrariaDirectory'."
-}
-if (-not (Test-Path $TerrariaServerExe -PathType Leaf)) {
-    throw "TerrariaServer.exe was not found in '$TerrariaDirectory'. The upstream decompiler expects the normal Steam Terraria install."
 }
 
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
@@ -138,7 +134,9 @@ if (-not (Test-Path $SetupCli -PathType Leaf)) {
     throw "The pinned upstream workspace does not contain setup-cli.bat."
 }
 
-# Generate source from the user's own installed 1.4.5.8 executable.
+# Generate source from the user's own installed 1.4.5.8 executable. If the
+# matching TerrariaServer.exe is absent, the pinned upstream setup retrieves
+# that exact server version from Re-Logic's terraria.org dedicated-server API.
 Invoke-Checked -FilePath $SetupCli -Arguments @(
     "decompile", "--no-prompts", "--plain-progress",
     "--terraria-steam-dir", $TerrariaDirectory)
