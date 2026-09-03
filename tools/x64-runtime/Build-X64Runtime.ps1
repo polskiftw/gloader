@@ -159,7 +159,7 @@ function Invoke-UpstreamSetup {
     # setup/user.settings and src/WorkspaceInfo.targets to be relative to the
     # repository root. Its trailing `cd ..` also masks dotnet's non-zero exit
     # code. Invoke the CLI project directly from the workspace root instead.
-    Invoke-Checked -FilePath "dotnet" -WorkingDirectory $WorkspaceDirectory -Arguments @(
+    $setupArguments = @(
         "run",
         "--project", $SetupProject,
         "-c", "Release",
@@ -167,6 +167,8 @@ function Invoke-UpstreamSetup {
         "-v", "q",
         "--"
     ) + $CommandArguments
+
+    Invoke-Checked -FilePath "dotnet" -WorkingDirectory $WorkspaceDirectory -Arguments $setupArguments
 }
 
 # Generate source from the user's own installed 1.4.5.8 executable. If the
