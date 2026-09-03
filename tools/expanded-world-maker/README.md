@@ -18,7 +18,7 @@ All three stay categorically **Large** inside Terraria. Expanded Worlds changes 
 - World name
 - Classic / Expert / Master / Journey
 - Normal seed text (blank = random)
-- Independent Terraria 1.4.5 special-seed switches:
+- A dedicated **Special Seeds** section with Terraria's nine Special Seeds:
   - Not the Bees
   - Drunk
   - Celebration Mk10
@@ -28,12 +28,15 @@ All three stay categorically **Large** inside Terraria. Expanded Worlds changes 
   - Remix / Don't Dig Up
   - Zenith / Get Fixed Boi
   - Skyblock
-- Arbitrary combinations of those special-seed switches
+- A separate **Secret Seeds (1.4.5)** section with all 37 current Terraria 1.4.5 Secret Seeds as checkboxes
+- Arbitrary combinations of Secret Seeds with each other and with Special Seeds
 - Output-folder picker for the finished `.wld`
 - `TerrariaServer.exe` picker if auto-detection does not find it
 - Live worldgen progress, collapsible server log, cancellation, and open-output-folder button
 
-Legacy magic seed text still works in the normal seed box. Special-seed switches are written as Terraria's native dedicated-server `seed_<name>=1` config flags, so they can be combined with an ordinary seed instead of replacing it.
+You do not need to remember or type Secret Seed phrases. When Secret Seeds are selected, the World Maker encodes them through Terraria 1.4.5.8's native copied-seed format so the unattended dedicated-server path activates them correctly. Any checked Special Seeds are serialized into the same payload so mixed combinations survive generation.
+
+If no Secret Seeds are selected, ordinary seeds and Special-Seed-only worlds keep using Terraria's normal dedicated-server configuration path.
 
 ## Install / run
 
