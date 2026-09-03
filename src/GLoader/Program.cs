@@ -123,7 +123,6 @@ namespace GLoader
             var gameArguments = options.GameArguments.ToArray();
 
             using (var resolver = new ManagedAssemblyResolver(
-                gameAssembly,
                 gameDirectory,
                 dependenciesDirectory,
                 modsDirectory))
