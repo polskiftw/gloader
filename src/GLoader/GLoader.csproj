@@ -1,13 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
-    <OutputType>Exe</OutputType>
+    <OutputType>WinExe</OutputType>
     <AssemblyName>gloader</AssemblyName>
     <RootNamespace>GLoader</RootNamespace>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
-    <PlatformTarget>AnyCPU</PlatformTarget>
-    <Prefer32Bit>true</Prefer32Bit>
+    <PlatformTarget>x86</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
@@ -18,7 +18,7 @@
     <InformationalVersion>0.1.22-alpha</InformationalVersion>
     <Company>gloader</Company>
     <Product>gloader</Product>
-    <Description>Raw C# source mod loader for vanilla Terraria</Description>
+    <Description>Terraria mod launcher</Description>
     <Deterministic>true</Deterministic>
   </PropertyGroup>
 
