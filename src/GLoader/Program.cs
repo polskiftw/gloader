@@ -121,8 +121,11 @@ namespace GLoader
             Log.Info("Dependencies: " + dependenciesDirectory);
             Log.Info("Compiler helper: " + compilerPath);
 
+            // gloader is distributed directly beside Terraria.exe. Setting the working
+            // directory to the game folder is enough for Terraria's ordinary content and
+            // native-library probing; do not call SetDllDirectory or alter Windows loader
+            // search settings.
             Directory.SetCurrentDirectory(gameDirectory);
-            NativeLibrarySearch.UseDirectory(gameDirectory);
 
             var gameAssembly = GameBootstrap.Load(targetPath);
             var gameArguments = options.GameArguments.ToArray();
