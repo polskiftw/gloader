@@ -161,6 +161,9 @@ namespace GLoader
         private Dictionary<string, string> BuildIndex(bool managed)
         {
             var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var nativeScores = managed
+                ? null
+                : new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var directory in _directories)
             {
@@ -210,8 +213,17 @@ namespace GLoader
                         catch (BadImageFormatException)
                         {
                             var name = Path.GetFileNameWithoutExtension(path);
-                            if (!string.IsNullOrWhiteSpace(name) && !result.ContainsKey(name))
-                                result[name] = Path.GetFullPath(path);
+                            if (string.IsNullOrWhiteSpace(name))
+                                continue;
+
+                            var fullPath = Path.GetFullPath(path);
+                            var score = GetNativeArchitectureScore(fullPath);
+
+                            if (!nativeScores.TryGetValue(name, out var currentScore) || score > currentScore)
+                            {
+                                nativeScores[name] = score;
+                                result[name] = fullPath;
+                            }
                         }
                         catch
                         {
@@ -222,6 +234,41 @@ namespace GLoader
             }
 
             return result;
+        }
+
+        private static int GetNativeArchitectureScore(string path)
+        {
+            var normalized = path
+                .Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar)
+                .ToLowerInvariant();
+            var separator = Path.DirectorySeparatorChar.ToString();
+
+            var hasX64 =
+                normalized.Contains(separator + "x64" + separator, StringComparison.Ordinal) ||
+                normalized.Contains(separator + "win-x64" + separator, StringComparison.Ordinal) ||
+                normalized.EndsWith(separator + "x64", StringComparison.Ordinal) ||
+                normalized.Contains(separator + "amd64" + separator, StringComparison.Ordinal);
+            var hasX86 =
+                normalized.Contains(separator + "x86" + separator, StringComparison.Ordinal) ||
+                normalized.Contains(separator + "win-x86" + separator, StringComparison.Ordinal) ||
+                normalized.EndsWith(separator + "x86", StringComparison.Ordinal);
+
+            if (Environment.Is64BitProcess)
+            {
+                if (hasX64)
+                    return 100;
+                if (hasX86)
+                    return -100;
+            }
+            else
+            {
+                if (hasX86)
+                    return 100;
+                if (hasX64)
+                    return -100;
+            }
+
+            return 0;
         }
     }
 }
