@@ -66,7 +66,7 @@ Generation happens in a private job directory under `%LOCALAPPDATA%\gloader\Expa
 2. the World Maker opens Terraria's saved `.wld` header and confirms its physical width and height exactly match the requested XL/Huge/THICC preset, and
 3. the generated file exists and is non-empty.
 
-The validator does **not** depend on a particular Expanded Worlds console/log sentence. It validates the file Terraria actually wrote, so a successful server-ready world is not rejected just because a diagnostic line was absent or arrived at a different time.
+The validator does **not** depend on a particular Expanded Worlds console/log sentence. It validates the file Terraria actually wrote, so a successful server-ready world is not rejected just because a diagnostic line was absent or arrived at a different time. A successful check is also written into **Show log** as a `[World Maker] Validated generated .wld header` entry with the saved dimensions and file size.
 
 If a destination `.wld` already exists, the GUI asks before starting but does not overwrite the existing file until the replacement has finished and validated.
 
