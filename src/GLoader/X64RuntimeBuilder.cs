@@ -27,27 +27,32 @@ namespace GLoader
             "Libraries",
             SteamworksPackageId,
             SteamworksPackageVersion);
-        public string SteamworksManaged => Path.Combine(
+        public string SteamworksManagedPackageAsset => Path.Combine(
             SteamworksPackageDirectory,
             "runtimes",
             "win",
             "lib",
             "net8.0",
             "Steamworks.NET.dll");
-        public string SteamworksNativeX64 => Path.Combine(
+        public string SteamworksNativePackageAsset => Path.Combine(
             SteamworksPackageDirectory,
             "runtimes",
             "win-x64",
             "native",
             "steam_api64.dll");
+        public string SteamworksManaged => Path.Combine(RuntimeDirectory, "Steamworks.NET.dll");
+        public string SteamworksNativeX64 => Path.Combine(RuntimeDirectory, "steam_api64.dll");
         public string ScriptPath => Path.Combine(_loaderDirectory, "gdeps", "tools", "x64-runtime", "Build-X64Runtime.ps1");
         public string LogPath => Path.Combine(_logsDirectory, "x64-runtime-build.log");
 
         // TerrariaRelease.dll alone is not a usable client runtime. The real game
-        // initializes Steam during startup, so both managed Steamworks.NET and the
-        // x64 Steam native library are part of the minimum ready-state contract.
+        // initializes Steam during startup, so the selected managed Steamworks.NET
+        // assembly and x64 Steam native library are part of the ready-state contract.
+        // Require both the organized NuGet assets and flat fallback copies.
         public bool IsReady =>
             File.Exists(ManagedTarget) &&
+            File.Exists(SteamworksManagedPackageAsset) &&
+            File.Exists(SteamworksNativePackageAsset) &&
             File.Exists(SteamworksManaged) &&
             File.Exists(SteamworksNativeX64);
 
