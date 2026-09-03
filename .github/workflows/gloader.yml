@@ -113,7 +113,7 @@ jobs:
         run: |
           & "tests/RadioPolicyCompile/bin/Release/net48/RadioPolicyCompile.exe"
           if ($LASTEXITCODE -ne 0) {
-            throw "Radio policy regression test failed with exit code $LASTEXITCODE"
+            throw "Radio policy regression failed with exit code $LASTEXITCODE"
           }
 
       - name: General Radio overlay-upgrade discovery test
@@ -139,7 +139,7 @@ jobs:
             throw "Published gloader did not report the expected x64/CoreCLR build. Output:`n$output"
           }
 
-      - name: Verify clean Terraria root layout
+      - name: Verify release payload
         shell: pwsh
         run: |
           $rootFiles = @(Get-ChildItem "dist/gloader" -File)
@@ -157,17 +157,20 @@ jobs:
             throw "gmods must contain mod folders only. Loose files found: $($modRootFiles.Name -join ', ')"
           }
 
+          $bundledMods = @(Get-ChildItem "dist/gloader/gmods" -Directory | Select-Object -ExpandProperty Name | Sort-Object)
+          if (($bundledMods -join ',') -ne "ExpandedWorlds") {
+            throw "Release package must bundle exactly one gmod: ExpandedWorlds. Found: $($bundledMods -join ', ')"
+          }
+          if (-not (Test-Path "dist/gloader/gmods/ExpandedWorlds/Main.cs" -PathType Leaf)) {
+            throw "Expanded Worlds Main.cs is missing from the release payload."
+          }
+
           $dependencyFiles = @(Get-ChildItem "dist/gloader/gdeps" -File)
           if ($dependencyFiles.Count -eq 0) {
             throw "gdeps must contain the published gloader runtime/support files."
           }
-
-          if (-not (Test-Path "dist/gloader/gmods/Radio/Main.cs")) {
-            throw "Published package must contain the General Radio mod."
-          }
-
-          if (Test-Path "dist/gloader/gmods/VGMRadio") {
-            throw "VGMRadio is retired and must not be shipped as a separate mod."
+          if (-not (Test-Path "dist/gloader/gdeps/tools/x64-runtime/Build-X64Runtime.ps1" -PathType Leaf)) {
+            throw "The required first-run x64 Terraria runtime bootstrap dependency is missing."
           }
 
       - name: Private x64 runtime uses the Terraria game root
@@ -233,13 +236,6 @@ jobs:
           "RELEASE_VERSION=$version" >> $env:GITHUB_ENV
           Compress-Archive -Path "dist/gloader/*" -DestinationPath "gloader-$version.zip" -Force
 
-      - name: Build optional Terraria decompiler release asset
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release ')
-        shell: pwsh
-        run: |
-          ./tools/terraria-decompiler/offline/Build-OfflineBundle.ps1 `
-            -OutputDirectory "$env:GITHUB_WORKSPACE\release-tools"
-
       - name: Publish GitHub release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Release ')
         shell: pwsh
@@ -268,18 +264,16 @@ jobs:
           $global:LASTEXITCODE = 0
 
           $notes = @"
-          ## Downloads
+          ## Download
 
-          - **gloader-$env:RELEASE_VERSION.zip** — gloader itself. Extract it into the Terraria install folder.
-          - **TerrariaDecompilerOffline-win-x64.zip** — optional standalone GUI reference decompiler. It is not required to use gloader.
+          - **gloader-$env:RELEASE_VERSION.zip** — Windows x64 gloader, its required runtime dependencies/bootstrap files, and **Expanded Worlds** as the only bundled gmod. Extract the ZIP directly into the Terraria install folder.
 
-          The decompiler is self-contained for Windows x64 and performs no dependency downloads while you use it. It harvests managed reference DLLs from your own Terraria install and does not include Terraria or decompiled Terraria source.
+          No optional gmods, Expanded World Maker, decompiler bundle, or other standalone tools are included in this release.
           "@
 
           $releaseArgs = @(
             'release', 'create', $tag,
             "gloader-$env:RELEASE_VERSION.zip",
-            'release-tools/TerrariaDecompilerOffline-win-x64.zip',
             '--repo', $repo,
             '--target', "${{ github.sha }}",
             '--title', "gloader v$env:RELEASE_VERSION",
@@ -296,15 +290,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "Could not publish gloader release '$tag'."
           }
-
-          gh release view 'terraria-decompiler-offline' --repo $repo *> $null
-          if ($LASTEXITCODE -eq 0) {
-            gh release delete 'terraria-decompiler-offline' --repo $repo --yes --cleanup-tag
-            if ($LASTEXITCODE -ne 0) {
-              throw "Published '$tag', but could not remove the legacy standalone Terraria decompiler release."
-            }
-          }
-          $global:LASTEXITCODE = 0
 
       - name: Upload
         uses: actions/upload-artifact@v4
