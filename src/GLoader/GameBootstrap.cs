@@ -15,10 +15,37 @@ namespace GLoader
             var fullTargetPath = Path.GetFullPath(targetPath);
             ConfigurePrivateFnaTitleLocation(fullTargetPath);
 
-            Log.Info("Loading managed Terraria assembly into the 64-bit CoreCLR host.");
-            var gameAssembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(fullTargetPath);
-            InitializePrivateRuntimeNativeDirectory(gameAssembly, fullTargetPath);
-            return gameAssembly;
+            if (!IsPrivateRuntimeTarget(fullTargetPath))
+            {
+                Log.Info("Loading managed Terraria assembly into the 64-bit CoreCLR host.");
+                return AssemblyLoadContext.Default.LoadFromAssemblyPath(fullTargetPath);
+            }
+
+            var runtimeDirectory = Path.GetDirectoryName(fullTargetPath);
+            if (string.IsNullOrWhiteSpace(runtimeDirectory))
+                throw new InvalidOperationException("Could not determine the private Terraria runtime directory.");
+
+            runtimeDirectory = Path.GetFullPath(runtimeDirectory);
+            var originalDirectory = Environment.CurrentDirectory;
+
+            try
+            {
+                // TerrariaNetCore's MonoLaunch type is marked beforefieldinit, so the CLR
+                // is allowed to initialize its static fields earlier than the first field
+                // access. Put cwd on the private runtime before loading the assembly at
+                // all, then explicitly run MonoLaunch's class constructor while we still
+                // hold that cwd. This guarantees NativesDir captures gdeps\x64-runtime.
+                Directory.SetCurrentDirectory(runtimeDirectory);
+                Log.Info("Loading private Terraria assembly with runtime cwd: " + runtimeDirectory);
+
+                var gameAssembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(fullTargetPath);
+                InitializePrivateRuntimeNativeDirectory(gameAssembly, runtimeDirectory);
+                return gameAssembly;
+            }
+            finally
+            {
+                Directory.SetCurrentDirectory(originalDirectory);
+            }
         }
 
         public static int InvokeEntryPoint(Assembly gameAssembly, string[] gameArguments)
@@ -84,11 +111,8 @@ namespace GLoader
             Log.Info("FNA title base forced to SDL executable directory for private x64 runtime.");
         }
 
-        private static void InitializePrivateRuntimeNativeDirectory(Assembly gameAssembly, string targetPath)
+        private static void InitializePrivateRuntimeNativeDirectory(Assembly gameAssembly, string runtimeDirectory)
         {
-            if (!IsPrivateRuntimeTarget(targetPath))
-                return;
-
             var monoLaunch = gameAssembly.GetType("Terraria.MonoLaunch", throwOnError: false);
             if (monoLaunch == null)
             {
@@ -96,29 +120,7 @@ namespace GLoader
                 return;
             }
 
-            var runtimeDirectory = Path.GetDirectoryName(targetPath);
-            if (string.IsNullOrWhiteSpace(runtimeDirectory))
-                throw new InvalidOperationException("Could not determine the private Terraria runtime directory.");
-
-            runtimeDirectory = Path.GetFullPath(runtimeDirectory);
-            var originalDirectory = Environment.CurrentDirectory;
-
-            // TerrariaNetCore v1.4.5.8 computes MonoLaunch.NativesDir in its static
-            // initializer from Environment.CurrentDirectory. The game itself must keep
-            // cwd at the Steam Terraria root for vanilla relative paths, while the
-            // rebuilt native libraries live under gdeps\x64-runtime. Initialize only
-            // MonoLaunch while cwd points at the private runtime, then restore cwd before
-            // any Terraria game code executes. NativesDir remains locked to the correct
-            // private runtime path for the lifetime of the process.
-            try
-            {
-                Directory.SetCurrentDirectory(runtimeDirectory);
-                RuntimeHelpers.RunClassConstructor(monoLaunch.TypeHandle);
-            }
-            finally
-            {
-                Directory.SetCurrentDirectory(originalDirectory);
-            }
+            RuntimeHelpers.RunClassConstructor(monoLaunch.TypeHandle);
 
             var nativesField = monoLaunch.GetField(
                 "NativesDir",
