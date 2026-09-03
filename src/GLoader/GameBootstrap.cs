@@ -141,13 +141,6 @@ namespace GLoader
                     expectedDirectory + "', got '" + nativesDirectory + "'.");
             }
 
-            if (!Directory.Exists(nativesDirectory))
-            {
-                throw new DirectoryNotFoundException(
-                    "The private Terraria runtime is missing its native Windows library directory: " +
-                    nativesDirectory);
-            }
-
             Log.Info("TerrariaNetCore native root locked to private runtime: " + nativesDirectory);
         }
 
