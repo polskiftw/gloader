@@ -36,7 +36,7 @@ Examples that remain Terraria-owned include:
 
 There is therefore no Desert/Jungle/Hive/feature-geometry/secret-seed aspect-ratio correction layer.
 
-## Rule 2: explicit size tables continue only when the sequence is unique
+## Rule 2: explicit size tables continue when the sequence is unique
 
 The following 1.4.5.8 Small/Medium/Large tables have one obvious arithmetic continuation and are extended mechanically:
 
@@ -69,17 +69,51 @@ The following 1.4.5.8 Small/Medium/Large tables have one obvious arithmetic cont
 
 Downstream vanilla modifiers stay downstream. No Traps, Celebration, Remix, Error World, Care Bears, and other seed behavior is not duplicated inside these continuation functions.
 
-## Rule 3: ambiguous tables stop at Large
+## Rule 3: high-confidence contextual continuations may be promoted, but must stay visibly separate
 
-No interpolation is invented for a table whose first three terms do not determine one unique rule.
+A three-term table can be ambiguous in isolation while still having a strong source-backed continuation when compared with Terraria's other size math. Those promotions live in `InferredTierContinuity.cs`, not in the exact arithmetic table above.
 
-Audited examples retained at vanilla Large behavior:
+### Shadow Orb / Crimson Heart quota
 
-- Early Dual Dungeon Shadow Orb / Crimson Heart quota: `8, 14, 18`;
-- Spider specialized rooms: `2, 6, 8`;
-- Lihzahrd painting cap: `1, 2, 2 + random`.
+Vanilla source: `8, 14, 18`.
 
-## Rule 4: file/network-schema ceilings are not redesigned
+Vertical network sections are `8, 12, 16` for Small/Medium/Large. Medium and Large are exactly `verticalSections + 2`; Small is the compact-world exception. Canonical expanded vertical sections are `20, 24, 28`, so the promoted continuation is:
+
+| Small | Medium | Large | XL | Huge | THICC |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 8 | 14 | 18 | **22** | **26** | **30** |
+
+The source uses the same quota for Shadow Orb rooms and Crimson Heart rooms. Placement, room availability, and RNG remain Terraria-owned.
+
+### Spider specialized rooms
+
+Vanilla source: `2, 6, 8`.
+
+From Medium upward this is exactly `verticalSections / 2`; Small is the compact-world exception. The promoted continuation is:
+
+| Small | Medium | Large | XL | Huge | THICC |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 2 | 6 | 8 | **10** | **12** | **14** |
+
+This is a conversion quota over already-existing eligible rooms, not a guarantee that every requested Spider room can be placed.
+
+### Lihzahrd painting cap: explicit conservative policy
+
+Vanilla source: Small `1`, Medium `2`, Large `2 + genRand.Next(2)`.
+
+There is not enough evidence for a trustworthy tier-growth formula, so Expanded Worlds does **not** pretend one exists. The chosen policy is deliberately flat across all three expanded tiers:
+
+- XL: **3 or 4**
+- Huge: **3 or 4**
+- THICC: **3 or 4**
+
+Implementation preserves vanilla Large's exact single `Next(2)` RNG roll and adds one to the already-randomized `2/3` result. No extra random call is introduced.
+
+## Rule 4: unresolved ambiguous tables stop at Large
+
+If neither the local terms nor surrounding source math produce a strong enough continuation, Expanded Worlds retains vanilla Large behavior. A promoted inference must have its rationale documented here and deterministic tests locking the intended values.
+
+## Rule 5: file/network-schema ceilings are not redesigned
 
 `RandomizeTreeStyle` and `RandomizeCaveBackgrounds` visibly progress from two to three to four regions, but Terraria 1.4.5.8 stores exactly three X boundaries and four styles in its current world/runtime/network model. Expanded Worlds therefore retains the Large four-region representation rather than inventing an incompatible format.
 
@@ -91,11 +125,11 @@ Every 1.4.5.8 worldgen/runtime use was classified:
 - ExtraSpawnPointManager: Small-specific spacing; expanded worlds naturally take the Large path.
 - DungeonGlobalBookshelves: exact `5/10/15`; continued.
 - DungeonGlobalGroundFurniture (both implementations): exact `5/10/15`; continued.
-- DungeonGlobalEarlyDualDungeonFeatures first switch: only unique sequences continued; ambiguous `8/14/18` retained.
+- DungeonGlobalEarlyDualDungeonFeatures first switch: exact sequences continued; contextual Orb/Heart `8/14/18` promoted to `22/26/30`.
 - DungeonGlobalEarlyDualDungeonFeatures flooded-pit switch: exact `2/4/6`; continued.
-- DungeonGlobalPaintings: ambiguous; retained.
+- DungeonGlobalPaintings: Large's `2 + Next(2)` roll is preserved and shifted to `3/4` for every expanded tier.
 - DungeonGlobalTraps: exact base/range progressions; continued.
-- DualDungeonLayoutProvider specialized rooms: unique sequences continued; Spider `2/6/8` retained.
+- DualDungeonLayoutProvider specialized rooms: exact sequences continued; contextual Spider `2/6/8` promoted to `10/12/14`.
 - DualDungeonLayoutProvider specialized halls: exact `3/4/5`; continued.
 - WorldGen Boulder Pet trap: exact `2/4/6`; continued before vanilla No Traps multiplier.
 - WorldGen Dirtiest Block: exact `3/6/9`; continued before vanilla Celebration multiplier.
@@ -124,4 +158,4 @@ The remaining patches are mechanical support for a larger legal canvas:
 - present XL/Huge/THICC names and buttons;
 - use vanilla Large's copied-seed category prefix because Terraria exposes only three size categories.
 
-Client and server compile the same generation context, tier continuations, and capacity guards so the same seed/preset does not have two Expanded Worlds rule sets.
+Client and server compile the same generation context, tier continuations, inferred promotions, and capacity guards so the same seed/preset does not have two Expanded Worlds rule sets.
