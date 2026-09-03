@@ -266,8 +266,23 @@ if (-not (Test-Path $SteamworksNative -PathType Leaf)) {
     throw "Staged Steamworks package is missing its win-x64 native library: '$SteamworksNative'."
 }
 
-Write-Host "Steamworks managed: $SteamworksManaged"
-Write-Host "Steamworks x64:     $SteamworksNative"
+# Keep the organized package tree for .deps.json/RID-aware resolution, but also
+# put the selected Windows assets beside TerrariaRelease.dll. This gives the
+# normal CLR and Windows native probing rules a simple, deterministic fallback.
+$SteamworksManagedFlat = Join-Path $OutputDirectory "Steamworks.NET.dll"
+$SteamworksNativeFlat = Join-Path $OutputDirectory "steam_api64.dll"
+Copy-Item $SteamworksManaged $SteamworksManagedFlat -Force
+Copy-Item $SteamworksNative $SteamworksNativeFlat -Force
+
+if (-not (Test-Path $SteamworksManagedFlat -PathType Leaf)) {
+    throw "Steamworks.NET.dll was not placed beside TerrariaRelease.dll."
+}
+if (-not (Test-Path $SteamworksNativeFlat -PathType Leaf)) {
+    throw "steam_api64.dll was not placed beside TerrariaRelease.dll."
+}
+
+Write-Host "Steamworks managed: $SteamworksManagedFlat"
+Write-Host "Steamworks x64:     $SteamworksNativeFlat"
 
 $manifest = [ordered]@{
     format = 2
@@ -284,8 +299,9 @@ $manifest = [ordered]@{
     runtime = ".NET 10 / FNA"
     steamworks_package = $SteamworksPackageDisplayName
     steamworks_version = $SteamworksPackageVersion
-    steamworks_managed = "Libraries/$SteamworksPackageId/$SteamworksPackageVersion/runtimes/win/lib/net8.0/Steamworks.NET.dll"
-    steamworks_native = "Libraries/$SteamworksPackageId/$SteamworksPackageVersion/runtimes/win-x64/native/steam_api64.dll"
+    steamworks_managed = "Steamworks.NET.dll"
+    steamworks_native = "steam_api64.dll"
+    steamworks_package_root = "Libraries/$SteamworksPackageId/$SteamworksPackageVersion"
     generated_utc = [DateTime]::UtcNow.ToString("o")
 }
 $manifest | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 (Join-Path $OutputDirectory "gloader-x64-runtime.json")
