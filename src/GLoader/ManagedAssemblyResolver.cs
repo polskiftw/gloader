@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -10,23 +9,16 @@ namespace GLoader
     internal sealed class ManagedAssemblyResolver : IDisposable
     {
         private readonly string[] _directories;
-        private readonly Assembly _resourceAssembly;
 
         // AssemblyResolve may be serviced by more than one ManagedAssemblyResolver
-        // instance at once (the bootstrap resolver and the Terraria/resource resolver).
+        // instance at once (the bootstrap resolver and the Terraria/runtime resolver).
         // Loading a dependency can itself raise AssemblyResolve, so a same-identity
         // request must not be allowed to ping-pong between handlers until the stack dies.
         [ThreadStatic]
         private static HashSet<string> _resolvingIdentities;
 
         public ManagedAssemblyResolver(params string[] directories)
-            : this(null, directories)
         {
-        }
-
-        public ManagedAssemblyResolver(Assembly resourceAssembly, params string[] directories)
-        {
-            _resourceAssembly = resourceAssembly;
             _directories = (directories ?? Array.Empty<string>())
                 .Where(path => !string.IsNullOrWhiteSpace(path))
                 .Select(Path.GetFullPath)
@@ -117,11 +109,10 @@ namespace GLoader
                             continue;
                         }
 
-                        // Keep every managed dependency file-backed. Older builds used
-                        // Assembly.Load(File.ReadAllBytes(...)) here, which creates an
-                        // in-memory assembly with no backing file and is a common malware
-                        // heuristic. LoadFile gives the CLR the exact dependency path
-                        // without turning normal packaged DLLs into fileless payloads.
+                        // Every dependency must already exist as a normal file. Do not
+                        // unpack embedded managed payloads into AppData or synthesize a
+                        // second on-disk copy; those behaviors are unnecessary for the
+                        // shipped package and look exactly like dropper behavior to AV ML.
                         return Assembly.LoadFile(Path.GetFullPath(candidate));
                     }
                     catch (BadImageFormatException)
@@ -135,7 +126,9 @@ namespace GLoader
                 }
             }
 
-            return ResolveEmbeddedFileBacked(requested);
+            // Returning null lets the CLR and any resolver registered by Terraria try
+            // their normal probing behavior. gloader itself never extracts assemblies.
+            return null;
         }
 
         private static bool IsCompatibleIdentity(AssemblyName candidate, AssemblyName requested)
@@ -173,12 +166,9 @@ namespace GLoader
             }
 
             // NuGet servicing releases can intentionally ship a strong-named assembly
-            // whose revision is newer than the compile-time reference. Example: Roslyn
-            // 5.9 requests System.Collections.Immutable 10.0.0.0 while the packaged
-            // System.Collections.Immutable 10.0.1 asset has assembly version 10.0.0.1.
-            // Exact version equality rejects a compatible package and breaks startup.
-            // Allow forward servicing within the same major/minor line, never backward
-            // or across a major/minor boundary where API compatibility is not implied.
+            // whose revision is newer than the compile-time reference. Allow forward
+            // servicing within the same major/minor line, never backward or across a
+            // major/minor boundary where API compatibility is not implied.
             if (candidate.Version.Major != requested.Version.Major ||
                 candidate.Version.Minor != requested.Version.Minor)
             {
@@ -218,107 +208,6 @@ namespace GLoader
                 Path.GetFileName(trimmed),
                 "gdeps",
                 StringComparison.OrdinalIgnoreCase);
-        }
-
-        private Assembly ResolveEmbeddedFileBacked(AssemblyName requested)
-        {
-            if (_resourceAssembly == null || string.IsNullOrWhiteSpace(requested.Name))
-            {
-                return null;
-            }
-
-            string[] resourceNames;
-            try
-            {
-                resourceNames = _resourceAssembly.GetManifestResourceNames();
-            }
-            catch
-            {
-                return null;
-            }
-
-            foreach (var extension in new[] { ".dll", ".exe" })
-            {
-                var fileName = requested.Name + extension;
-                var suffix = "." + fileName;
-                var resourceName = resourceNames.FirstOrDefault(name =>
-                    string.Equals(name, fileName, StringComparison.OrdinalIgnoreCase) ||
-                    name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
-
-                if (resourceName == null)
-                {
-                    continue;
-                }
-
-                try
-                {
-                    var cacheRoot = Path.Combine(
-                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                        "gloader",
-                        "cache",
-                        "embedded",
-                        Process.GetCurrentProcess().Id.ToString());
-                    Directory.CreateDirectory(cacheRoot);
-
-                    var safeName = SanitizeFileName(fileName);
-                    var extractedPath = Path.Combine(cacheRoot, safeName);
-
-                    using (var stream = _resourceAssembly.GetManifestResourceStream(resourceName))
-                    {
-                        if (stream == null)
-                        {
-                            continue;
-                        }
-
-                        using (var output = new FileStream(
-                            extractedPath,
-                            FileMode.Create,
-                            FileAccess.Write,
-                            FileShare.Read))
-                        {
-                            stream.CopyTo(output);
-                        }
-                    }
-
-                    if (!File.Exists(extractedPath) || new FileInfo(extractedPath).Length == 0)
-                    {
-                        continue;
-                    }
-
-                    var extractedName = AssemblyName.GetAssemblyName(extractedPath);
-                    if (!IsCompatibleIdentity(extractedName, requested))
-                    {
-                        try { File.Delete(extractedPath); } catch { }
-                        continue;
-                    }
-
-                    return Assembly.LoadFile(Path.GetFullPath(extractedPath));
-                }
-                catch (BadImageFormatException)
-                {
-                    // Embedded native library; not a managed assembly candidate.
-                }
-                catch (FileLoadException)
-                {
-                    // Continue searching other embedded candidates.
-                }
-                catch (IOException)
-                {
-                    // An embedded fallback is optional. Disk/cache failures must not
-                    // hide a normal dependency resolution path.
-                }
-            }
-
-            return null;
-        }
-
-        private static string SanitizeFileName(string value)
-        {
-            var invalid = Path.GetInvalidFileNameChars();
-            var chars = value
-                .Select(character => invalid.Contains(character) ? '_' : character)
-                .ToArray();
-            return new string(chars);
         }
     }
 }
