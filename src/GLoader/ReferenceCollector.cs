@@ -8,6 +8,9 @@ namespace GLoader
 {
     internal static class ReferenceCollector
     {
+        private const string NetStandardIdentity =
+            "netstandard, Version=2.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51";
+
         public static IReadOnlyList<string> Collect(
             Assembly gameAssembly,
             string gameDirectory,
@@ -29,11 +32,18 @@ namespace GLoader
             AddReferencedAssemblyLocations(paths, gameAssembly);
 
             // Source mods are allowed to use loader-provided runtime libraries such as
-            // Harmony. Those assemblies may not have been JIT-loaded yet when reference
-            // collection runs, so scan the loader output directory explicitly.
+            // Harmony and NAudio. Those assemblies may not have been JIT-loaded yet when
+            // reference collection runs, so scan the loader output directories explicitly.
             AddManagedFiles(paths, AppDomain.CurrentDomain.BaseDirectory, overwrite: false);
             AddManagedFiles(paths, supportDirectory, overwrite: false);
             AddManagedFiles(paths, gameDirectory, overwrite: false);
+
+            // NAudio 2.x is a .NET Standard library even when consumed by our net48 host.
+            // Roslyn therefore needs the netstandard 2.0 facade as an explicit metadata
+            // reference. The CLR can resolve the facade at runtime, but it is commonly not
+            // loaded yet when source mods are compiled, which otherwise produces CS0012 on
+            // Stream/Object/IDisposable in Radio's MediaFoundationReader pipeline.
+            AddNetStandardFacade(paths);
 
             // Terraria.exe and TerrariaServer.exe both define Terraria.Main. Never feed
             // the opposite executable to the compiler or source mods get CS0433 ambiguity.
@@ -46,6 +56,100 @@ namespace GLoader
             return paths.Values
                 .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
+        }
+
+        private static void AddNetStandardFacade(IDictionary<string, string> paths)
+        {
+            if (paths.ContainsKey("netstandard"))
+                return;
+
+            try
+            {
+                AddAssemblyLocation(paths, Assembly.Load(NetStandardIdentity), overwrite: false);
+            }
+            catch (FileNotFoundException)
+            {
+                // Fall through to the known framework facade locations below.
+            }
+            catch (FileLoadException)
+            {
+                // Fall through to the known framework facade locations below.
+            }
+            catch (BadImageFormatException)
+            {
+                // Fall through to the known framework facade locations below.
+            }
+
+            if (paths.ContainsKey("netstandard"))
+                return;
+
+            foreach (var candidate in EnumerateNetStandardFacadeCandidates())
+            {
+                if (!File.Exists(candidate))
+                    continue;
+
+                AddManagedPath(paths, candidate, overwrite: false);
+                if (paths.ContainsKey("netstandard"))
+                    return;
+            }
+
+            Log.Warn(
+                "Could not locate the .NET Standard 2.0 facade for source-mod compilation. " +
+                "Mods using .NET Standard libraries such as NAudio may fail to compile.");
+        }
+
+        private static IEnumerable<string> EnumerateNetStandardFacadeCandidates()
+        {
+            var windowsDirectory = Environment.GetEnvironmentVariable("WINDIR");
+            if (!string.IsNullOrWhiteSpace(windowsDirectory))
+            {
+                yield return Path.Combine(
+                    windowsDirectory,
+                    "Microsoft.NET",
+                    "Framework",
+                    "v4.0.30319",
+                    "Facades",
+                    "netstandard.dll");
+            }
+
+            var programFilesX86 = Environment.GetEnvironmentVariable("ProgramFiles(x86)");
+            if (string.IsNullOrWhiteSpace(programFilesX86))
+                programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+
+            if (string.IsNullOrWhiteSpace(programFilesX86))
+                yield break;
+
+            var frameworkRoot = Path.Combine(
+                programFilesX86,
+                "Reference Assemblies",
+                "Microsoft",
+                "Framework",
+                ".NETFramework");
+
+            if (!Directory.Exists(frameworkRoot))
+                yield break;
+
+            IEnumerable<string> versionDirectories;
+            try
+            {
+                versionDirectories = Directory
+                    .EnumerateDirectories(frameworkRoot, "v4.*", SearchOption.TopDirectoryOnly)
+                    .OrderByDescending(path => path, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+            }
+            catch (IOException)
+            {
+                yield break;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                yield break;
+            }
+
+            foreach (var versionDirectory in versionDirectories)
+            {
+                yield return Path.Combine(versionDirectory, "Facades", "netstandard.dll");
+            }
         }
 
         private static void AddReferencedAssemblyLocations(
