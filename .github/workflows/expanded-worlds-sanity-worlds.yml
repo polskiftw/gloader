@@ -2,13 +2,6 @@ name: Expanded Worlds sanity world artifacts
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - feat/expanded-world-sizes
-    paths:
-      - .github/workflows/expanded-worlds-sanity-worlds.yml
-      - gmods/ExpandedWorlds/**
-      - src/GLoader/**
 
 jobs:
   generate:
