@@ -5,12 +5,20 @@ on:
   push:
     paths:
       - "src/**"
+      - "gmods/**"
+      - "tools/expanded-world-maker/**"
       - "build.ps1"
+      - ".github/workflows/gloader.yml"
+      - ".github/workflows/expanded-world-maker.yml"
       - ".github/workflows/windows-defender-package-scan.yml"
   pull_request:
     paths:
       - "src/**"
+      - "gmods/**"
+      - "tools/expanded-world-maker/**"
       - "build.ps1"
+      - ".github/workflows/gloader.yml"
+      - ".github/workflows/expanded-world-maker.yml"
       - ".github/workflows/windows-defender-package-scan.yml"
 
 jobs:
@@ -29,9 +37,19 @@ jobs:
         shell: pwsh
         run: ./build.ps1
 
-      - name: Scan gloader.exe with Microsoft Defender
+      - name: Build Expanded World Maker
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          dotnet restore tools/expanded-world-maker/ExpandedWorldMaker.csproj
+          dotnet build tools/expanded-world-maker/ExpandedWorldMaker.csproj -c Release --no-restore
+          New-Item -ItemType Directory -Force "dist/gloader/tools" | Out-Null
+          Copy-Item "tools/expanded-world-maker/bin/Release/net48/ExpandedWorldMaker.exe" "dist/gloader/tools/ExpandedWorldMaker.exe" -Force
+
+      - name: Scan complete release tree with Microsoft Defender
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
           $platformRoot = Join-Path $env:ProgramData "Microsoft\Windows Defender\Platform"
           $mp = Get-ChildItem $platformRoot -Filter MpCmdRun.exe -Recurse -ErrorAction SilentlyContinue |
             Sort-Object FullName -Descending |
@@ -48,13 +66,27 @@ jobs:
             throw "Microsoft Defender MpCmdRun.exe was not found on the Windows runner."
           }
 
+          try {
+            $status = Get-MpComputerStatus
+            Write-Host "Defender engine: $($status.AMEngineVersion)"
+            Write-Host "Defender AV signature: $($status.AntivirusSignatureVersion)"
+          } catch {
+            Write-Warning "Could not read Defender status: $($_.Exception.Message)"
+          }
+
           & $mp.FullName -SignatureUpdate
           if ($LASTEXITCODE -ne 0) {
             Write-Warning "Defender signature update returned $LASTEXITCODE; scanning with the runner's current signatures."
           }
 
-          $exe = (Resolve-Path "dist/gloader/gloader.exe").Path
-          & $mp.FullName -Scan -ScanType 3 -File $exe -DisableRemediation
+          $scanRoot = (Resolve-Path "dist/gloader").Path
+          Write-Host "Scanning complete staged release tree: $scanRoot"
+          & $mp.FullName -Scan -ScanType 3 -File $scanRoot -DisableRemediation
           if ($LASTEXITCODE -ne 0) {
-            throw "Microsoft Defender flagged gloader.exe (MpCmdRun exit code $LASTEXITCODE)."
+            try {
+              Get-MpThreatDetection | Format-List * | Out-String | Write-Host
+            } catch {}
+            throw "Microsoft Defender flagged one or more files in the staged gloader release (MpCmdRun exit code $LASTEXITCODE)."
           }
+
+          Write-Host "PASS: current Microsoft Defender definitions did not flag the staged release tree."
