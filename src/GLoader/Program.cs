@@ -19,12 +19,17 @@ namespace GLoader
 
             try
             {
+                // gloader is a normal Windows GUI executable now. Command-line users
+                // still get the parent console when they intentionally pass arguments.
+                if (args.Length > 0)
+                {
+                    ConsoleManager.EnsureConsole();
+                }
+
                 var options = LoaderOptions.Parse(args);
 
                 if (args.Length == 0)
                 {
-                    ConsoleManager.DetachForGui();
-
                     var launch = LauncherForm.ShowLauncher(defaultModsDirectory, logsDirectory);
                     if (launch.Action == LauncherAction.Cancel)
                     {
