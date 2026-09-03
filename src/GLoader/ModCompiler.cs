@@ -1,10 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
+using System.Text;
+using System.Threading.Tasks;
 
 namespace GLoader
 {
@@ -12,123 +13,145 @@ namespace GLoader
     {
         public static Assembly Compile(
             ModSource mod,
-            IReadOnlyList<MetadataReference> references,
+            IReadOnlyList<string> references,
             bool isServerTarget,
-            string cacheRoot)
+            string cacheRoot,
+            string compilerPath)
         {
             if (string.IsNullOrWhiteSpace(cacheRoot))
                 throw new ArgumentException("A compiled-mod cache directory is required.", nameof(cacheRoot));
+            if (string.IsNullOrWhiteSpace(compilerPath))
+                throw new ArgumentException("A compiler helper path is required.", nameof(compilerPath));
 
-            var symbols = isServerTarget
-                ? new[] { "GLOADER", "GLOADER_SERVER" }
-                : new[] { "GLOADER", "GLOADER_CLIENT" };
-
-            var parseOptions = new CSharpParseOptions(
-                languageVersion: LanguageVersion.Latest,
-                documentationMode: DocumentationMode.None,
-                kind: SourceCodeKind.Regular,
-                preprocessorSymbols: symbols);
-
-            var syntaxTrees = mod.SourceFiles
-                .Select(path => CSharpSyntaxTree.ParseText(
-                    File.ReadAllText(path),
-                    parseOptions,
-                    path))
-                .ToArray();
+            compilerPath = Path.GetFullPath(compilerPath);
+            if (!File.Exists(compilerPath))
+            {
+                throw new FileNotFoundException(
+                    "gloader's compiler helper is missing. Re-extract the complete release package so gdeps\\compiler is present.",
+                    compilerPath);
+            }
 
             var safeId = SanitizeAssemblyName(mod.Id);
             var assemblyName = "gloader.mod." + safeId;
-
-            var compilation = CSharpCompilation.Create(
-                assemblyName,
-                syntaxTrees,
-                references,
-                new CSharpCompilationOptions(
-                    OutputKind.DynamicallyLinkedLibrary,
-                    optimizationLevel: OptimizationLevel.Release,
-                    allowUnsafe: true,
-                    deterministic: true));
-
             var targetCache = Path.Combine(
                 Path.GetFullPath(cacheRoot),
                 isServerTarget ? "server" : "client");
             Directory.CreateDirectory(targetCache);
 
             var outputPath = Path.Combine(targetCache, safeId + ".dll");
-            var stagingPath = outputPath + ".new";
+            var manifestPath = Path.Combine(
+                targetCache,
+                safeId + ".compile-job-" + Guid.NewGuid().ToString("N") + ".txt");
 
             try
             {
-                if (File.Exists(stagingPath))
-                    File.Delete(stagingPath);
+                WriteManifest(
+                    manifestPath,
+                    assemblyName,
+                    outputPath,
+                    mod.SourceFiles,
+                    references,
+                    isServerTarget);
 
-                using (var peStream = new FileStream(
-                    stagingPath,
-                    FileMode.CreateNew,
-                    FileAccess.Write,
-                    FileShare.Read))
+                RunCompiler(compilerPath, manifestPath, mod.DisplayName);
+
+                if (!File.Exists(outputPath) || new FileInfo(outputPath).Length == 0)
                 {
-                    var emitResult = compilation.Emit(peStream);
-
-                    if (!emitResult.Success)
-                    {
-                        var diagnostics = emitResult.Diagnostics
-                            .Where(diagnostic =>
-                                diagnostic.Severity == DiagnosticSeverity.Error ||
-                                diagnostic.IsWarningAsError)
-                            .OrderBy(diagnostic => diagnostic.Location.SourceTree?.FilePath)
-                            .ThenBy(diagnostic => diagnostic.Location.GetLineSpan().StartLinePosition.Line)
-                            .Select(FormatDiagnostic)
-                            .ToArray();
-
-                        throw new ModCompilationException(
-                            mod.DisplayName,
-                            diagnostics.Length == 0
-                                ? "Compilation failed with no compiler diagnostics."
-                                : string.Join(Environment.NewLine, diagnostics));
-                    }
+                    throw new ModCompilationException(
+                        mod.DisplayName,
+                        "Compiler helper exited successfully but did not produce a usable DLL: " + outputPath);
                 }
 
-                if (File.Exists(outputPath))
-                    File.Delete(outputPath);
-
-                File.Move(stagingPath, outputPath);
-
-                // Load compiled mods as normal file-backed assemblies. This keeps the
-                // loader conventional for the CLR and avoids the fileless mod-loading
-                // behavior that was provoking Microsoft Defender's ML heuristic.
+                // The compiled mod is a normal file-backed assembly. Roslyn itself runs
+                // in gloader.compiler.exe and exits before Terraria starts, so the main
+                // loader no longer contains an in-process arbitrary-code compiler.
                 return Assembly.LoadFrom(outputPath);
             }
             finally
             {
                 try
                 {
-                    if (File.Exists(stagingPath))
-                        File.Delete(stagingPath);
+                    if (File.Exists(manifestPath))
+                        File.Delete(manifestPath);
                 }
                 catch
                 {
-                    // Cache cleanup must not hide the real compiler/load failure.
+                    // Cleanup must never hide the actual compile/load failure.
                 }
             }
         }
 
-        private static string FormatDiagnostic(Diagnostic diagnostic)
+        private static void WriteManifest(
+            string manifestPath,
+            string assemblyName,
+            string outputPath,
+            IReadOnlyList<string> sourceFiles,
+            IReadOnlyList<string> references,
+            bool isServerTarget)
         {
-            var span = diagnostic.Location.GetLineSpan();
-            if (!span.IsValid || string.IsNullOrWhiteSpace(span.Path))
+            var lines = new List<string>
             {
-                return diagnostic.ToString();
-            }
+                "version=" + Escape("1"),
+                "assembly=" + Escape(assemblyName),
+                "output=" + Escape(Path.GetFullPath(outputPath)),
+                "symbol=" + Escape("GLOADER"),
+                "symbol=" + Escape(isServerTarget ? "GLOADER_SERVER" : "GLOADER_CLIENT")
+            };
 
-            return string.Format(
-                "{0}({1},{2}): {3} {4}: {5}",
-                span.Path,
-                span.StartLinePosition.Line + 1,
-                span.StartLinePosition.Character + 1,
-                diagnostic.Severity.ToString().ToLowerInvariant(),
-                diagnostic.Id,
-                diagnostic.GetMessage());
+            foreach (var source in sourceFiles)
+                lines.Add("source=" + Escape(Path.GetFullPath(source)));
+            foreach (var reference in references)
+                lines.Add("reference=" + Escape(Path.GetFullPath(reference)));
+
+            File.WriteAllLines(manifestPath, lines, new UTF8Encoding(false));
+        }
+
+        private static void RunCompiler(string compilerPath, string manifestPath, string modDisplayName)
+        {
+            var start = new ProcessStartInfo
+            {
+                FileName = compilerPath,
+                Arguments = "--manifest " + Quote(manifestPath),
+                WorkingDirectory = Path.GetDirectoryName(compilerPath),
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+
+            using (var process = new Process { StartInfo = start })
+            {
+                if (!process.Start())
+                    throw new ModCompilationException(modDisplayName, "Windows could not start gloader.compiler.exe.");
+
+                Task<string> stdoutTask = process.StandardOutput.ReadToEndAsync();
+                Task<string> stderrTask = process.StandardError.ReadToEndAsync();
+                process.WaitForExit();
+                Task.WaitAll(stdoutTask, stderrTask);
+
+                var stdout = stdoutTask.Result == null ? string.Empty : stdoutTask.Result.Trim();
+                var stderr = stderrTask.Result == null ? string.Empty : stderrTask.Result.Trim();
+
+                if (process.ExitCode != 0)
+                {
+                    var details = string.Join(
+                        Environment.NewLine,
+                        new[] { stderr, stdout }.Where(value => !string.IsNullOrWhiteSpace(value)));
+                    if (string.IsNullOrWhiteSpace(details))
+                        details = "Compiler helper exited with code " + process.ExitCode + ".";
+                    throw new ModCompilationException(modDisplayName, details);
+                }
+            }
+        }
+
+        private static string Escape(string value)
+        {
+            return Uri.EscapeDataString(value ?? string.Empty);
+        }
+
+        private static string Quote(string value)
+        {
+            return "\"" + (value ?? string.Empty).Replace("\"", "\\\"") + "\"";
         }
 
         private static string SanitizeAssemblyName(string value)
