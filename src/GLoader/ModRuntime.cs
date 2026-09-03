@@ -19,10 +19,21 @@ namespace GLoader
             bool isServerTarget,
             string compilerPath)
         {
-            var mods = ModDiscovery.Discover(modsDirectory);
-            Log.Info("Discovered " + mods.Count + " source mod(s).");
+            var userMods = ModDiscovery.Discover(modsDirectory);
+            var internalModsDirectory = Path.Combine(supportDirectory, "coremods");
+            var internalMods = isServerTarget
+                ? new ModSource[0]
+                : ModDiscovery.Discover(internalModsDirectory).ToArray();
 
-            if (mods.Count == 0)
+            var mods = internalMods
+                .Concat(userMods)
+                .ToArray();
+
+            Log.Info(
+                "Discovered " + userMods.Count + " user source mod(s) and " +
+                internalMods.Length + " built-in source mod(s).");
+
+            if (mods.Length == 0)
             {
                 return;
             }
