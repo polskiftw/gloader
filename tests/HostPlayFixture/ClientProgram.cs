@@ -36,6 +36,28 @@ namespace FixtureClient
                     return 94;
                 }
 
+                var runtimeRoot = Path.GetDirectoryName(typeof(Terraria.MonoLaunch).Assembly.Location);
+                if (string.IsNullOrWhiteSpace(runtimeRoot))
+                {
+                    Console.Error.WriteLine("Fixture could not determine its runtime root.");
+                    return 95;
+                }
+
+                var expectedNatives = Path.GetFullPath(
+                    Path.Combine(runtimeRoot, "Libraries", "Native", "Windows"))
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                var actualNatives = Path.GetFullPath(Terraria.MonoLaunch.NativesDir)
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+                Console.WriteLine("[fixture client] expected native root: " + expectedNatives);
+                Console.WriteLine("[fixture client] actual native root:   " + actualNatives);
+
+                if (!string.Equals(expectedNatives, actualNatives, StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.Error.WriteLine("TerrariaNetCore native root was captured from the game cwd instead of the private runtime.");
+                    return 96;
+                }
+
                 return 0;
             }
 
@@ -67,6 +89,17 @@ namespace Terraria
     public static class Program
     {
         public static string SavePath;
+    }
+
+    // Mirrors TerrariaNetCore 1.4.5.8: NativesDir is a static readonly value
+    // captured from Environment.CurrentDirectory when MonoLaunch initializes.
+    internal static class MonoLaunch
+    {
+        internal static readonly string NativesDir = Path.Combine(
+            Environment.CurrentDirectory,
+            "Libraries",
+            "Native",
+            "Windows");
     }
 
     public static class Main
