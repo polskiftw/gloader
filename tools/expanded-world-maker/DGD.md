@@ -13,10 +13,11 @@ Do **not** move just that EXE somewhere random. Leave it inside the extracted gl
 1. Pick **XL**, **Huge**, or **THICC**.
 2. Type the world name.
 3. Pick Classic / Expert / Master / Journey.
-4. Type a seed, or leave Seed blank for random.
-5. Tick any special seeds you want. They can be combined.
-6. Under **SAVE .WLD TO**, pick your Terraria Worlds folder.
-7. Click **GENERATE WORLD**.
+4. Type a normal seed, or leave Seed blank for random.
+5. Tick any **Special Seeds** you want.
+6. Tick any **Secret Seeds (1.4.5)** you want. You do not need to type their phrases.
+7. Under **SAVE .WLD TO**, pick your Terraria Worlds folder.
+8. Click **GENERATE WORLD**.
 
 Typical Worlds folder:
 
@@ -34,23 +35,31 @@ Huge   16,800 x 2,400
 THICC  16,800 x 4,800
 ```
 
-## Secret seeds
+## Special Seeds
 
-The checkboxes are the real Terraria 1.4.5 dedicated-server flags, not fake presets in the World Maker. You can tick multiple at once.
+The nine Terraria Special Seeds have their own checkbox section:
 
 ```text
-Not the Bees        seed_notthebees=1
-Drunk               seed_drunk=1
-Celebration Mk10    seed_celebration=1
-The Constant        seed_theconstant=1
-For the Worthy      seed_fortheworthy=1
-No Traps            seed_notraps=1
-Remix               seed_remix=1
-Zenith              seed_zenith=1
-Skyblock            seed_skyblock=1
+Not the Bees
+Drunk
+Celebration Mk10
+The Constant
+For the Worthy
+No Traps
+Remix / Don't Dig Up
+Zenith / Get Fixed Boi
+Skyblock
 ```
 
-You can also type old magic values such as `getfixedboi`, `dontdigup`, `skyblock`, or `5162020` into the normal Seed box. Terraria itself interprets them.
+These use Terraria's normal dedicated-server special-seed configuration when no Secret Seeds are selected.
+
+## Secret Seeds (1.4.5)
+
+The World Maker exposes all **37 Terraria 1.4.5 Secret Seeds** as visible checkboxes in their own section. You can combine them with each other and with the nine Special Seeds. You do **not** need to remember or type the secret phrases.
+
+When one or more Secret Seeds are checked, the World Maker builds Terraria's native copied-seed payload so the headless dedicated-server generation path actually activates the selected Secret Seeds. Selected Special Seeds are serialized into that same payload so mixed combinations survive world generation.
+
+A normal seed can still be typed in the Seed box. If it is left blank, the World Maker supplies a random base seed before constructing the copied-seed payload.
 
 ## What happens when you press Generate
 
