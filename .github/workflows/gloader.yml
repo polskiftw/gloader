@@ -7,6 +7,7 @@ on:
       - "src/**"
       - "gmods/**"
       - "tests/**"
+      - "tools/x64-runtime/**"
       - "build.ps1"
       - "gloader.sln"
       - ".github/workflows/gloader.yml"
@@ -16,6 +17,7 @@ on:
       - "src/**"
       - "gmods/**"
       - "tests/**"
+      - "tools/x64-runtime/**"
       - "build.ps1"
       - "gloader.sln"
       - ".github/workflows/gloader.yml"
@@ -62,6 +64,31 @@ jobs:
           dotnet build tests/HostPlayFixture/Client.csproj -c Release --no-restore
           dotnet build tests/HostPlayFixture/Server.csproj -c Release --no-restore
 
+      - name: Validate x64 runtime builder PowerShell
+        shell: pwsh
+        run: |
+          $builderPath = (Resolve-Path "tools/x64-runtime/Build-X64Runtime.ps1").Path
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            $builderPath,
+            [ref]$tokens,
+            [ref]$errors) | Out-Null
+          if ($errors.Count -ne 0) {
+            throw "x64 runtime builder has PowerShell parse errors:`n$($errors | Out-String)"
+          }
+
+          $builder = Get-Content $builderPath -Raw
+          if ($builder -match '(?m)^\s*\$SetupCli\s*=') {
+            throw "x64 runtime builder must not invoke the pinned Windows setup-cli.bat; that wrapper changes into setup/ and masks dotnet failures."
+          }
+          if ($builder -notmatch '-WorkingDirectory\s+\$WorkspaceDirectory') {
+            throw "x64 runtime builder must run the upstream setup CLI with the workspace root as its working directory."
+          }
+          if ($builder -notmatch 'setup\\CLI\\Setup\.CLI\.csproj') {
+            throw "x64 runtime builder must invoke the pinned Setup.CLI project directly."
+          }
+
       - name: Infinite Angler debug quest-fish regression test
         shell: pwsh
         run: |
@@ -101,6 +128,17 @@ jobs:
         shell: pwsh
         run: ./build.ps1
 
+      - name: Verify x64 gloader host
+        shell: pwsh
+        run: |
+          $output = (& "dist/gloader/gloader.exe" --help 2>&1 | Out-String)
+          if ($LASTEXITCODE -ne 0) {
+            throw "Published gloader host failed to execute. Output:`n$output"
+          }
+          if ($output -notmatch '64-bit raw C# source mod loader') {
+            throw "Published gloader did not report the expected x64/CoreCLR build. Output:`n$output"
+          }
+
       - name: Verify clean Terraria root layout
         shell: pwsh
         run: |
@@ -132,11 +170,32 @@ jobs:
             throw "VGMRadio is retired and must not be shipped as a separate mod."
           }
 
+      - name: Private x64 runtime uses the Terraria game root
+        shell: pwsh
+        run: |
+          $loader = (Resolve-Path "dist/gloader/gloader.exe").Path
+          $gameRoot = (Resolve-Path "dist/gloader").Path
+          $runtimeRoot = Join-Path $gameRoot "gdeps/x64-runtime"
+          $target = Join-Path $runtimeRoot "TerrariaRelease.dll"
+
+          New-Item -ItemType Directory -Path $runtimeRoot -Force | Out-Null
+          Copy-Item "tests/HostPlayFixture/bin/Release/net10.0-windows/Terraria.dll" $target -Force
+
+          try {
+            & $loader --target $target --no-mods -- --cwd-probe $gameRoot
+            if ($LASTEXITCODE -ne 0) {
+              throw "Private runtime/game-root split fixture failed with exit code $LASTEXITCODE"
+            }
+          }
+          finally {
+            Remove-Item $runtimeRoot -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
       - name: Steam Host & Play + Infinite Angler raw packet-82 integration test
         shell: pwsh
         run: |
           $loader = (Resolve-Path "dist/gloader/gloader.exe").Path
-          $target = (Resolve-Path "tests/HostPlayFixture/bin/Release/net48/Terraria.exe").Path
+          $target = (Resolve-Path "tests/HostPlayFixture/bin/Release/net10.0-windows/Terraria.dll").Path
           $mods = Join-Path $env:RUNNER_TEMP "gloader-hostplay-mods"
           $anglerMod = Join-Path $mods "InfiniteAngler"
 
@@ -216,17 +275,6 @@ jobs:
 
           The decompiler is self-contained for Windows x64 and performs no dependency downloads while you use it. It harvests managed reference DLLs from your own Terraria install and does not include Terraria or decompiled Terraria source.
           "@
-
-          if ($env:RELEASE_VERSION -eq '0.1.20-alpha') {
-            $notes += @"
-
-          ## v0.1.20-alpha highlights
-
-          - Native launcher GUI built directly into `gloader.exe`, including mod enable/disable, Configure, logs, console, vanilla launch, and normal Terraria launch controls.
-          - New included mods/tools added since v0.1.19-alpha, including Difficulty Cycler, Hardcore Save Protection, and World Capture.
-          - Terraria reference/decompiler tooling added for maintaining version-sensitive mods without shipping Terraria binaries or source.
-          "@
-          }
 
           $releaseArgs = @(
             'release', 'create', $tag,

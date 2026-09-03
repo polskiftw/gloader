@@ -24,14 +24,25 @@ namespace GLoader
     {
         private readonly string _modsDirectory;
         private readonly string _logsDirectory;
+        private readonly X64RuntimeBuilder _runtimeBuilder;
         private readonly TableLayoutPanel _modsTable;
         private readonly Label _statusLabel;
         private readonly CheckBox _showConsole;
+        private readonly Button _runtimeButton;
+        private readonly Button _vanillaButton;
+        private readonly Button _launchButton;
+        private bool _buildingRuntime;
 
         public LauncherForm(string modsDirectory, string logsDirectory)
         {
-            _modsDirectory = modsDirectory;
-            _logsDirectory = logsDirectory;
+            _modsDirectory = Path.GetFullPath(modsDirectory);
+            _logsDirectory = Path.GetFullPath(logsDirectory);
+
+            var loaderDirectory = Path.GetDirectoryName(_modsDirectory);
+            if (string.IsNullOrWhiteSpace(loaderDirectory))
+                throw new InvalidOperationException("Could not determine the gloader installation directory.");
+
+            _runtimeBuilder = new X64RuntimeBuilder(loaderDirectory, _logsDirectory);
 
             Text = "gloader";
             StartPosition = FormStartPosition.CenterScreen;
@@ -116,8 +127,16 @@ namespace GLoader
             utilityButtons.Controls.Add(modsFolderButton);
 
             var refreshButton = new Button { Text = "Refresh", AutoSize = true };
-            refreshButton.Click += (sender, args) => RefreshMods(showErrors: true);
+            refreshButton.Click += (sender, args) =>
+            {
+                RefreshMods(showErrors: true);
+                RefreshRuntimeState();
+            };
             utilityButtons.Controls.Add(refreshButton);
+
+            _runtimeButton = new Button { Text = "Build x64 Runtime", AutoSize = true };
+            _runtimeButton.Click += BuildRuntimeClicked;
+            utilityButtons.Controls.Add(_runtimeButton);
 
             var logsButton = new Button { Text = "Logs ▾", AutoSize = true };
             logsButton.Click += (sender, args) => ShowLogsMenu(logsButton);
@@ -143,28 +162,29 @@ namespace GLoader
             launchRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
             root.Controls.Add(launchRow, 0, 4);
 
-            var vanillaButton = new Button
+            _vanillaButton = new Button
             {
                 Text = "Launch Vanilla",
                 Dock = DockStyle.Fill,
                 Height = 34,
                 Margin = new Padding(0, 0, 4, 0)
             };
-            vanillaButton.Click += (sender, args) => Finish(LauncherAction.Vanilla);
-            launchRow.Controls.Add(vanillaButton, 0, 0);
+            _vanillaButton.Click += (sender, args) => Finish(LauncherAction.Vanilla);
+            launchRow.Controls.Add(_vanillaButton, 0, 0);
 
-            var launchButton = new Button
+            _launchButton = new Button
             {
                 Text = "Launch Terraria",
                 Dock = DockStyle.Fill,
                 Height = 34,
                 Margin = new Padding(4, 0, 0, 0)
             };
-            launchButton.Click += (sender, args) => Finish(LauncherAction.Modded);
-            launchRow.Controls.Add(launchButton, 1, 0);
-            AcceptButton = launchButton;
+            _launchButton.Click += (sender, args) => Finish(LauncherAction.Modded);
+            launchRow.Controls.Add(_launchButton, 1, 0);
+            AcceptButton = _launchButton;
 
             RefreshMods(showErrors: false);
+            RefreshRuntimeState();
         }
 
         public LauncherAction SelectedAction { get; private set; } = LauncherAction.Cancel;
@@ -274,10 +294,82 @@ namespace GLoader
             var enabled = rows.Count(row => row.Mod.Enabled && !row.Mod.HasConflict);
             var conflicts = rows.Count(row => row.Mod.HasConflict);
 
-            _statusLabel.Text = enabled + " / " + rows.Length + " mods enabled";
+            string runtimeStatus;
+            if (_buildingRuntime)
+                runtimeStatus = "Building x64 runtime...";
+            else if (_runtimeBuilder.IsReady)
+                runtimeStatus = "x64 runtime ready";
+            else if (_runtimeBuilder.CanBuild)
+                runtimeStatus = "x64 runtime missing";
+            else
+                runtimeStatus = "x64 runtime missing — gloader must be beside Terraria.exe";
+
+            _statusLabel.Text = runtimeStatus + "   •   " + enabled + " / " + rows.Length + " mods enabled";
             if (conflicts > 0)
             {
                 _statusLabel.Text += "   •   " + conflicts + " conflict" + (conflicts == 1 ? string.Empty : "s");
+            }
+        }
+
+        private void RefreshRuntimeState()
+        {
+            var ready = _runtimeBuilder.IsReady;
+            _runtimeButton.Visible = !ready;
+            _runtimeButton.Enabled = !_buildingRuntime && _runtimeBuilder.CanBuild;
+            _runtimeButton.Text = _buildingRuntime ? "Building x64 Runtime..." : "Build x64 Runtime";
+            _vanillaButton.Enabled = ready && !_buildingRuntime;
+            _launchButton.Enabled = ready && !_buildingRuntime;
+            UpdateStatus();
+        }
+
+        private async void BuildRuntimeClicked(object sender, EventArgs args)
+        {
+            if (_buildingRuntime)
+                return;
+
+            _buildingRuntime = true;
+            RefreshRuntimeState();
+
+            try
+            {
+                var result = await _runtimeBuilder.BuildAsync();
+                if (result.Success)
+                {
+                    MessageBox.Show(
+                        "64-bit Terraria runtime built successfully.\r\n\r\ngloader will use it automatically.",
+                        "gloader",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                }
+                else
+                {
+                    var message = "The 64-bit Terraria runtime build failed.";
+                    if (!string.IsNullOrWhiteSpace(result.LastMessage))
+                        message += "\r\n\r\n" + result.LastMessage;
+                    message += "\r\n\r\nOpen the build log?";
+
+                    if (MessageBox.Show(message, "gloader", MessageBoxButtons.YesNo, MessageBoxIcon.Error) == DialogResult.Yes)
+                        OpenPath(result.LogPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                var message = "Could not build the 64-bit Terraria runtime.\r\n\r\n" + ex.Message;
+                if (File.Exists(_runtimeBuilder.LogPath))
+                {
+                    message += "\r\n\r\nOpen the build log?";
+                    if (MessageBox.Show(message, "gloader", MessageBoxButtons.YesNo, MessageBoxIcon.Error) == DialogResult.Yes)
+                        OpenPath(_runtimeBuilder.LogPath);
+                }
+                else
+                {
+                    MessageBox.Show(message, "gloader", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            finally
+            {
+                _buildingRuntime = false;
+                RefreshRuntimeState();
             }
         }
 
@@ -287,6 +379,7 @@ namespace GLoader
             menu.Items.Add("Open latest", null, (sender, args) => OpenLatestLog());
             menu.Items.Add("Client log", null, (sender, args) => OpenLog("gloader-client.log"));
             menu.Items.Add("Server log", null, (sender, args) => OpenLog("gloader-server.log"));
+            menu.Items.Add("x64 runtime build log", null, (sender, args) => OpenLog("x64-runtime-build.log"));
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Open logs folder", null, (sender, args) => OpenDirectory(_logsDirectory));
             menu.Closed += (sender, args) => menu.Dispose();
@@ -347,6 +440,16 @@ namespace GLoader
 
         private void Finish(LauncherAction action)
         {
+            if (!_runtimeBuilder.IsReady)
+            {
+                MessageBox.Show(
+                    "Build the 64-bit Terraria runtime first.",
+                    "gloader",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
             SelectedAction = action;
             DialogResult = DialogResult.OK;
             Close();
@@ -389,7 +492,7 @@ namespace GLoader
                     Anchor = AnchorStyles.Left,
                     Margin = new Padding(4, 7, 8, 7)
                 };
-                _enabled.CheckedChanged += EnabledChanged;
+                _enabled.CheckedChanged += ModEnabledChanged;
                 layout.Controls.Add(_enabled, 0, 0);
 
                 var conflict = new Label
@@ -416,7 +519,7 @@ namespace GLoader
 
             public ManagedMod Mod { get; }
 
-            private void EnabledChanged(object sender, EventArgs args)
+            private void ModEnabledChanged(object sender, EventArgs args)
             {
                 if (_changing)
                 {

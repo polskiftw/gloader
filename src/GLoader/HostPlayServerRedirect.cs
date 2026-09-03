@@ -14,9 +14,14 @@ namespace GLoader
         private const string HarmonyId = "gloader.core.hostplay-server";
         private static string _loaderPath;
         private static string _modsDirectory;
+        private static string _serverTargetOverride;
         private static bool _installed;
 
-        public static void Install(Assembly gameAssembly, string loaderPath, string modsDirectory)
+        public static void Install(
+            Assembly gameAssembly,
+            string loaderPath,
+            string modsDirectory,
+            string serverTargetOverride = null)
         {
             if (_installed)
                 return;
@@ -26,6 +31,9 @@ namespace GLoader
 
             _loaderPath = Path.GetFullPath(loaderPath);
             _modsDirectory = Path.GetFullPath(modsDirectory);
+            _serverTargetOverride = string.IsNullOrWhiteSpace(serverTargetOverride)
+                ? null
+                : Path.GetFullPath(serverTargetOverride);
 
             var launcher = FindServerLauncher(gameAssembly);
             if (launcher == null)
@@ -148,17 +156,12 @@ namespace GLoader
             {
                 if (instruction.Calls(argumentsSetter))
                 {
-                    // Steam Host & Play hands the Process object to
-                    // SocialAPI.Network.LaunchLocalServer(), so Process.Start() is not
-                    // called inside Terraria.Main. Redirect while Terraria is finishing
-                    // the ProcessStartInfo instead, after the server arguments exist.
                     instruction.opcode = OpCodes.Call;
                     instruction.operand = argumentsRedirect;
                     preparationReplacements++;
                 }
                 else if (instruction.Calls(instanceStart))
                 {
-                    // Keep the direct-launch fallback for non-Steam/social-null paths.
                     instruction.opcode = OpCodes.Call;
                     instruction.operand = instanceRedirect;
                     startReplacements++;
@@ -220,25 +223,34 @@ namespace GLoader
                 ? Environment.CurrentDirectory
                 : startInfo.WorkingDirectory;
 
-            var serverPath = Path.IsPathRooted(requestedFile)
+            var requestedServerPath = Path.IsPathRooted(requestedFile)
                 ? Path.GetFullPath(requestedFile)
                 : Path.GetFullPath(Path.Combine(workingDirectory, requestedFile));
 
-            if (!File.Exists(serverPath))
+            var serverTarget = _serverTargetOverride;
+            if (string.IsNullOrWhiteSpace(serverTarget))
             {
-                Log.Warn("Host & Play requested TerrariaServer.exe, but the resolved path does not exist: " + serverPath);
-                return;
+                var managedSibling = Path.ChangeExtension(requestedServerPath, ".dll");
+                if (File.Exists(managedSibling))
+                    serverTarget = managedSibling;
+                else if (File.Exists(requestedServerPath))
+                    serverTarget = requestedServerPath;
+                else
+                {
+                    Log.Warn("Host & Play requested TerrariaServer.exe, but no managed server target exists at: " + requestedServerPath);
+                    return;
+                }
             }
 
             var originalArguments = startInfo.Arguments ?? string.Empty;
             startInfo.FileName = _loaderPath;
             startInfo.Arguments =
-                "--server --target " + Quote(serverPath) +
+                "--server --target " + Quote(serverTarget) +
                 " --mods " + Quote(_modsDirectory) +
                 " --" +
                 (string.IsNullOrWhiteSpace(originalArguments) ? string.Empty : " " + originalArguments);
 
-            Log.Info("Routing Host & Play server through gloader: " + serverPath);
+            Log.Info("Routing Host & Play server through gloader x64: " + serverTarget);
         }
 
         private static string TrimQuotes(string value)

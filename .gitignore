@@ -2,5 +2,6 @@ bin/
 obj/
 dist/
 logs/
+/gdeps/x64-runtime/
 *.user
 *.suo

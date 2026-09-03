@@ -73,12 +73,14 @@ namespace GLoader
                     continue;
                 }
 
-                if (result.TargetPath == null &&
-                    arg.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) &&
-                    File.Exists(Unquote(arg)))
+                if (result.TargetPath == null && IsManagedTargetPath(arg))
                 {
-                    result.TargetPath = Unquote(arg);
-                    continue;
+                    var unquoted = Unquote(arg);
+                    if (File.Exists(unquoted))
+                    {
+                        result.TargetPath = unquoted;
+                        continue;
+                    }
                 }
 
                 result.GameArguments.Add(arg);
@@ -94,40 +96,43 @@ namespace GLoader
 
         public static void PrintHelp()
         {
-            Console.WriteLine("gloader - raw C# source mod loader for vanilla Terraria");
+            Console.WriteLine("gloader - 64-bit raw C# source mod loader for Terraria");
             Console.WriteLine();
             Console.WriteLine("Usage:");
             Console.WriteLine("  gloader.exe                         Open the mod launcher GUI");
             Console.WriteLine("  gloader.exe --run                   Launch directly without the GUI");
-            Console.WriteLine("  gloader.exe --target \"C:\\...\\Terraria.exe\"");
+            Console.WriteLine("  gloader.exe --target \"C:\\...\\TerrariaRelease.dll\"");
             Console.WriteLine("  gloader.exe --server");
             Console.WriteLine("  gloader.exe --mods \"C:\\...\\gmods\"");
             Console.WriteLine("  gloader.exe --no-mods");
             Console.WriteLine("  gloader.exe -- <arguments passed to Terraria>");
             Console.WriteLine();
-            Console.WriteLine("Default layout: put gloader.exe beside Terraria.exe, with gmods and gdeps beside them.");
-            Console.WriteLine("gmods contains mod folders only; gdeps contains gloader runtime/support files and logs.");
-            Console.WriteLine("If no target is given, gloader looks beside itself first, then one folder above");
-            Console.WriteLine("itself, and in the current working directory.");
+            Console.WriteLine("Default x64 runtime: gdeps\\x64-runtime\\TerrariaRelease.dll");
+            Console.WriteLine("Stock 32-bit/XNA Terraria.exe is not loaded into the x64 process.");
+            Console.WriteLine("gmods contains mod folders; gdeps contains support files, logs, and the x64 runtime.");
         }
 
         private static string RequireValue(string[] args, ref int index, string option)
         {
             if (index + 1 >= args.Length)
-            {
                 throw new ArgumentException(option + " requires a value.");
-            }
 
             index++;
             return Unquote(args[index]);
         }
 
+        private static bool IsManagedTargetPath(string value)
+        {
+            var unquoted = Unquote(value);
+            return unquoted != null &&
+                (unquoted.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ||
+                 unquoted.EndsWith(".dll", StringComparison.OrdinalIgnoreCase));
+        }
+
         private static string Unquote(string value)
         {
             if (value == null)
-            {
                 return null;
-            }
 
             return value.Trim().Trim('"');
         }

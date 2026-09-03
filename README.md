@@ -1,17 +1,16 @@
 # gloader
 
-Tiny raw-C# runtime mod loader for vanilla Terraria.
+Tiny raw-C# runtime mod loader for Terraria, now hosted as a native 64-bit .NET 10 process.
 
-gloader loads the installed Terraria executable, compiles each source mod in memory against that exact game build, applies Harmony patches, and then invokes Terraria normally. Terraria's executables are not rewritten on disk and mods are not precompiled DLLs.
+gloader does not load stock 32-bit/XNA `Terraria.exe` into its process anymore. Instead, it builds a private user-derived Terraria 1.4.5.8 runtime on modern CoreCLR/FNA, compiles each source mod in memory against that exact rebuilt game assembly, applies Harmony patches, and then invokes Terraria normally. The original Steam `Terraria.exe` is left untouched and gloader does not distribute a rebuilt Terraria binary.
 
 ## Install layout
 
-Copy the built gloader files directly into the Terraria installation folder. `gloader.exe` sits beside `Terraria.exe`; `gmods/` contains only mod folders, and `gdeps/` contains GLoader's runtime/support files and logs.
+Copy the built gloader files directly into the Terraria installation folder. `gloader.exe` remains the one public launcher beside the user's original `Terraria.exe`; `gmods/` contains only mod folders, and `gdeps/` contains gloader's private runtime/support files, logs, and the locally generated 64-bit Terraria runtime.
 
 ```text
 Terraria/
   Terraria.exe
-  TerrariaServer.exe
   gloader.exe
   gmods/
     InfiniteAngler/
@@ -19,13 +18,25 @@ Terraria/
     Radio/
     DVDLogo/
   gdeps/
-    [gloader runtime/support files]
+    gloader.dll
+    coreclr.dll
+    clrjit.dll
+    [other gloader/.NET runtime files]
+    tools/
+      x64-runtime/
+        Build-X64Runtime.ps1
+    x64-runtime/
+      TerrariaRelease.dll
+      Libraries/
+      [private Terraria CoreCLR/FNA runtime files]
     logs/
 ```
 
+The root stays intentionally clean: the published package has exactly one root file, `gloader.exe`, plus the `gmods/` and `gdeps/` folders. The public apphost points at `gdeps/gloader.dll`, so CoreCLR and Harmony can use normal physical runtime modules such as `clrjit.dll` without creating a second user-facing launcher executable.
+
 ## gmods and gdeps folder contract
 
-`gmods/` is for mods only. Each immediate subfolder containing enabled `.cs` files is treated as one mod. There should be no GLoader dependency DLLs or log files loose in this directory.
+`gmods/` is for mods only. Each immediate subfolder containing enabled `.cs` files is treated as one mod. There should be no gloader dependency DLLs or log files loose in this directory.
 
 ```text
 gmods/
@@ -44,14 +55,20 @@ gmods/
     dvd-logo.png
 ```
 
-`gdeps/` is GLoader's runtime/support directory. Published dependency files and GLoader's client/server logs live there.
+`gdeps/` is gloader's runtime/support directory. The self-contained .NET 10 host files, the private Terraria x64 runtime, the x64 runtime builder, and gloader's client/server/build logs live there.
 
 ```text
 gdeps/
   [gloader dependency/support files]
+  tools/
+    x64-runtime/
+  x64-runtime/
+    TerrariaRelease.dll
+    Libraries/
   logs/
     gloader-client.log
     gloader-server.log
+    x64-runtime-build.log
 ```
 
 Everything belonging specifically to a mod stays inside that mod's folder: `.cs` source, `.ini`/other configuration, images, data files, and any mod-specific documentation. All `.cs` files beneath one mod folder are compiled together as one in-memory assembly.
@@ -70,8 +87,8 @@ Each compile receives:
 
 ```text
 GLOADER
-GLOADER_CLIENT   // compiling against Terraria.exe
-GLOADER_SERVER   // compiling against TerrariaServer.exe
+GLOADER_CLIENT   // compiling for a client-mode run
+GLOADER_SERVER   // compiling for a dedicated/Host & Play server-mode run
 ```
 
 Optional one-time initialization is:
@@ -90,25 +107,76 @@ Harmony attributes are discovered and applied automatically.
 
 ## Launcher GUI
 
-Run `gloader.exe` with no arguments to open the native Windows launcher. The launcher is built directly into the same `gloader.exe`; there is no second launcher/helper executable.
+Run `gloader.exe` with no arguments to open the native Windows launcher. The launcher is built into the same public `gloader.exe`; there is no second launcher/helper executable to launch manually.
 
 The launcher is intentionally just a friendly front end for the existing filesystem contract:
 
 - checking or unchecking a mod renames `Thing/` <-> `Thing.disabled/` immediately;
 - **Configure** appears when a mod has one or more top-level `.ini` files; one file opens directly and multiple files are offered in a small menu;
 - **Mods Folder** opens `gmods/` and **Refresh** rescans it;
-- **Logs** can open the newest log, the client log, the server log, or the logs folder;
+- **Build x64 Runtime** appears when the private Terraria CoreCLR/FNA runtime has not been generated yet;
+- while that first-run build is running, the normal launch buttons remain disabled and the full build output is saved to `gdeps/logs/x64-runtime-build.log`;
+- **Logs** can open the newest game log, the client log, the server log, the x64 runtime build log, or the logs folder;
 - **Show console** is a one-run debug option and is not persisted;
-- **Launch Vanilla** launches with mods disabled for that run without changing the checkboxes;
-- **Launch Terraria** starts normally with the checked mods.
+- **Launch Vanilla** launches the 64-bit Terraria runtime with gloader mods disabled for that run without changing the checkboxes;
+- **Launch Terraria** starts the 64-bit Terraria runtime normally with the checked mods.
 
 If both `Thing/` and `Thing.disabled/` exist at the same time, the launcher shows a conflict and refuses to rename either one instead of guessing which folder should win.
 
-To bypass the GUI and launch directly with the current mod state:
+To bypass the GUI and launch directly with the current mod state after the private x64 runtime exists:
 
 ```powershell
 .\gloader.exe --run
 ```
+
+## Private 64-bit Terraria runtime
+
+Stock Terraria 1.4.5.8 is a legacy 32-bit .NET Framework/XNA process. Merely changing its PE architecture flag does not remove that runtime/native dependency chain, so gloader uses the same class of platform conversion that modern tModLoader uses: modern CoreCLR plus FNA and 64-bit native libraries.
+
+The included builder pins `gold-meridian/terraria-unified` tag `v0.3.3` at commit:
+
+```text
+f98c9a42a59c15022cea3f6ad3750d1f85578f61
+```
+
+That workspace targets Terraria 1.4.5.8. gloader deliberately stops after these upstream stages:
+
+```text
+vanilla decompile
+    -> patch terraria
+    -> patch netcore
+    -> build
+```
+
+It does **not** apply Terraria Unified's later `patch unified` gameplay/QoL stage and it does **not** apply tModLoader's mod-loader patches. The result is the vanilla Terraria codebase with the modern .NET/FNA platform port, which gloader then hosts and patches itself.
+
+On first run, click **Build x64 Runtime** in the launcher. The builder uses the owned `Terraria.exe` beside gloader, retrieves the matching official 1.4.5.8 dedicated-server executable from `terraria.org` when the local install does not contain it, generates the patched source in a workspace under `%LOCALAPPDATA%`, builds Release, and installs the private result under:
+
+```text
+gdeps/x64-runtime/
+```
+
+The important managed target is:
+
+```text
+gdeps/x64-runtime/TerrariaRelease.dll
+```
+
+The builder records the source Terraria SHA-256 and exact upstream revision in:
+
+```text
+gdeps/x64-runtime/gloader-x64-runtime.json
+```
+
+The original Steam `Terraria.exe` is not overwritten.
+
+The same operation can be invoked manually if needed:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\gdeps\tools\x64-runtime\Build-X64Runtime.ps1 -TerrariaDirectory .
+```
+
+The one-time private runtime build currently requires Git, a .NET 10 SDK, and internet access for the pinned source/dependencies and official server fallback. See `tools/x64-runtime/README.md` for the builder details.
 
 ## Host & Play server support
 
@@ -118,9 +186,9 @@ Run the visible client through gloader normally from the Terraria folder:
 .\gloader.exe
 ```
 
-When Terraria starts `TerrariaServer.exe` for **Multiplayer -> Host & Play**, gloader redirects that child process through another gloader instance using the same `gmods` folder. The original server arguments, working directory, Steam environment, and process relationship are preserved.
+Terraria's Host & Play code still asks to start `TerrariaServer.exe`. gloader intercepts that launch and routes it through another x64 `gloader.exe` process using the same private `TerrariaRelease.dll`, the same `gmods` folder, and Terraria's `-server` mode. The original server arguments, working directory, Steam environment, and process relationship are preserved.
 
-This lets server-authoritative mods work for Host & Play without rewriting `TerrariaServer.exe` and without requiring joining players to install anything.
+That means the modern Terraria build itself is used for both client and dedicated-server execution; a second rebuilt server executable is not required. Server-authoritative gloader mods can therefore work for Host & Play without rewriting the original Terraria executables and without requiring joining players to install the server-side mod.
 
 Dedicated server:
 
@@ -128,10 +196,10 @@ Dedicated server:
 .\gloader.exe --server
 ```
 
-Explicit target:
+Explicit modern Terraria target:
 
 ```powershell
-.\gloader.exe --target "C:\Games\Terraria\Terraria.exe"
+.\gloader.exe --target "C:\Games\Terraria\gdeps\x64-runtime\TerrariaRelease.dll"
 ```
 
 Explicit mods folder override:
@@ -218,16 +286,16 @@ Width=192
 
 ## Updates
 
-There is no hardcoded Terraria version check. Each launch recompiles source against the exact installed `Terraria.exe` or `TerrariaServer.exe`.
+Source mods are still compiled on every launch against the exact private Terraria assembly gloader is about to execute, so there is no separately versioned precompiled mod DLL layer.
 
-That does not make a patch immune to game updates: if Re-Logic renames or changes a method/field a mod patches, that mod may need a source edit. It does avoid distributing replacement compiled mod DLLs for routine changes.
+The platform port itself is version-specific. The current x64 builder is pinned to Terraria 1.4.5.8 and its audited TerrariaNetCore patch set. When Re-Logic ships a new Terraria build, the x64 runtime baseline must be updated/audited before gloader should target that new version. Individual mods may also need source edits if game methods or fields they patch change.
 
 ## Build
 
 Requirements:
 
 - Windows
-- .NET SDK capable of building `net48`
+- .NET 10 SDK
 
 From the `gloader` source folder:
 
@@ -241,10 +309,10 @@ Output staging folder:
 dist/gloader/
 ```
 
-Copy the **contents** of `dist/gloader/` directly into the Terraria installation folder. The package adds `gloader.exe` plus two sibling folders: `gmods/` for mods and `gdeps/` for GLoader runtime/support files.
+Copy the **contents** of `dist/gloader/` directly into the Terraria installation folder. The package adds exactly one root executable, `gloader.exe`, plus two sibling folders: `gmods/` for mods and `gdeps/` for the loader/CoreCLR runtime, private Terraria runtime builder, and support files.
 
 Raw source mods execute with the same privileges as Terraria. Only use code you trust.
 
 ## License and third-party software
 
-Original code and assets in this repository are licensed under the PolyForm Noncommercial License 1.0.0 unless a file says otherwise; see `LICENSE.md`. Third-party components bundled with GLoader or Gelatin remain under their own licenses, which are collected in `THIRD-PARTY-NOTICES.txt` and are not replaced by the PolyForm terms.
+Original code and assets in this repository are licensed under the PolyForm Noncommercial License 1.0.0 unless a file says otherwise; see `LICENSE.md`. Third-party components bundled with gloader or Gelatin remain under their own licenses, which are collected in `THIRD-PARTY-NOTICES.txt` and are not replaced by the PolyForm terms.
