@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
-    <OutputType>Exe</OutputType>
+    <OutputType>WinExe</OutputType>
     <AssemblyName>gloader.compiler</AssemblyName>
     <RootNamespace>GLoader.CompilerHost</RootNamespace>
     <LangVersion>latest</LangVersion>
@@ -14,7 +14,7 @@
     <InformationalVersion>0.1.22-alpha</InformationalVersion>
     <Company>gloader</Company>
     <Product>gloader compiler helper</Product>
-    <Description>Out-of-process C# source compiler helper for gloader mods</Description>
+    <Description>Compiler helper for gloader mods</Description>
     <Deterministic>true</Deterministic>
   </PropertyGroup>
 
