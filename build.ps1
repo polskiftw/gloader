@@ -85,6 +85,16 @@ if (-not (Test-Path $CompilerExe)) {
 Get-ChildItem $CompilerPublish -Force | Move-Item -Destination $CompilerOut -Force
 Remove-Item $CompilerPublish -Recurse -Force
 
+# Keep the separation enforceable: Roslyn must never leak back into the main
+# gdeps probing directory. It belongs only beside the short-lived compiler helper.
+$roslynInMainDeps = @(Get-ChildItem $Deps -File -Filter "Microsoft.CodeAnalysis*.dll" -ErrorAction SilentlyContinue)
+if ($roslynInMainDeps.Count -ne 0) {
+    throw "Roslyn leaked into main gdeps: $($roslynInMainDeps.Name -join ', ')"
+}
+if (-not (Test-Path (Join-Path $CompilerOut "gloader.compiler.exe"))) {
+    throw "Packaged compiler helper is missing from gdeps\\compiler."
+}
+
 Copy-Item (Join-Path $Mods "*") $ModsOut -Recurse -Force
 Copy-Item (Join-Path $Root "LICENSE.md") (Join-Path $Deps "LICENSE.md") -Force
 Copy-Item (Join-Path $Root "THIRD-PARTY-NOTICES.txt") (Join-Path $Deps "THIRD-PARTY-NOTICES.txt") -Force
