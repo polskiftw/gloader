@@ -192,10 +192,28 @@ jobs:
           $target = (Resolve-Path "tests/HostPlayFixture/bin/Release/net48/Terraria.exe").Path
           $mods = Join-Path $env:RUNNER_TEMP "gloader-hostplay-mods"
           $anglerMod = Join-Path $mods "InfiniteAngler"
+          $radioProbeMod = Join-Path $mods "RadioCompilerProbe"
 
           Remove-Item $mods -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Path $mods | Out-Null
           Copy-Item "gmods/InfiniteAngler" $anglerMod -Recurse
+          New-Item -ItemType Directory -Path $radioProbeMod | Out-Null
+
+          @'
+          using NAudio.Wave;
+
+          internal static class RadioCompilerProbe
+          {
+              private static void CompileOnly(string streamUrl)
+              {
+                  using (var reader = new MediaFoundationReader(streamUrl))
+                  using (var resampler = new MediaFoundationResampler(reader, new WaveFormat(44100, 16, 2)))
+                  {
+                      resampler.ResamplerQuality = 60;
+                  }
+              }
+          }
+          '@ | Set-Content -Path (Join-Path $radioProbeMod "Main.cs") -Encoding UTF8
 
           $anglerConfig = Get-Content (Join-Path $anglerMod "InfiniteAngler.ini") -Raw
           if ($anglerConfig -notmatch '(?im)^EnableParticipationCommands\s*=\s*true\s*$') {
