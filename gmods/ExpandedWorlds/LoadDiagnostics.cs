@@ -1,4 +1,5 @@
 #if GLOADER
+// Runtime diagnostics are written to gdeps\logs\expanded-worlds-load.log.
 using System;
 using System.Diagnostics;
 using System.IO;
