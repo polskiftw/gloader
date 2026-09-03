@@ -16,13 +16,14 @@ namespace GLoader
         {
             var paths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
-            {
-                AddAssemblyLocation(paths, assembly, overwrite: false);
-            }
+            AddTrustedPlatformAssemblies(paths);
 
-            AddManagedFiles(paths, supportDirectory, overwrite: false);
-            AddManagedFiles(paths, gameDirectory, overwrite: false);
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+                AddAssemblyLocation(paths, assembly, overwrite: false);
+
+            AddManagedFiles(paths, supportDirectory, overwrite: false, recursive: false);
+            AddManagedFiles(paths, gameDirectory, overwrite: false, recursive: false);
+            AddManagedFiles(paths, Path.Combine(gameDirectory, "Libraries"), overwrite: false, recursive: true);
 
             // Terraria.exe and TerrariaServer.exe both define Terraria.Main. Never feed
             // the opposite executable to Roslyn or source mods get CS0433 ambiguity.
@@ -52,40 +53,50 @@ namespace GLoader
             return references;
         }
 
+        private static void AddTrustedPlatformAssemblies(IDictionary<string, string> paths)
+        {
+            var trusted = AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string;
+            if (string.IsNullOrWhiteSpace(trusted))
+                return;
+
+            foreach (var path in trusted.Split(Path.PathSeparator))
+                AddManagedPath(paths, path, overwrite: false);
+        }
+
         private static void RemoveOppositeTerrariaAssembly(
             IDictionary<string, string> paths,
             Assembly gameAssembly)
         {
             var targetName = gameAssembly.GetName().Name;
-            if (string.Equals(targetName, "Terraria", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(targetName, "Terraria", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(targetName, "TerrariaRelease", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(targetName, "TerrariaDebug", StringComparison.OrdinalIgnoreCase))
             {
                 paths.Remove("TerrariaServer");
             }
             else if (string.Equals(targetName, "TerrariaServer", StringComparison.OrdinalIgnoreCase))
             {
                 paths.Remove("Terraria");
+                paths.Remove("TerrariaRelease");
+                paths.Remove("TerrariaDebug");
             }
         }
 
         private static void AddManagedFiles(
             IDictionary<string, string> paths,
             string directory,
-            bool overwrite)
+            bool overwrite,
+            bool recursive)
         {
             if (!Directory.Exists(directory))
-            {
                 return;
-            }
 
-            foreach (var path in Directory.EnumerateFiles(directory, "*.dll", SearchOption.TopDirectoryOnly))
-            {
+            var searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+            foreach (var path in Directory.EnumerateFiles(directory, "*.dll", searchOption))
                 AddManagedPath(paths, path, overwrite);
-            }
 
-            foreach (var path in Directory.EnumerateFiles(directory, "*.exe", SearchOption.TopDirectoryOnly))
-            {
+            foreach (var path in Directory.EnumerateFiles(directory, "*.exe", searchOption))
                 AddManagedPath(paths, path, overwrite);
-            }
         }
 
         private static void AddAssemblyLocation(
@@ -96,9 +107,7 @@ namespace GLoader
             try
             {
                 if (assembly.IsDynamic || string.IsNullOrWhiteSpace(assembly.Location))
-                {
                     return;
-                }
 
                 AddManagedPath(paths, assembly.Location, overwrite);
             }
@@ -115,13 +124,14 @@ namespace GLoader
         {
             try
             {
+                if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                    return;
+
                 var fullPath = Path.GetFullPath(path);
                 var name = AssemblyName.GetAssemblyName(fullPath).Name;
 
                 if (overwrite || !paths.ContainsKey(name))
-                {
                     paths[name] = fullPath;
-                }
             }
             catch (BadImageFormatException)
             {
