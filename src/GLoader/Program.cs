@@ -158,7 +158,7 @@ namespace GLoader
 
             var gameAssembly = GameBootstrap.Load(targetPath);
             var gameArguments = options.GameArguments.ToList();
-            if (options.DedicatedServer && runtimeInfo.IsModernCoreClr &&
+            if (options.DedicatedServer && IsUnifiedRuntimeTarget(targetPath) &&
                 !gameArguments.Any(argument => argument.Equals("-server", StringComparison.OrdinalIgnoreCase)))
             {
                 gameArguments.Insert(0, "-server");
