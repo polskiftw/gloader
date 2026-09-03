@@ -13,6 +13,7 @@ namespace GLoader
             string modsDirectory,
             Assembly gameAssembly,
             string gameDirectory,
+            string runtimeDirectory,
             string supportDirectory,
             bool isServerTarget)
         {
@@ -27,6 +28,7 @@ namespace GLoader
             var references = ReferenceCollector.Collect(
                 gameAssembly,
                 gameDirectory,
+                runtimeDirectory,
                 supportDirectory);
 
             foreach (var mod in mods)
