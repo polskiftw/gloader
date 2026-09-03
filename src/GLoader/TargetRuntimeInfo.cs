@@ -96,7 +96,7 @@ namespace GLoader
                 references.Add(metadata.GetString(reference.Name));
             }
 
-            var corFlags = peReader.PEHeaders.CorHeader?.Flags ?? 0;
+            var corFlags = peReader.PEHeaders.CorHeader?.Flags ?? (CorFlags)0;
             var requires32Bit = (corFlags & CorFlags.Requires32Bit) != 0;
             var prefers32Bit = (corFlags & CorFlags.Prefers32Bit) != 0;
             var usesLegacyXna = references.Any(name =>
