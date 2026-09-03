@@ -25,6 +25,9 @@ internal static class ExpandedWorldCreationDrawGuardPatch
             "Inject",
             new[] { typeof(UIWorldCreation) });
 
+    private static readonly FieldInfo OwnerField =
+        AccessTools.Field(typeof(ExpandedWorldBuildPageSizeRowFix), "_owner");
+
     private static readonly FieldInfo XlButtonField =
         AccessTools.Field(typeof(ExpandedWorldBuildPageSizeRowFix), "_xlButton");
 
@@ -49,7 +52,7 @@ internal static class ExpandedWorldCreationDrawGuardPatch
     [HarmonyPrefix]
     private static void Prefix(UIWorldCreation __instance)
     {
-        if (__instance == null || IsInstalled())
+        if (__instance == null || IsInstalledFor(__instance))
             return;
 
         // Do not hammer reflection every frame if something genuinely fails.
@@ -67,7 +70,19 @@ internal static class ExpandedWorldCreationDrawGuardPatch
                     "Inject(UIWorldCreation)");
 
             InjectMethod.Invoke(null, new object[] { __instance });
-            Console.WriteLine("[Expanded Worlds] Draw guard verified the custom world-size row.");
+
+            // A Draw-time recovery occurs after Terraria may already have done
+            // the normal layout pass. Force the newly appended controls to get
+            // calculated dimensions before this frame renders them.
+            __instance.Recalculate();
+
+            if (!IsInstalledFor(__instance))
+            {
+                throw new InvalidOperationException(
+                    "Expanded Worlds injected a size row, but it was not attached to the live UIWorldCreation instance.");
+            }
+
+            Console.WriteLine("[Expanded Worlds] Draw guard verified the custom world-size row on the live New World screen.");
         }
         catch (TargetInvocationException ex)
         {
@@ -80,13 +95,17 @@ internal static class ExpandedWorldCreationDrawGuardPatch
         }
     }
 
-    private static bool IsInstalled()
+    private static bool IsInstalledFor(UIWorldCreation owner)
     {
-        if (XlButtonField == null || ParentProperty == null)
+        if (owner == null || OwnerField == null || XlButtonField == null || ParentProperty == null)
             return false;
 
         try
         {
+            UIWorldCreation installedOwner = OwnerField.GetValue(null) as UIWorldCreation;
+            if (!ReferenceEquals(owner, installedOwner))
+                return false;
+
             UIElement button = XlButtonField.GetValue(null) as UIElement;
             return button != null && ParentProperty.GetValue(button, null) != null;
         }
