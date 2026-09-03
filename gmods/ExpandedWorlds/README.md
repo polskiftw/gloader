@@ -36,17 +36,17 @@ vertical:    8, 12, 16, 20, 24, 28
 
 That gives the physical dimensions above. It deliberately preserves the tiny width/height mismatch already present at vanilla Medium instead of introducing a new aspect-ratio family.
 
-
 ## Vanilla-continuity policy
 
 The source authority is the clean Terraria **1.4.5.8 retail decompile from the matching retail binary**.
 
-Expanded Worlds follows four rules:
+Expanded Worlds follows five rules:
 
 1. **Physical-dimension formulas remain Terraria's formulas.** If vanilla uses `Main.maxTilesX`, `Main.maxTilesY`, `WorldWidth`, `WorldArea`, `maxTilesX / 4200.0`, `maxTilesY / 1200`, or another physical expression, Expanded Worlds does not reinterpret it.
-2. **Exact discrete Small/Medium/Large sequences may continue.** A categorical sequence is extended only when its first three terms define one unambiguous continuation.
-3. **Vanilla storage ceilings may grow, but generation behavior may not be replaced.** Capacity patches only prevent valid vanilla generation from overrunning fixed scratch arrays or startup-sized backing storage.
-4. **Ambiguous or format-limited rules stay vanilla Large.** If there is no single defensible continuation, or extending it would require changing Terraria's `.wld`/network schema, the Large behavior is retained.
+2. **Exact discrete Small/Medium/Large sequences may continue.** A categorical sequence is extended mechanically when its first three terms define one unambiguous continuation.
+3. **A high-confidence contextual continuation may be promoted only when surrounding Terraria size math independently supports it.** These cases live separately in `InferredTierContinuity.cs`, have their rationale documented, and are locked by tests/source-shape guards.
+4. **Vanilla storage ceilings may grow, but generation behavior may not be replaced.** Capacity patches only prevent valid vanilla generation from overrunning fixed scratch arrays or startup-sized backing storage.
+5. **Unresolved or format-limited rules stay vanilla Large.** If there is no defensible continuation, or extending it would require changing Terraria's `.wld`/network schema, the Large behavior is retained.
 
 There is no aspect-ratio correction layer anymore. The old Desert, Jungle, Hive, feature-geometry, and secret-seed proxy repairs existed because the previous custom sizes deliberately broke the relationship between width and height. With canonical co-growing sizes, those patches are both unnecessary and less vanilla than simply allowing Terraria's own formulas to see the new dimensions.
 
@@ -80,7 +80,7 @@ XL, Huge, and THICC therefore naturally categorize as vanilla **Large**. The New
 
 ## Exact discrete continuations
 
-Some Terraria rules are not physical formulas. They are explicit Small/Medium/Large tables. Expanded Worlds continues only clean arithmetic sequences.
+Some Terraria rules are not physical formulas. They are explicit Small/Medium/Large tables. Expanded Worlds continues clean arithmetic sequences mechanically.
 
 | Rule | Small | Medium | Large | XL | Huge | THICC |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -123,7 +123,30 @@ The clean 1.4.5.8 source introduced additional explicit size tables. The unambig
 | Temple-trap base | 30 | 50 | 70 | **90** | **110** | **130** |
 | Temple-trap RNG exclusive max | 11 | 16 | 21 | **26** | **31** | **36** |
 
-The ambiguous 1.4.5 sequences are intentionally not extrapolated. Examples include the early Shadow Orb/Crimson Heart quota `8/14/18`, Spider specialized rooms `2/6/8`, and Lihzahrd painting cap `1/2/(2 + Next(2))`.
+## Promoted high-confidence contextual continuations
+
+Two 1.4.5 Dual Dungeon tables are not uniquely extrapolatable from their three terms alone, but both line up cleanly with Terraria's vertical network-section cadence and neighboring well-defined tables.
+
+Vertical sections are `8, 12, 16, 20, 24, 28` across Small through THICC.
+
+| Rule | Small | Medium | Large | XL | Huge | THICC | Evidence |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Shadow Orb / Crimson Heart quota | 8 | 14 | 18 | **22** | **26** | **30** | Medium+ = `verticalSections + 2`; Small is the compact exception |
+| Spider specialized rooms | 2 | 6 | 8 | **10** | **12** | **14** | Medium+ = `verticalSections / 2`; Small is the compact exception |
+
+The Orb/Heart value is a quota used by both evil-room styles. The Spider value is a conversion quota over already-created eligible rooms. Existing Terraria room availability, placement checks, and RNG remain authoritative.
+
+### Lihzahrd painting policy
+
+The Lihzahrd painting cap is different. Vanilla is Small `1`, Medium `2`, Large `2 + genRand.Next(2)`. There is not enough evidence for a trustworthy tier-growth formula.
+
+Expanded Worlds therefore uses one conservative flat rule for every super-size:
+
+| Rule | XL | Huge | THICC |
+| --- | ---: | ---: | ---: |
+| Lihzahrd painting max | **3 or 4** | **3 or 4** | **3 or 4** |
+
+The implementation preserves vanilla Large's exact single `Next(2)` call and adds one to the already-randomized `2/3` result. It does **not** consume another RNG value and does not pretend the cap scales by tier.
 
 ## Rules intentionally capped by Terraria's file/runtime schema
 
@@ -153,7 +176,7 @@ Integer expressions remain integer expressions too. For example, if Terraria its
 
 Terraria remains authoritative for secret/special seed registration, activation, RNG, and pass behavior. Expanded Worlds does not maintain a replacement secret-seed implementation.
 
-The mod only touches a secret-seed result when an already-identified **discrete vanilla size table** needs an unambiguous next tier or when fixed scratch storage must be large enough for Terraria's own generated record count.
+The mod only touches a secret-seed result when an already-identified **discrete vanilla size table** needs a documented continuation or when fixed scratch storage must be large enough for Terraria's own generated record count.
 
 ## Fixed worldgen scratch capacity
 
@@ -197,7 +220,7 @@ These are storage/rendering accommodations, not world-generation rules.
 
 ## Client/server parity
 
-World-size state, physical dimensions, discrete tier continuations, and generation scratch-capacity guards are shared under the same source files for both `GLOADER_CLIENT` and `GLOADER_SERVER` builds.
+World-size state, physical dimensions, exact discrete continuations, promoted inferred continuations, and generation scratch-capacity guards are shared under the same source files for both `GLOADER_CLIENT` and `GLOADER_SERVER` builds.
 
 Headless generation uses:
 
@@ -220,6 +243,8 @@ Expanded Worlds introduces no custom `.wld` format. Terraria writes the real wid
 
 ## CI continuity audit
 
-`tests/ExpandedWorldsMath` locks the canonical dimensions, section cadence, every pure discrete continuation above, the two capacity upper bounds, rejection of the obsolete dimensions, and syntax parsing of every Expanded Worlds source file in both client and server preprocessor modes.
+`tests/ExpandedWorldsMath` locks the canonical dimensions, section cadence, every pure exact continuation, the promoted `22/26/30` Orb/Heart rule, the promoted `10/12/14` Spider rule, the flat `3/4` painting mapping, the two capacity upper bounds, rejection of the obsolete dimensions, and syntax parsing of every Expanded Worlds source file in both client and server preprocessor modes.
 
-The audit intentionally distinguishes **vanilla physical arithmetic** from **source-backed categorical continuation**. That is the core design rule of the mod.
+When the private matching retail input is configured, CI also decompiles exact Terraria 1.4.5.8 and verifies the source shapes behind both the exact continuations and the promoted inference rules.
+
+The audit intentionally distinguishes **vanilla physical arithmetic**, **exact categorical continuation**, and **documented contextual inference**. That separation is the core design rule of the mod.

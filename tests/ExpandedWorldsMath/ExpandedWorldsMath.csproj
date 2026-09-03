@@ -16,6 +16,7 @@
     <Compile Include="../../gmods/ExpandedWorlds/DiscreteCountContinuity.cs" Link="DiscreteCountContinuity.cs" />
     <Compile Include="../../gmods/ExpandedWorlds/DiscreteTierContinuity.cs" Link="DiscreteTierContinuity.cs" />
     <Compile Include="../../gmods/ExpandedWorlds/DungeonTierContinuity.cs" Link="DungeonTierContinuity.cs" />
+    <Compile Include="../../gmods/ExpandedWorlds/InferredTierContinuity.cs" Link="InferredTierContinuity.cs" />
     <Compile Include="../../gmods/ExpandedWorlds/GenerationCapacityMath.cs" Link="GenerationCapacityMath.cs" />
   </ItemGroup>
 </Project>

@@ -143,4 +143,6 @@ jobs:
       - name: Verify source contracts
         if: steps.source.outputs.available == 'true'
         shell: pwsh
-        run: python tests/ExpandedWorldsMath/verify_source.py "$env:RUNNER_TEMP\terraria-source\source"
+        run: |
+          python tests/ExpandedWorldsMath/verify_source.py "$env:RUNNER_TEMP\terraria-source\source"
+          python tests/ExpandedWorldsMath/verify_promoted_inferences.py "$env:RUNNER_TEMP\terraria-source\source"
