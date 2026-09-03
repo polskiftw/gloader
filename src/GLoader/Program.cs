@@ -101,6 +101,7 @@ namespace GLoader
             var modsDirectory = string.IsNullOrWhiteSpace(options.ModsPath)
                 ? defaultModsDirectory
                 : Path.GetFullPath(options.ModsPath);
+            var compilerPath = Path.Combine(dependenciesDirectory, "compiler", "gloader.compiler.exe");
             var isServerTarget = string.Equals(
                 Path.GetFileName(targetPath),
                 "TerrariaServer.exe",
@@ -113,6 +114,7 @@ namespace GLoader
             Log.Info("Mode: " + (isServerTarget ? "server" : "client"));
             Log.Info("Mods: " + modsDirectory);
             Log.Info("Dependencies: " + dependenciesDirectory);
+            Log.Info("Compiler helper: " + compilerPath);
 
             Directory.SetCurrentDirectory(gameDirectory);
             NativeLibrarySearch.UseDirectory(gameDirectory);
@@ -143,7 +145,8 @@ namespace GLoader
                         gameAssembly,
                         gameDirectory,
                         dependenciesDirectory,
-                        isServerTarget);
+                        isServerTarget,
+                        compilerPath);
                 }
                 else
                 {
