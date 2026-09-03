@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 
 namespace FixtureClient
 {
@@ -8,6 +9,25 @@ namespace FixtureClient
     {
         public static int Main(string[] args)
         {
+            if (args.Length >= 2 && args[0] == "--cwd-probe")
+            {
+                var expected = Path.GetFullPath(args[1])
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                var actual = Path.GetFullPath(Environment.CurrentDirectory)
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+                Console.WriteLine("[fixture client] expected game root: " + expected);
+                Console.WriteLine("[fixture client] actual game root:   " + actual);
+
+                if (!string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.Error.WriteLine("Fixture game/runtime root split is wrong.");
+                    return 93;
+                }
+
+                return 0;
+            }
+
             return Terraria.Main.LaunchHostAndPlay();
         }
     }
