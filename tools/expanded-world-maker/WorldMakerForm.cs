@@ -134,9 +134,9 @@ namespace GLoader.ExpandedWorldMaker
             sizes.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.333f));
             sizes.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.333f));
             sizes.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.333f));
-            _xl = MakePresetRadio("XL\r\n12,600 x 2,400");
-            _huge = MakePresetRadio("Huge\r\n16,800 x 2,400");
-            _thicc = MakePresetRadio("THICC\r\n16,800 x 4,800");
+            _xl = MakePresetRadio("XL\r\n10,600 x 3,000");
+            _huge = MakePresetRadio("Huge\r\n12,600 x 3,600");
+            _thicc = MakePresetRadio("THICC\r\n14,800 x 4,200");
             sizes.Controls.Add(_xl, 0, 0);
             sizes.Controls.Add(_huge, 1, 0);
             sizes.Controls.Add(_thicc, 2, 0);

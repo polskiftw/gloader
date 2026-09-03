@@ -10,9 +10,9 @@ Every run creates one timestamped folder containing exactly seven PNGs:
 - `01_Small_4200x1200.png`
 - `02_Medium_6400x1800.png`
 - `03_Large_8400x2400.png`
-- `04_XL_12600x2400.png`
-- `05_Huge_16800x2400.png`
-- `06_THICC_16800x4800.png`
+- `04_XL_10600x3000.png`
+- `05_Huge_12600x3600.png`
+- `06_THICC_14800x4200.png`
 
 The source world is never rendered or modified. It is opened header-only to recover its text seed, difficulty, evil, and the classic Terraria special-seed bit flags. Each output map comes from a freshly generated temporary world.
 
@@ -36,7 +36,7 @@ TEdit is pinned by the build workflow to commit `cca62adbe37f8cbbd447061650f91a3
 
 ## Quality slider
 
-The six PNGs all use the same pixels-per-tile sampling scale so their visual dimensions stay proportional to the actual world dimensions. The slider chooses the maximum width of Huge/THICC:
+The six PNGs all use the same pixels-per-tile sampling scale so their visual dimensions stay proportional to the actual world dimensions. The slider chooses the maximum width of the widest preset (THICC):
 
 | Level | Max width |
 | --- | ---: |

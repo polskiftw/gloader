@@ -41,7 +41,7 @@ internal static class TEditPaletteRenderer
 
                 cancellationToken.ThrowIfCancellationRequested();
 
-                double pixelsPerTile = maxWorldPixelWidth / 16800.0;
+                double pixelsPerTile = maxWorldPixelWidth / (double)WorldPreset.All.Max(item => item.Width);
                 int outputWidth = Math.Max(1, (int)Math.Round(world.TilesWide * pixelsPerTile));
                 int outputHeight = Math.Max(1, (int)Math.Round(world.TilesHigh * pixelsPerTile));
 

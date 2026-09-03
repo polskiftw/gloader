@@ -1,73 +1,72 @@
 # Expanded Worlds
 
-Expanded Worlds adds three larger world sizes to Terraria 1.4.5.8 through gloader:
+Expanded Worlds adds three larger creation presets to Terraria 1.4.5.8 through gloader without replacing Terraria's world generator.
 
-| Size | Tiles | Area vs vanilla Large | Purpose |
-| --- | ---: | ---: | --- |
-| XL | `12,600 x 2,400` | `1.5x` | next exact horizontal size quantum after Large |
-| Huge | `16,800 x 2,400` | `2x` | twice vanilla Large width at vanilla Large height |
-| THICC | `16,800 x 4,800` | `4x` | Huge width with twice vanilla Large height |
+> **Expanded Worlds supplies a larger vanilla-shaped canvas. Terraria supplies the world.**
 
-The mod does not replace Terraria's world generator and does not run a subjective post-generation "make it look bigger" pass.
+## Canonical sizes
 
-> **Expanded Worlds supplies the canvas; Terraria supplies the rulebook.**
+The custom sizes continue the numerical pattern established by Terraria's own Small, Medium, and Large dimensions.
 
-## Using it
+| Tier | Name | Tiles | Network sections | Width vs Small | Height vs Small |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 1 | Small | `4,200 x 1,200` | `21 x 8` | `1.0000x` | `1.0000x` |
+| 2 | Medium | `6,400 x 1,800` | `32 x 12` | `1.5238x` | `1.5000x` |
+| 3 | Large | `8,400 x 2,400` | `42 x 16` | `2.0000x` | `2.0000x` |
+| 4 | XL | **`10,600 x 3,000`** | **`53 x 20`** | `2.5238x` | `2.5000x` |
+| 5 | Huge | **`12,600 x 3,600`** | **`63 x 24`** | `3.0000x` | `3.0000x` |
+| 6 | THICC | **`14,800 x 4,200`** | **`74 x 28`** | `3.5238x` | `3.5000x` |
 
-Enable `ExpandedWorlds` in gloader, launch Terraria, create a new world, and choose one of the six size buttons:
-
-```text
-Small | Medium | Large | XL | Huge | THICC
-```
-
-THICC is a real third custom preset. It is not a temporary alias for Huge and it does not replace Huge.
-
-Headless/dedicated-server generation uses the same source mod with an environment variable:
-
-```powershell
-$env:GLOADER_EXPANDED_WORLD='XL'
-$env:GLOADER_EXPANDED_WORLD='HUGE'
-$env:GLOADER_EXPANDED_WORLD='THICC'
-```
-
-Run the server through gloader's normal server/target path after setting the value. Unset the variable to leave vanilla server sizing untouched.
-
-## Ground truth
-
-The source authority for this branch is the clean Terraria **1.4.5.8** retail decompile made from the matching retail binary. The clean decompile has zero known ILSpy decompilation-error markers from the audit that produced it.
-
-Repository CI independently decompiles the official Terraria 1.4.5.8 dedicated server and asserts source contracts for APIs and worldgen rules shared with retail. Client-only contracts such as the New World UI, `WorldMap`, section tables, `RemoteClient`, and `MapRenderer` were reconciled against the matching retail decompile/binary.
-
-Old 1.4.0.x public decompiles are not authority for this branch. Historical compatibility fallbacks can remain in code, but current 1.4.5.8 behavior is explicitly identified as current and kept separate from those fallbacks.
-
-Runtime patches are fail-closed: if a private member or audited IL/source shape no longer matches the expected Terraria build, the patch throws instead of silently inventing a replacement rule.
-
-## Why XL is 12,600 instead of 12,000
-
-Several Terraria rules use `maxTilesX / 4200` as a horizontal world-size scale or, in some places, an integer width quantum. Exact 4,200-tile multiples make the expanded widths clean continuations:
+Terraria's network sections are `200 x 150` tiles. Vanilla's section counts are:
 
 ```text
-Small    4200
-Large    8400
-XL      12600
-Huge    16800
-THICC   16800   (same horizontal tier as Huge)
+horizontal: 21, 32, 42
+vertical:    8, 12, 16
 ```
 
-`12,000 / 4,200` is still integer quantum `2`, the same as Large. `12,600` is the next exact quantum (`3`), while Huge/THICC use quantum `4`.
-
-The widths also divide exactly into Terraria's 200-tile network sections:
+The canonical continuation is:
 
 ```text
-Large   8400 / 200 = 42 sections
-XL     12600 / 200 = 63 sections
-Huge   16800 / 200 = 84 sections
-THICC  16800 / 200 = 84 sections
+horizontal: 21, 32, 42, 53, 63, 74
+             +11 +10 +11 +10 +11
+
+vertical:    8, 12, 16, 20, 24, 28
+              +4  +4  +4  +4  +4
 ```
 
-THICC's `4,800` height divides into `32` of Terraria's 150-tile vertical network sections.
+That gives the physical dimensions above. It deliberately preserves the tiny width/height mismatch already present at vanilla Medium instead of introducing a new aspect-ratio family.
 
-## Vanilla category remains Large
+
+## Vanilla-continuity policy
+
+The source authority is the clean Terraria **1.4.5.8 retail decompile from the matching retail binary**.
+
+Expanded Worlds follows four rules:
+
+1. **Physical-dimension formulas remain Terraria's formulas.** If vanilla uses `Main.maxTilesX`, `Main.maxTilesY`, `WorldWidth`, `WorldArea`, `maxTilesX / 4200.0`, `maxTilesY / 1200`, or another physical expression, Expanded Worlds does not reinterpret it.
+2. **Exact discrete Small/Medium/Large sequences may continue.** A categorical sequence is extended only when its first three terms define one unambiguous continuation.
+3. **Vanilla storage ceilings may grow, but generation behavior may not be replaced.** Capacity patches only prevent valid vanilla generation from overrunning fixed scratch arrays or startup-sized backing storage.
+4. **Ambiguous or format-limited rules stay vanilla Large.** If there is no single defensible continuation, or extending it would require changing Terraria's `.wld`/network schema, the Large behavior is retained.
+
+There is no aspect-ratio correction layer anymore. The old Desert, Jungle, Hive, feature-geometry, and secret-seed proxy repairs existed because the previous custom sizes deliberately broke the relationship between width and height. With canonical co-growing sizes, those patches are both unnecessary and less vanilla than simply allowing Terraria's own formulas to see the new dimensions.
+
+## What is not changed
+
+Expanded Worlds does **not**:
+
+- replace `WorldGen.GenerateWorld`;
+- replace, reorder, or invent worldgen passes;
+- reseed Terraria's world RNG;
+- force Snow, Jungle, Dungeon, evil, Desert, or other macro features to a chosen side;
+- move or resize completed biomes in a post-generation cleanup pass;
+- substitute custom terrain/cave algorithms;
+- reinterpret continuous width/height/area formulas;
+- introduce a custom `.wld` format;
+- introduce fake Terraria `WorldSizeId` enum values.
+
+A seed may therefore produce noticeably different geography at different physical sizes. That is expected: each size is a fresh run of Terraria's generator on a different canvas.
+
+## Terraria still sees Large categorically
 
 Terraria 1.4.5.8 `WorldGen.GetWorldSize()` returns:
 
@@ -75,253 +74,152 @@ Terraria 1.4.5.8 `WorldGen.GetWorldSize()` returns:
 - `1` through width `6400`;
 - `2` for anything wider.
 
-XL, Huge, and THICC therefore remain categorically **Large** without introducing fake Terraria size enum values. Code that asks for Small/Medium/Large sees a legal vanilla value; code that uses the physical dimensions sees the real expanded canvas.
+XL, Huge, and THICC therefore naturally categorize as vanilla **Large**. The New World UI keeps Terraria's private size state at Large and carries the custom physical preset separately until generation starts.
 
-The New World UI keeps Terraria's own categorical size selection at Large while Expanded Worlds carries the physical XL/Huge/THICC selection separately until generation starts.
+`WorldDimensions.cs` validates the six vanilla `WorldGen.WorldSize*` constants against the audited 1.4.5.8 values before the mod runs. If that source contract changes, Expanded Worlds fails instead of silently guessing.
 
-## Scaling model
+## Exact discrete continuations
 
-Vanilla normally grows width and height together, so source code can sometimes use one axis as a proxy for overall scale. Expanded Worlds breaks that relationship intentionally. When a source rule needs disambiguation, it is classified by what the quantity physically represents:
-
-```text
-horizontal geometry/counts = width / 4200
-vertical geometry          = height / 1200
-area-density counts        = width*height / (4200*1200)
-isotropic linear geometry  = sqrt(width*height / (4200*1200))
-```
-
-Relative to Small:
-
-| Size | Horizontal | Vertical | Tile area | Isotropic linear |
-| --- | ---: | ---: | ---: | ---: |
-| Small | 1x | 1x | 1x | 1x |
-| Medium | 1.5238x | 1.5x | 2.2857x | 1.5119x |
-| Large | 2x | 2x | 4x | 2x |
-| XL | 3x | 2x | 6x | 2.4495x |
-| Huge | 4x | 2x | 8x | 2.8284x |
-| THICC | 4x | 4x | 16x | 4x |
-
-This is not a universal multiplier. If vanilla already consumes the correct physical dimension, Expanded Worlds leaves the generator alone.
-
-### THICC's important rule
-
-THICC is **Huge's horizontal tier plus a taller physical canvas**.
-
-That means:
-
-- width-driven rules see the same `16,800` width as Huge;
-- discrete source-backed width/tier continuations use the same fifth term as Huge;
-- height-driven rules see `4,800` instead of `2,400`;
-- area-driven rules see `80,640,000` tiles instead of Huge's `40,320,000`;
-- axis-neutral geometry sees the corresponding area-equivalent linear scale.
-
-This is why THICC does not invent a sixth term for categorical rules such as statues merely because the button appears after Huge.
-
-## Generation lifecycle and backing storage
-
-`Main.cs`:
-
-1. adds XL, Huge, and THICC to Terraria's New World size row;
-2. keeps Terraria's categorical selection at Large;
-3. arms a custom preset only when `CreateNewWorld` begins;
-4. applies the preset's real width and height before generation;
-5. reapplies the dimensions at `clearWorld` as an allocation safety boundary;
-6. updates `WorldFileData` so in-memory metadata matches the physical canvas;
-7. disarms the preset in a `GenerateWorld` finalizer even if generation throws.
-
-Changing `Main.maxTilesX/maxTilesY` alone is not enough. Terraria 1.4.5.8 has world-sized storage created from startup dimensions. `WorldStorage.cs` handles the actual storage contract:
-
-- `Main.tile` is enlarged to logical dimensions plus Terraria's one-tile backing margin;
-- client `WorldMap` storage is recreated at the expanded physical dimensions;
-- `ActiveSections.LastActiveTime` and `LeashedEntity.BySection` are initialized with THICC-capable section storage;
-- any `RemoteClient.TileSections` / `TileSectionsCheckTime` arrays that were constructed at startup dimensions are resized once the expanded physical dimensions are known;
-- client `MapRenderer` is extended from its vanilla `5 x 2` target grid to a guarded `10 x 4` backing grid;
-- `DrawMap`'s hard-coded X loop is extended through physical target column `8`; its Y loop is already derived from `Main.maxTilesY`, so THICC naturally reaches physical target row `2`.
-
-The extra map-renderer guard column/row are intentional. Terraria treats the final allocated target as a short `400 x 600` tail. Keeping one unused target beyond each expanded physical edge prevents Huge/THICC's real last target from being incorrectly truncated.
-
-These are storage/rendering changes only. They do not generate content.
-
-## Address space
-
-The proven THICC server generation/save/reload path used a 32-bit gloader process with the PE `IMAGE_FILE_LARGE_ADDRESS_AWARE` flag enabled. `build.ps1` now makes that flag part of the normal distributed `gloader.exe` and verifies the bit after writing it.
-
-This is a launcher/process-host requirement, not a `.wld` format change.
-
-## World metadata
-
-No custom `.wld` format is introduced. Terraria's normal world header stores the real physical width and height.
-
-`WorldMetadata.cs` presents the three recognized physical dimension pairs as **XL**, **Huge**, and **THICC** instead of `Unknown`. Full seed text intentionally uses the vanilla **Large** size prefix because Terraria's seed format only knows the three vanilla categories; the physical custom preset remains a separate creation choice.
-
-## Source-backed worldgen behavior
-
-### Terraria-native scaling that needs no patch
-
-Terraria 1.4.5.8 already uses the physical dimensions for many rules. Examples include:
-
-- Life Crystals — physical tile area;
-- Surface Chests — width;
-- Floating Islands — width;
-- Marble count — `WorldGenRange` with `WorldArea`;
-- Granite count — `WorldGenRange` with `WorldWidth`;
-- Cave Houses/Cabins and Cave Chests — `WorldArea`;
-- Dead Man's Chests — `WorldWidth`;
-- Living Tree micro-biomes — `WorldWidth`;
-- minecart track counts/lengths according to the embedded 1.4.5.8 configuration.
-
-The clean embedded configuration resolves minecart scaling directly:
-
-| Minecart rule | 1.4.5.8 source scaling |
-| --- | --- |
-| StandardTrackCount `4..7` | `WorldArea` |
-| StandardTrackLength `150..300` | `WorldWidth` |
-| LongTrackCount `1..2` | `WorldWidth` |
-| LongTrackLength `400..1000` | `WorldWidth` |
-
-Because `WorldGenRange` reads the real `Main.maxTilesX/maxTilesY`, those rules automatically respond to THICC's true physical area/height where appropriate.
-
-### Underground Desert
-
-`DesertDescription.CreateFromPlacement` uses one **double** width-derived scalar (`maxTilesX / 4200.0`) for both axes because vanilla widths/heights normally co-grow.
-
-`DesertScaling.cs` preserves Terraria's source arithmetic and RNG, but on expanded aspect ratios it keeps horizontal uses width-driven and changes only vertical uses to the actual height scale. XL/Huge remain Large-height vertically; THICC receives the intended taller vertical geometry.
-
-### Jungle
-
-`JungleScaling.cs` preserves the original `JunglePass`, RNG stream, seed branches, and placement logic while separating its overloaded `_worldScale` by dimensional meaning:
-
-- X displacement and horizontal margins -> width;
-- Y displacement -> height;
-- axis-neutral linear body strength/repetition -> area-equivalent linear scale.
-
-One main Jungle remains one main Jungle unless a secret seed changes that rule.
-
-### Drunk-world Hive tunnel geometry
-
-Clean 1.4.5.8 source is explicit:
-
-```text
-num3 = (double)Main.maxTilesX / 4200.0
-num3 = (num3 + 1.0) / 2.0
-```
-
-The division is **not integer division**. `BeeScaling.cs` preserves the exact source result for Small/Medium/Large. Beyond Large, using the raw width-only scalar for axis-neutral tunnel geometry would be dimensionally wrong, so Expanded Worlds continues from Large by the area-equivalent linear factor.
-
-Hive count itself remains Terraria-owned and width-driven. THICC therefore has the same count range as Huge while its tunnel geometry can respond to the larger canvas. Drunk World's `0.667` hive-count multiplier and larva behavior remain downstream and untouched.
-
-### Don't Starve Wavy Caves
-
-The 1.4.5.8 source derives Wavy Cave count from `(maxTilesX / 4200.0)^2`, which is a valid area proxy only while axes co-grow. `SecretSeedScaling.cs` preserves vanilla results through Large, then continues the count from Large by actual tile area. THICC therefore doubles Huge's normal area-derived continuation. Remix's vanilla `/3` remains downstream.
-
-### Axis-neutral feature geometry
-
-`FeatureGeometryScaling.cs` repairs source rules such as Neon Moss, Shroom Patch, and PlantAlch where one width-derived linear scalar is applied to geometry that is not purely horizontal. The source generator and RNG remain in control.
-
-## Discrete Small/Medium/Large sequences
-
-Some source rules are genuinely categorical rather than continuous. Expanded Worlds extends only sequences whose next horizontal-tier terms are unambiguous and keeps seed multipliers downstream.
+Some Terraria rules are not physical formulas. They are explicit Small/Medium/Large tables. Expanded Worlds continues only clean arithmetic sequences.
 
 | Rule | Small | Medium | Large | XL | Huge | THICC |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Statue multiplier | 2 | 3 | 4 | **5** | **6** | **6** |
-| Glow Tulips | 2 | 4 | 6 | **8** | **10** | **10** |
-| Boulder Pet base quota | 2 | 4 | 6 | **8** | **10** | **10** |
-| Spike Cave base | 3 | 5 | 7 | **9** | **11** | **11** |
-| Chillet Eggs | 6 | 9 | 12 | **15** | **18** | **18** |
-| Dirtiest Block base | 3 | 6 | 9 | **12** | **15** | **15** |
+| Sky-lake base | 1 | 2 | 3 | **4** | **5** | **6** |
+| Statue multiplier | 2 | 3 | 4 | **5** | **6** | **7** |
+| Glow Tulips | 2 | 4 | 6 | **8** | **10** | **12** |
+| Boulder Pet base quota | 2 | 4 | 6 | **8** | **10** | **12** |
+| Spike Cave base | 3 | 5 | 7 | **9** | **11** | **13** |
+| Chillet Eggs | 6 | 9 | 12 | **15** | **18** | **21** |
+| Dirtiest Block base | 3 | 6 | 9 | **12** | **15** | **18** |
 
-THICC deliberately repeats Huge in this table because these are tier/width rules, not area rules.
+Terraria's downstream behavior remains downstream:
 
-Important source details:
+- No Traps still doubles the Boulder Pet base quota itself;
+- Spike Caves still add Terraria's `genRand.Next(2)` itself;
+- Celebration still multiplies the Dirtiest Block base by five itself;
+- extra-floating-island secret-seed multipliers still apply to the sky-lake base inside Terraria's own Floating Islands pass.
 
-- the statue multiplier is calculated in **`WorldGen.Reset()`**, not `GenerateWorld`; the patch runs as a postfix after Terraria produces Large's value `4` and verifies that boundary before extending it;
-- No Traps doubles the Boulder Pet quota **after** the base 2/4/6 rule, so Expanded Worlds extends only the base and leaves the seed multiplier untouched;
-- Spike Caves add vanilla `genRand.Next(2)` after their base count, and that draw remains untouched;
-- Celebration multiplies the Dirtiest Block base by five downstream, and that remains untouched.
+### Dual Dungeon sequences added in 1.4.5
 
-## Temple
+The clean 1.4.5.8 source introduced additional explicit size tables. The unambiguous ones are continued the same way on client and server generation.
 
-Clean 1.4.5.8 `makeTemple` uses:
+| Dual Dungeon rule | Small | Medium | Large | XL | Huge | THICC |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Bookshelf minimum | 5 | 10 | 15 | **20** | **25** | **30** |
+| Water-candle minimum | 5 | 10 | 15 | **20** | **25** | **30** |
+| Early altars | 20 | 30 | 40 | **50** | **60** | **70** |
+| Early desert drop traps | 8 | 12 | 16 | **20** | **24** | **28** |
+| Early snow drop traps | 6 | 10 | 14 | **18** | **22** | **26** |
+| Early cavern drop traps | 4 | 6 | 8 | **10** | **12** | **14** |
+| Early pit traps | 4 | 8 | 12 | **16** | **20** | **24** |
+| Early biome clumps | 40 | 60 | 80 | **100** | **120** | **140** |
+| Flooded-pit quota | 2 | 4 | 6 | **8** | **10** | **12** |
+| Shimmer specialized rooms | 2 | 4 | 6 | **8** | **10** | **12** |
+| Living Tree rooms | 2 | 6 | 10 | **14** | **18** | **22** |
+| Living Mahogany rooms | 2 | 6 | 10 | **14** | **18** | **22** |
+| Beehive rooms | 5 | 8 | 11 | **14** | **17** | **20** |
+| Crystal rooms | 6 | 10 | 14 | **18** | **22** | **26** |
+| Specialized halls | 3 | 4 | 5 | **6** | **7** | **8** |
+| Temple-trap base | 30 | 50 | 70 | **90** | **110** | **130** |
+| Temple-trap RNG exclusive max | 11 | 16 | 21 | **26** | **31** | **36** |
 
-```text
-scale = (double)Main.maxTilesX / 4200.0
-rooms = Next((int)(10*scale), (int)(16*scale))
-```
+The ambiguous 1.4.5 sequences are intentionally not extrapolated. Examples include the early Shadow Orb/Crimson Heart quota `8/14/18`, Spider specialized rooms `2/6/8`, and Lihzahrd painting cap `1/2/(2 + Next(2))`.
 
-The room arrays are **dynamic** in 1.4.5.8: both are allocated from `roomCount + 10`. There is no modern fixed Temple room buffer to enlarge.
+## Rules intentionally capped by Terraria's file/runtime schema
 
-Source room-count ranges are:
+Two obvious visual-region sequences are **not** extended: tree-background regions and cave-background regions.
 
-| Size | Rooms |
-| --- | ---: |
-| Small | 10–15 |
-| Medium | 15–23 |
-| Large | 20–31 |
-| XL | **30–47** |
-| Huge | **40–63** |
-| THICC | **40–63** |
+Small uses two styles, Medium three, and Large four. However, Terraria's current world format and runtime logic serialize/use exactly three X boundaries plus four styles. Extending those counts would require changing the `.wld` schema, networking, and multiple consumers. That would violate this mod's vanilla-format rule, so expanded worlds use Terraria's normal Large four-region behavior.
 
-THICC intentionally shares Huge's temple room-count distribution because the source rule is width-driven. Its deeper world does not imply a doubled Temple.
+This distinction is intentional: a mathematically visible sequence is not enough if continuing it requires inventing a new Terraria data model.
 
-## Dungeon
+## Continuous worldgen stays vanilla
 
-Terraria 1.4.5.8 does **not** use the old fixed 100-room / 500-door Dungeon scratch arrays. Current Dungeon generation stores growing state in per-Dungeon `List<T>` collections (`dungeonRooms`, `dungeonHalls`, `dungeonFeatures`, doors, platforms, protected bounds) plus a dynamic `List<DungeonGenVars>`.
+A large amount of Terraria 1.4.5.8 already scales from the physical canvas and therefore needs no patch. Examples include rules using:
 
-`GenerationCapacity.cs` validates those current 1.4.5.8 list shapes and performs **no Dungeon resize** on the current build. Historical fixed-array capacity math remains only as a fail-closed compatibility fallback for older source layouts; that fallback uses both physical width and height.
+- `Main.maxTilesX` or `Main.maxTilesY` directly;
+- `WorldGenRange` with `WorldWidth` or `WorldArea`;
+- `maxTilesX / 4200.0` floating-point scale;
+- `maxTilesY / 1200` source arithmetic;
+- physical tile area.
 
-## Fixed-capacity records that really do matter
+This includes large portions of terrain, caves, ores, surface chests, Floating Islands, Marble/Granite, cabins/cave houses, minecart tracks, Jungle geometry, Underground Desert geometry, Hive geometry, and numerous secret-seed features.
 
-A clean-source pass found two current 1.4.5.8 generation-record capacities that expanded widths can exceed:
+Those formulas are deliberately **not patched**. The canonical dimensions restore the co-growing width/height relationship they were written against.
+
+Integer expressions remain integer expressions too. For example, if Terraria itself uses integer `maxTilesX / 4200`, an intermediate custom tier may legitimately receive the same integer quantum as the previous tier. Expanded Worlds does not convert such source arithmetic to floating point merely to make every button increase every count.
+
+## Secret and special seeds
+
+Terraria remains authoritative for secret/special seed registration, activation, RNG, and pass behavior. Expanded Worlds does not maintain a replacement secret-seed implementation.
+
+The mod only touches a secret-seed result when an already-identified **discrete vanilla size table** needs an unambiguous next tier or when fixed scratch storage must be large enough for Terraria's own generated record count.
+
+## Fixed worldgen scratch capacity
+
+The current 1.4.5.8 source has two audited fixed record buffers that canonical expanded worlds can exceed.
 
 ### Floating Island metadata
 
-Vanilla arrays have 300 records. Error World can triple Floating Islands, and Care Bears can apply its full x10 multiplier to islands plus Large-category sky lakes. The source writes metadata before its later clamp can protect those arrays.
+Vanilla has 300 records. With the continued sky-lake base and the source's worst Error World + full extra-island multiplier, the upper bounds are:
 
-Worst audited storage requirements:
+- XL: **280**
+- Huge: **350**
+- THICC: **390**
 
-- XL: **330** records;
-- Huge: **420** records;
-- THICC: **420** records (same physical width/category as Huge).
-
-`GenerationCapacity.cs` enlarges all four parallel Floating Island metadata arrays together without changing generation counts or RNG.
+Only the four parallel metadata arrays are enlarged when necessary. Island/lake generation itself stays in Terraria.
 
 ### Crimson heart positions
 
-`WorldGen.heartPos` has 100 entries. Crimson region attempts scale from physical width; Remix doubles them, and each `CrimStart` can produce up to eight `CrimVein` records.
+`WorldGen.heartPos` has 100 records. The Remix worst-case bounds are:
 
-- XL Remix upper bound: **96**;
-- Huge Remix upper bound: **128**;
-- THICC Remix upper bound: **128**.
+- XL: **80**
+- Huge: **96**
+- THICC: **112**
 
-Only the scratch array is resized. Crimson generation itself remains untouched.
+Only THICC exceeds vanilla capacity. The array grows; Crimson generation does not change.
 
-Other audited fixed generation records such as larva positions, Mountain Caves, Jungle Shrine chests, tunnels, mushroom regions, ordinary Lakes, Oases, and surface ore-patch records are width-driven/capped in current 1.4.5.8 and therefore THICC does not exceed Huge's already-audited bounds merely by being taller.
+Current 1.4.5 Dungeon generation uses dynamic `List<T>` state, so Expanded Worlds does not carry the old fixed-Dungeon-array compatibility machinery.
 
-## Floating Lakes remain intentionally categorical
+## Backing storage and map renderer
 
-`GenVars.skyLakes` in 1.4.5.8 is established by explicit vanilla width thresholds that produce the Small/Medium/Large sequence `1/2/3`. XL/Huge/THICC intentionally remain categorically Large, so source continues to produce `3`.
+Terraria has world-sized storage created from startup dimensions. Expanded Worlds preserves vanilla formulas while ensuring the storage is large enough for the selected physical canvas:
 
-There is no source-backed fourth/fifth/sixth term to invent. Expanded Worlds does not curve-fit a synthetic Floating Lake count.
+- `Main.tile` uses exactly `[maxTilesX, maxTilesY]`, matching 1.4.5.8;
+- client `WorldMap` is recreated at the exact physical dimensions when necessary;
+- section tables use vanilla `maxTilesX / 200 + 1` by `maxTilesY / 150 + 1` sizing;
+- already-created `RemoteClient` section tables are enlarged to those same vanilla dimensions;
+- static section tables are initialized against maximum supported THICC dimensions.
 
-## Secret seeds
+The client `MapRenderer` has a separate vanilla `5 x 2` render-target ceiling. Canonical THICC needs physical X target index 7 and Y target index 2. Its width has an 800-tile final tail, while vanilla treats the final allocated X target as a special 400-tile tail, so one unused guard column is required. The resulting backing grid is `9 x 3`, while `DrawMap` renders only through physical X index 7. THICC's vertical tail is exactly vanilla's special 600-tile final-row size, so no vertical guard row is needed.
 
-**The seed wins.**
+These are storage/rendering accommodations, not world-generation rules.
 
-Expanded Worlds changes physical dimensions and repairs only source assumptions invalidated by the changed aspect ratio or fixed storage. Terraria still decides which passes run and what each secret seed does.
+## Client/server parity
 
-Not the Bees, Drunk, Remix, For the Worthy, Celebration, No Traps, Don't Starve, Error World, Care Bears, Dual Dungeons, and combinations remain Terraria-owned. Expanded Worlds patches the underlying source rule rather than replacing those seeds with hand-authored approximations.
+World-size state, physical dimensions, discrete tier continuations, and generation scratch-capacity guards are shared under the same source files for both `GLOADER_CLIENT` and `GLOADER_SERVER` builds.
 
-## Verification
+Headless generation uses:
 
-The repository uses several complementary checks:
+```powershell
+$env:GLOADER_EXPANDED_WORLD='XL'
+$env:GLOADER_EXPANDED_WORLD='HUGE'
+$env:GLOADER_EXPANDED_WORLD='THICC'
+```
 
-1. **pure regression tests** — verify source-derived arithmetic and Small/Medium/Large parity before accepting expanded continuation;
-2. **client raw-source compile fixture** — compiles the complete Expanded Worlds client source against an intentional Terraria API fixture, including THICC UI/storage/map contracts;
-3. **server raw-source compile fixture** — compiles the complete server source and checks the THICC headless/storage contract;
-4. **1.4.5.8 source audits** — independently inspect the official dedicated server for shared managed contracts;
-5. **real world-generation probes** — launch the official Terraria 1.4.5.8 dedicated server through gloader.
+Terraria still enters through its normal Large autocreate path; Expanded Worlds replaces only the physical canvas before `clearWorld` allocation/generation begins.
 
-The isolated `16,800 x 4,800` proof generated a complete world, saved it, exited, then loaded the same `.wld` successfully in a fresh process with Large Address Aware enabled. A same-seed six-size pass also generated and parsed a real `16,800 x 4,800` world and produced expected source-backed density behavior.
+## World files
 
-A real retail graphical launch remains the final execution test for Harmony application in `Terraria.exe`, GPU map-target creation/drawing, New World button behavior, and Host & Play. The source/storage contracts are wired for THICC; CI does not pretend a headless Windows runner is a human clicking through the retail UI.
+Expanded Worlds introduces no custom `.wld` format. Terraria writes the real width and height into its normal header.
+
+`WorldMetadata.cs` only fixes presentation around dimensions Terraria does not have names for:
+
+- recognized custom dimensions display as XL/Huge/THICC instead of Unknown;
+- copied full seeds retain vanilla Large's size prefix because Terraria's seed format knows only Small/Medium/Large categories.
+
+## CI continuity audit
+
+`tests/ExpandedWorldsMath` locks the canonical dimensions, section cadence, every pure discrete continuation above, the two capacity upper bounds, rejection of the obsolete dimensions, and syntax parsing of every Expanded Worlds source file in both client and server preprocessor modes.
+
+The audit intentionally distinguishes **vanilla physical arithmetic** from **source-backed categorical continuation**. That is the core design rule of the mod.

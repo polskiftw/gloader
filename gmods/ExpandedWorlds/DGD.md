@@ -1,140 +1,135 @@
-# Expanded Worlds — DGD
+# Expanded Worlds - DGD
 
-This is the short version. `README.md` is the canonical technical document.
-
-## What this mod does
-
-It adds three real world-size buttons to Terraria 1.4.5.8:
+## The six size buttons
 
 ```text
-Small | Medium | Large | XL | Huge | THICC
+Small   4200 x 1200
+Medium  6400 x 1800
+Large   8400 x 2400
+XL     10600 x 3000
+Huge   12600 x 3600
+THICC  14800 x 4200
 ```
 
-Exact custom sizes:
+Those are the canonical sizes.
+
+## Why those numbers
+
+Terraria splits worlds into `200 x 150` tile network sections.
+
+Vanilla:
 
 ```text
-XL     12600 x 2400
-Huge   16800 x 2400
-THICC  16800 x 4800
+Small   21 x  8 sections
+Medium  32 x 12 sections
+Large   42 x 16 sections
 ```
 
-THICC does **not** replace Huge. It is a separate third custom size.
-
-## How to use it
-
-1. Put/keep the `ExpandedWorlds` folder under `gmods/`.
-2. Run `gloader.exe`.
-3. Make sure **ExpandedWorlds** is enabled in the gloader launcher.
-4. Launch Terraria.
-5. Choose **Single Player -> New** and make a world.
-6. Pick **XL**, **Huge**, or **THICC** in the normal world-size row.
-
-Nothing else is required for ordinary client world creation.
-
-The retail-client UI hook normally installs after Terraria finishes building the New World page, using the live vanilla size-button row. A second draw-time guard now verifies the row when the New World screen is actually rendered and performs one recovery injection if Terraria constructed that UI state before Harmony installed the normal BuildPage hook. If a current package still shows only Small/Medium/Large, the gloader log should now contain a specific Expanded Worlds UI recovery error instead of silently omitting the buttons.
-
-## What THICC actually means
-
-THICC is:
+Continue the same pattern:
 
 ```text
-16800 tiles wide
- 4800 tiles tall
-80640000 total tiles
+XL      53 x 20 sections
+Huge    63 x 24 sections
+THICC   74 x 28 sections
 ```
 
-Compared with vanilla Large (`8400 x 2400`), THICC is:
+Horizontal section jumps repeat `+11, +10`. Vertical always adds `+4`.
+
+That is why the custom widths look slightly weird. We are preserving the same tiny width-vs-height wobble Terraria already has at Medium instead of picking prettier numbers and then patching around the consequences.
+
+## The rule
+
+**If Terraria already uses a physical formula, leave it the hell alone.**
+
+Width formula? It sees the real width.
+
+Height formula? It sees the real height.
+
+Area formula? It sees the real area.
+
+`maxTilesX / 4200.0`? Leave the exact source math alone.
+
+Integer `maxTilesX / 4200`? Also leave it alone. Do not "improve" it into floating point.
+
+We only extend a Small/Medium/Large lookup when its three values form one obvious arithmetic sequence.
+
+## Examples that DO continue
 
 ```text
-2x as wide
-2x as tall
-4x the tile area
+Sky lakes:       1,2,3 -> 4,5,6
+Statue mult:     2,3,4 -> 5,6,7
+Glow Tulips:     2,4,6 -> 8,10,12
+Boulder Pet:     2,4,6 -> 8,10,12
+Spike base:      3,5,7 -> 9,11,13
+Chillet Eggs:    6,9,12 -> 15,18,21
+Dirtiest Block:  3,6,9 -> 12,15,18
 ```
 
-Compared with Huge (`16800 x 2400`), THICC has:
+Terraria still applies its own special-seed multipliers/random rolls after those base values.
+
+The clean 1.4.5 Dual Dungeon code has more obvious sequences and those continue too. See README.md for the table.
+
+## Examples that DO NOT continue
+
+If the vanilla terms are weird/random/ambiguous, we stop at Large instead of making shit up.
+
+Examples:
 
 ```text
-same width
-2x height
-2x tile area
+Dual Dungeon orb/heart quota: 8,14,18
+Spider specialized rooms:     2,6,8
+Lihzahrd painting cap:         1,2,2+random
 ```
 
-## Why some things do not double from Huge to THICC
+Tree/cave background regions also stop at Large's four styles because Terraria's `.wld` format and runtime only store three boundaries + four styles. Changing that would mean inventing a new file/network format. Nope.
 
-That is intentional.
+## What got deleted
 
-Terraria does not scale every feature by total world area. Expanded Worlds follows the source rule for each feature:
+The old sizes were super wide, so we had patches trying to decide whether a vanilla width-derived number was "really" horizontal, vertical, area, or isotropic.
+
+Those aspect-ratio repair layers are gone:
+
+- no custom Desert scaling layer;
+- no custom Jungle scaling layer;
+- no Hive geometry reinterpretation;
+- no generic feature-geometry reinterpretation;
+- no Don't Starve Wavy Cave area rewrite;
+- no other secret-seed width-proxy rewrite.
+
+With the canonical sizes, width and height grow together again like vanilla. Terraria gets to use its own math.
+
+## What still has to be patched
+
+Stuff that is not worldgen policy:
+
+- set the bigger physical dimensions before Terraria allocates the world;
+- enlarge startup-sized tile/map/section storage;
+- enlarge two fixed worldgen scratch arrays if Terraria can legitimately overflow them;
+- extend the client map renderer's fixed target grid;
+- label custom dimensions XL/Huge/THICC;
+- add the three buttons;
+- extend only the exact discrete size tables described above.
+
+## Secret seeds
+
+Terraria owns them. We do not have our own replacement list or our own fake secret-seed generator.
+
+If a secret seed changes a vanilla pass, that vanilla pass still runs. Expanded Worlds only supplies the larger canonical canvas and the small set of source-backed discrete/capacity continuations.
+
+## Client and server
+
+Same generation math now.
+
+The shared generation context, tier continuations, and capacity guards compile for both client and server. The 64-bit headless generator should not be a different flavor of Expanded Worlds from clicking the size button in the client.
+
+## OCD check
+
+CI locks:
 
 ```text
-width rule       -> THICC behaves like Huge
-height rule      -> THICC sees the doubled height
-area rule        -> THICC sees the doubled area vs Huge
-discrete tier    -> THICC uses Huge's tier
+XL     10600 x 3000 = 53 x 20 sections
+Huge   12600 x 3600 = 63 x 24 sections
+THICC  14800 x 4200 = 74 x 28 sections
 ```
 
-Examples of THICC deliberately using Huge's same width/tier behavior include the Temple room-count range, statue tier, Glow Tulips, Boulder Pet quota, Spike Cave tier, Chillet Eggs, and Dirtiest Block tier.
-
-Examples that respond to THICC's extra area include Life Crystals, Cave Houses/Cabins, Cave Chests, Marble counts, and other source rules based on `WorldArea`.
-
-## Dedicated server
-
-For headless generation, set one of these before launching the dedicated server through gloader:
-
-```powershell
-$env:GLOADER_EXPANDED_WORLD='XL'
-$env:GLOADER_EXPANDED_WORLD='HUGE'
-$env:GLOADER_EXPANDED_WORLD='THICC'
-```
-
-If the variable is absent, Expanded Worlds leaves vanilla dedicated-server sizing alone.
-
-## Saves
-
-Expanded Worlds does **not** invent a new `.wld` format. Terraria saves the real width and height in the normal world file.
-
-The mod labels recognized custom worlds as:
-
-```text
-XL
-Huge
-THICC
-```
-
-Terraria still categorizes all three as vanilla **Large** internally when code asks for Small/Medium/Large. That is deliberate compatibility behavior.
-
-## Memory / giant-world plumbing
-
-THICC is big enough that changing two numbers is not sufficient. The mod also handles the relevant Terraria 1.4.5.8 backing storage:
-
-```text
-Main.tile
-WorldMap
-ActiveSections
-LeashedEntity section storage
-RemoteClient multiplayer section storage
-MapRenderer target columns and rows
-```
-
-The distributed `gloader.exe` is also marked **Large Address Aware** by `build.ps1`, because the successful `16800 x 4800` generation/save/reload proof used that address-space setup.
-
-## What has already been proven
-
-A real official Terraria 1.4.5.8 dedicated server has successfully:
-
-```text
-generated 16800 x 4800
-saved the .wld
-exited
-started in a fresh process
-reloaded the saved world successfully
-```
-
-The same-size world was also included in a six-size same-seed generation/statistics pass.
-
-Automatic source pushes now run compile/source-contract checks only. The obsolete dedicated world-generation workflows were removed entirely, so rebuilding Expanded Worlds does not manufacture `.wld` files. The six-size real-world/TEdit comparison remains available as a manual-only workflow when an intentional map comparison is wanted.
-
-## What still needs a literal eyeball test
-
-CI cannot physically click Terraria's retail graphical UI or inspect GPU rendering like a person can. The code includes the THICC button, a live-screen recovery hook for the size row, and the audited map/storage support, but the final practical smoke test is still launching the retail client and making/opening one THICC world.
-
-If that graphical smoke test exposes anything, fix the exact failure. Do not redesign the scaling model unless the evidence says the model is wrong.
+It also tests the discrete sequences, capacity bounds, rejects the three obsolete dimensions, and syntax-parses every Expanded Worlds `.cs` file once as client and once as server.

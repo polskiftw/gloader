@@ -1,22 +1,50 @@
 using System;
 
-#if GLOADER_CLIENT
+#if GLOADER
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
 using HarmonyLib;
 using Terraria;
+using Terraria.WorldBuilding;
 
 /// <summary>
-/// Generalizes worldgen rules that are explicitly keyed to Terraria's discrete
-/// Small / Medium / Large category rather than to physical dimensions.
-///
-/// These are intentionally separate from GenerationMath's width/height/area
-/// families. A discrete tier rule is only extended when the source itself gives
-/// an unambiguous per-tier sequence. THICC shares Huge's horizontal/tier term;
-/// its extra vertical canvas is handled only by physical height/area rules.
+/// WorldGen.Reset contains two exact Small/Medium/Large tier sequences:
+/// statue multiplier 2/3/4 and sky lakes 1/2/3. Terraria has no category above
+/// Large, so expanded physical tiers would otherwise freeze at the Large term.
+/// Continue only those exact sequences; later secret-seed multipliers stay in
+/// Terraria's original code.
 /// </summary>
+[HarmonyPatch(typeof(WorldGen), nameof(WorldGen.Reset))]
+internal static class ExpandedWorldResetTierContinuationPatch
+{
+    [HarmonyPostfix]
+    private static void Postfix()
+    {
+        if (!ExpandedWorldGenerationContext.IsActive)
+            return;
+
+        if (GenVars.extraBastStatueCountMax != 4)
+        {
+            throw new InvalidOperationException(
+                "[Expanded Worlds] Expected Terraria Large statue multiplier 4 after Reset(), got " +
+                GenVars.extraBastStatueCountMax + ".");
+        }
+
+        if (GenVars.skyLakes != 3)
+        {
+            throw new InvalidOperationException(
+                "[Expanded Worlds] Expected Terraria Large sky-lake base count 3 after Reset(), got " +
+                GenVars.skyLakes + ".");
+        }
+
+        int tier = ExpandedWorldGenerationContext.ActiveTier;
+        GenVars.extraBastStatueCountMax = ExpandedWorldTierMath.StatueMultiplier(tier);
+        GenVars.skyLakes = ExpandedWorldTierMath.SkyLakeBaseCount(tier);
+    }
+}
+
 [HarmonyPatch]
 internal static class ExpandedWorldDiscreteTierGenerationPatch
 {
@@ -188,7 +216,7 @@ internal static class ExpandedWorldDiscreteTierGenerationPatch
 
     private static int AdjustDirtiestBlockBaseCount(int vanillaCount)
     {
-        if (!ExpandedWorldState.GenerationArmed)
+        if (!ExpandedWorldGenerationContext.IsActive)
             return vanillaCount;
 
         if (vanillaCount != 9)
@@ -198,13 +226,13 @@ internal static class ExpandedWorldDiscreteTierGenerationPatch
                 vanillaCount + ".");
         }
 
-        switch (ExpandedWorldState.GenerationPreset)
+        switch (ExpandedWorldGenerationContext.ActivePreset)
         {
             case ExpandedWorldPreset.XL:
             case ExpandedWorldPreset.Huge:
             case ExpandedWorldPreset.Thicc:
                 return ExpandedWorldTierMath.DirtiestBlockBaseCount(
-                    ExpandedWorldState.DiscreteTierFor(ExpandedWorldState.GenerationPreset));
+                    ExpandedWorldMath.TierFor(ExpandedWorldGenerationContext.ActivePreset));
             default:
                 return vanillaCount;
         }
@@ -249,6 +277,24 @@ internal static class ExpandedWorldDiscreteTierGenerationPatch
 
 internal static class ExpandedWorldTierMath
 {
+    public static int StatueMultiplier(int oneBasedWorldTier)
+    {
+        if (oneBasedWorldTier < 1)
+            throw new ArgumentOutOfRangeException(nameof(oneBasedWorldTier));
+
+        // Source Small/Medium/Large: 2, 3, 4.
+        return checked(oneBasedWorldTier + 1);
+    }
+
+    public static int SkyLakeBaseCount(int oneBasedWorldTier)
+    {
+        if (oneBasedWorldTier < 1)
+            throw new ArgumentOutOfRangeException(nameof(oneBasedWorldTier));
+
+        // Source Small/Medium/Large: 1, 2, 3.
+        return oneBasedWorldTier;
+    }
+
     public static int DirtiestBlockBaseCount(int oneBasedWorldTier)
     {
         if (oneBasedWorldTier < 1)
