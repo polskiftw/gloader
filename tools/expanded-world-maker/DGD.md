@@ -79,9 +79,21 @@ or `HUGE` / `THICC`.
 
 TerrariaServer does the actual worldgen. The normal Terraria game client is never launched, so the renderer/content/UI side of the game is not sitting in memory at the same time.
 
+## How it decides the world succeeded
+
+When TerrariaServer reaches ready state, the World Maker opens the **actual generated `.wld` file** and reads Terraria's binary world header. It checks the saved physical width and height against the preset you picked:
+
+```text
+XL     must be 12,600 x 2,400
+Huge   must be 16,800 x 2,400
+THICC  must be 16,800 x 4,800
+```
+
+It no longer waits for a particular Expanded Worlds log sentence. If the `.wld` header reports the wrong dimensions, the app refuses to copy it into your Worlds folder.
+
 ## Existing world with the same filename
 
-The app warns you first. Your old file stays untouched while the replacement generates. The overwrite happens only after the new server run reaches ready state and Expanded Worlds verifies the expected dimensions after `.wld` reload.
+The app warns you first. Your old file stays untouched while the replacement generates. The overwrite happens only after the new server run reaches ready state and the generated `.wld` header itself confirms the requested dimensions.
 
 ## If it fails
 
