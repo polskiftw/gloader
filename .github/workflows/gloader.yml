@@ -67,14 +67,26 @@ jobs:
       - name: Validate x64 runtime builder PowerShell
         shell: pwsh
         run: |
+          $builderPath = (Resolve-Path "tools/x64-runtime/Build-X64Runtime.ps1").Path
           $tokens = $null
           $errors = $null
           [System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path "tools/x64-runtime/Build-X64Runtime.ps1").Path,
+            $builderPath,
             [ref]$tokens,
             [ref]$errors) | Out-Null
           if ($errors.Count -ne 0) {
             throw "x64 runtime builder has PowerShell parse errors:`n$($errors | Out-String)"
+          }
+
+          $builder = Get-Content $builderPath -Raw
+          if ($builder -match '(?m)^\s*\$SetupCli\s*=') {
+            throw "x64 runtime builder must not invoke the pinned Windows setup-cli.bat; that wrapper changes into setup/ and masks dotnet failures."
+          }
+          if ($builder -notmatch '-WorkingDirectory\s+\$WorkspaceDirectory') {
+            throw "x64 runtime builder must run the upstream setup CLI with the workspace root as its working directory."
+          }
+          if ($builder -notmatch 'setup\\CLI\\Setup\.CLI\.csproj') {
+            throw "x64 runtime builder must invoke the pinned Setup.CLI project directly."
           }
 
       - name: Infinite Angler debug quest-fish regression test
