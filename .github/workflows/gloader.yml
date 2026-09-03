@@ -205,9 +205,15 @@ jobs:
             throw "Infinite Angler debug quest-fish helper must ship disabled by default."
           }
 
-          & $loader --target $target --mods $mods
-          if ($LASTEXITCODE -ne 0) {
-            throw "Steam Host & Play / out-of-process compiler fixture failed with exit code $LASTEXITCODE"
+          # gloader is a WinExe so PowerShell's call operator does not reliably wait
+          # for it or populate LASTEXITCODE. Start-Process gives us the real result.
+          $argumentList = @(
+            "--target", ('"' + $target + '"'),
+            "--mods", ('"' + $mods + '"')
+          )
+          $process = Start-Process -FilePath $loader -ArgumentList $argumentList -Wait -PassThru
+          if ($process.ExitCode -ne 0) {
+            throw "Steam Host & Play / out-of-process compiler fixture failed with exit code $($process.ExitCode)"
           }
 
       - name: Remove integration-test logs
@@ -241,14 +247,14 @@ jobs:
             gh release upload $tag $asset --clobber --repo "${{ github.repository }}"
             gh release edit $tag `
               --repo "${{ github.repository }}" `
-              --notes "## Downloads`n`n- **gloader-$env:RELEASE_VERSION.zip** — full gloader package. Extract it into the Terraria install folder. It includes the current `gmods`, the native **tools\\ExpandedWorldMaker.exe**, Expanded Worlds XL/Huge/THICC support, and a Large Address Aware gloader.exe for the 32-bit Terraria host.`n- **ExpandedWorldMaker-$env:RELEASE_VERSION.zip** — optional small World Maker overlay when available.`n- **TerrariaDecompilerOffline-win-x64.zip** — optional standalone GUI reference decompiler when available.`n`nAV cleanup: packaged managed dependencies are file-backed, and raw C# compilation now runs in the short-lived `gdeps\\compiler\\gloader.compiler.exe` helper instead of embedding Roslyn compilation inside `gloader.exe`."
+              --notes "## Downloads`n`n- **gloader-$env:RELEASE_VERSION.zip** — full gloader package. Extract it into the Terraria install folder. It includes the current `gmods`, the native **tools\\ExpandedWorldMaker.exe**, Expanded Worlds XL/Huge/THICC support, and a Large Address Aware gloader.exe for the 32-bit Terraria host.`n- **ExpandedWorldMaker-$env:RELEASE_VERSION.zip** — optional small World Maker overlay when available.`n- **TerrariaDecompilerOffline-win-x64.zip** — optional standalone GUI reference decompiler when available.`n`nAV cleanup: `gloader.exe` is now a standard x86 WinExe with a normal asInvoker manifest; it no longer changes the process DLL search path or contains an embedded-assembly extraction fallback. Raw C# compilation remains isolated in `gdeps\\compiler\\gloader.compiler.exe`."
           }
           else {
             gh release create $tag $asset `
               --repo "${{ github.repository }}" `
               --target "${{ github.sha }}" `
               --title "gloader v$env:RELEASE_VERSION" `
-              --notes "Includes file-backed loader dependencies, an out-of-process source compiler helper, native Expanded World Maker, and Expanded Worlds XL/Huge/THICC support."
+              --notes "Includes a standard x86 WinExe launcher, file-only dependency probing, an out-of-process source compiler helper, native Expanded World Maker, and Expanded Worlds XL/Huge/THICC support."
           }
 
       - name: Upload
