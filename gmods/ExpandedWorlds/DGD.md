@@ -31,7 +31,7 @@ THICC does **not** replace Huge. It is a separate third custom size.
 
 Nothing else is required for ordinary client world creation.
 
-The retail-client UI hook is installed after Terraria finishes building the New World page, using the live vanilla size-button row. If a package shows only Small/Medium/Large, that package predates the retail UI fix and should be replaced with the current release asset.
+The retail-client UI hook normally installs after Terraria finishes building the New World page, using the live vanilla size-button row. A second draw-time guard now verifies the row when the New World screen is actually rendered and performs one recovery injection if Terraria constructed that UI state before Harmony installed the normal BuildPage hook. If a current package still shows only Small/Medium/Large, the gloader log should now contain a specific Expanded Worlds UI recovery error instead of silently omitting the buttons.
 
 ## What THICC actually means
 
@@ -131,8 +131,10 @@ reloaded the saved world successfully
 
 The same-size world was also included in a six-size same-seed generation/statistics pass.
 
+The expensive sanity-world generator and six-size comparison are manual workflows. Ordinary Expanded Worlds source pushes no longer automatically manufacture Large/XL/Huge test worlds just because the mod was recompiled.
+
 ## What still needs a literal eyeball test
 
-CI cannot physically click Terraria's retail graphical UI or inspect GPU rendering like a person can. The code includes the THICC button and the audited map/storage support, but the final practical smoke test is still launching the retail client and making/opening one THICC world.
+CI cannot physically click Terraria's retail graphical UI or inspect GPU rendering like a person can. The code includes the THICC button, a live-screen recovery hook for the size row, and the audited map/storage support, but the final practical smoke test is still launching the retail client and making/opening one THICC world.
 
 If that graphical smoke test exposes anything, fix the exact failure. Do not redesign the scaling model unless the evidence says the model is wrong.
