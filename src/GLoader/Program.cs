@@ -157,11 +157,16 @@ namespace GLoader
 
             var runtimeDirectories = GetRuntimeDirectories(runtimeDirectory);
             var nativeDirectory = runtimeDirectories.FirstOrDefault(path =>
-                path.EndsWith(Path.Combine("Native", "Windows"), StringComparison.OrdinalIgnoreCase))
+                path.EndsWith(Path.Combine("Native", "Windows", "x64"), StringComparison.OrdinalIgnoreCase))
+                ?? runtimeDirectories.FirstOrDefault(path =>
+                    path.EndsWith(Path.Combine("Native", "Windows"), StringComparison.OrdinalIgnoreCase))
+                ?? runtimeDirectories.FirstOrDefault(path =>
+                    path.EndsWith(Path.Combine("runtimes", "win-x64", "native"), StringComparison.OrdinalIgnoreCase))
                 ?? runtimeDirectories.FirstOrDefault(path =>
                     path.IndexOf(Path.DirectorySeparatorChar + "native", StringComparison.OrdinalIgnoreCase) >= 0)
                 ?? runtimeDirectory;
             NativeLibrarySearch.UseDirectory(nativeDirectory);
+            Log.Info("Native DLL search root: " + nativeDirectory);
 
             using var runtimeResolver = new ManagedAssemblyResolver(
                 runtimeDirectories
