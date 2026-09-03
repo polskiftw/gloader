@@ -289,10 +289,9 @@ internal static class ExpandedWorldLoadDiagnosticsPatch
 }
 
 /// <summary>
-/// Record the exact expanded clearWorld allocation boundary as well. A failure
-/// here is especially useful for distinguishing a 32-bit address-space failure
-/// from a later .wld decoding problem. The finalizer always returns the original
-/// exception unchanged.
+/// Record the exact expanded clearWorld allocation boundary as well. This
+/// separates backing-storage/allocation failures from later .wld decoding
+/// problems. The finalizer always returns the original exception unchanged.
 /// </summary>
 [HarmonyPatch(typeof(WorldGen), "clearWorld")]
 internal static class ExpandedWorldClearWorldDiagnosticsPatch

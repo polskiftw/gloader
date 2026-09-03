@@ -29,9 +29,9 @@ namespace GLoader.ExpandedWorldMaker
         public string Dimensions { get { return Width.ToString("N0", CultureInfo.InvariantCulture) + " x " + Height.ToString("N0", CultureInfo.InvariantCulture); } }
         public long TileCount { get { return (long)Width * Height; } }
 
-        public static readonly WorldPreset XL = new WorldPreset("XL", "XL", 12600, 2400);
-        public static readonly WorldPreset Huge = new WorldPreset("HUGE", "Huge", 16800, 2400);
-        public static readonly WorldPreset Thicc = new WorldPreset("THICC", "THICC", 16800, 4800);
+        public static readonly WorldPreset XL = new WorldPreset("XL", "XL", 10600, 3000);
+        public static readonly WorldPreset Huge = new WorldPreset("HUGE", "Huge", 12600, 3600);
+        public static readonly WorldPreset Thicc = new WorldPreset("THICC", "THICC", 14800, 4200);
     }
 
     internal sealed class SpecialSeedOption

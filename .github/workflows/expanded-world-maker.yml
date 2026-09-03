@@ -2,6 +2,10 @@ name: Expanded World Maker
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - "tools/expanded-world-maker/**"
+      - ".github/workflows/expanded-world-maker.yml"
   push:
     branches:
       - main

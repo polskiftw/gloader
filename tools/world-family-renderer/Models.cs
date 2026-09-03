@@ -18,9 +18,9 @@ internal sealed record WorldPreset(
         new WorldPreset(1, "Small", 4200, 1200, 1, null),
         new WorldPreset(2, "Medium", 6400, 1800, 2, null),
         new WorldPreset(3, "Large", 8400, 2400, 3, null),
-        new WorldPreset(4, "XL", 12600, 2400, 3, "XL"),
-        new WorldPreset(5, "Huge", 16800, 2400, 3, "HUGE"),
-        new WorldPreset(6, "THICC", 16800, 4800, 3, "THICC")
+        new WorldPreset(4, "XL", 10600, 3000, 3, "XL"),
+        new WorldPreset(5, "Huge", 12600, 3600, 3, "HUGE"),
+        new WorldPreset(6, "THICC", 14800, 4200, 3, "THICC")
     };
 }
 

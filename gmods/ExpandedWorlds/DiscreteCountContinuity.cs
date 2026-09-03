@@ -1,6 +1,6 @@
 using System;
 
-#if GLOADER_CLIENT
+#if GLOADER
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -55,7 +55,7 @@ internal static class ExpandedWorldDiscreteCountMath
     }
 }
 
-#if GLOADER_CLIENT
+#if GLOADER
 internal static class ExpandedWorldDiscreteCountPatchUtil
 {
     internal static readonly MethodInfo GetWorldSizeMethod =
@@ -122,7 +122,7 @@ internal static class ExpandedWorldDiscreteCountPatchUtil
 
     internal static int ExpandedTierOrLarge(int vanillaLargeCount, int expectedLargeCount, Func<int, int> countForTier, string featureName)
     {
-        if (!ExpandedWorldState.GenerationArmed)
+        if (!ExpandedWorldGenerationContext.IsActive)
             return vanillaLargeCount;
 
         if (vanillaLargeCount != expectedLargeCount)
@@ -132,12 +132,12 @@ internal static class ExpandedWorldDiscreteCountPatchUtil
                 expectedLargeCount + ", got " + vanillaLargeCount + ". Refusing to guess.");
         }
 
-        switch (ExpandedWorldState.GenerationPreset)
+        switch (ExpandedWorldGenerationContext.ActivePreset)
         {
             case ExpandedWorldPreset.XL:
             case ExpandedWorldPreset.Huge:
             case ExpandedWorldPreset.Thicc:
-                return countForTier(ExpandedWorldState.DiscreteTierFor(ExpandedWorldState.GenerationPreset));
+                return countForTier(ExpandedWorldMath.TierFor(ExpandedWorldGenerationContext.ActivePreset));
             default:
                 return vanillaLargeCount;
         }
@@ -191,7 +191,7 @@ internal static class ExpandedWorldDiscreteCountPatchUtil
 
 /// <summary>
 /// GrowGlowTulips hard-stops at Terraria's Large branch (2/4/6). Continue that
-/// exact +2-per-width-tier count to XL/Huge; THICC shares Huge's width tier.
+/// exact +2-per-tier count through XL/Huge/THICC.
 /// </summary>
 [HarmonyPatch]
 internal static class ExpandedWorldGlowTulipCountPatch
@@ -233,7 +233,7 @@ internal static class ExpandedWorldGlowTulipCountPatch
 /// <summary>
 /// placeTrap uses a 2/4/6 Small/Medium/Large cap for the rare Boulder Pet trap
 /// variant. No Traps doubles the source cap after this switch, so only the base
-/// is continued to 8/10 for XL/Huge; THICC retains Huge's width-tier quota.
+/// continues to 8/10/12 for XL/Huge/THICC.
 /// </summary>
 [HarmonyPatch]
 internal static class ExpandedWorldBoulderPetQuotaPatch
@@ -274,8 +274,8 @@ internal static class ExpandedWorldBoulderPetQuotaPatch
 
 /// <summary>
 /// AddSpikeCaves uses the explicit Small/Medium/Large base sequence 3/5/7 and
-/// then performs vanilla's +Next(2). Only the base is continued to 9/11 for
-/// XL/Huge; THICC retains Huge's width-tier base.
+/// then performs vanilla's +Next(2). Only the base is continued to 9/11/13
+/// for XL/Huge/THICC.
 /// </summary>
 [HarmonyPatch]
 internal static class ExpandedWorldSpikeCaveCountPatch
@@ -316,8 +316,8 @@ internal static class ExpandedWorldSpikeCaveCountPatch
 
 /// <summary>
 /// PlaceChilletEggs uses 6/9/12 by Terraria size. Continue its exact +3 sequence
-/// to 15/18 for XL/Huge while leaving placement search, spacing, Remix depth,
-/// and RNG intact. THICC keeps Huge's width-tier count.
+/// to 15/18/21 for XL/Huge/THICC while leaving placement search, spacing, Remix
+/// depth, and RNG intact.
 /// </summary>
 [HarmonyPatch]
 internal static class ExpandedWorldChilletEggCountPatch

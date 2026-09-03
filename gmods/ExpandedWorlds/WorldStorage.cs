@@ -33,12 +33,13 @@ internal static class ExpandedWorldBackingStorage
 
     public static int RequiredBackingWidth(int logicalWidth)
     {
-        return checked(logicalWidth + 1);
+        // Exact Terraria 1.4.5.8 Main.tile allocation is [maxTilesX,maxTilesY].
+        return logicalWidth;
     }
 
     public static int RequiredBackingHeight(int logicalHeight)
     {
-        return checked(logicalHeight + 1);
+        return logicalHeight;
     }
 
     public static int RequiredSectionColumns(int logicalWidth)
@@ -260,12 +261,11 @@ internal static class ExpandedWorldBackingStoragePatch
 /// <summary>
 /// Two 1.4.5.8 section tables are allocated once during type initialization:
 /// ActiveSections.LastActiveTime and LeashedEntity.BySection. The latter is
-/// static readonly, so trying to resize it later is runtime-dependent and not a
-/// safe contract. Patch both initializers before Terraria's entry point runs and
-/// give them the inexpensive maximum supported THICC section capacity from the
-/// start.
+/// static readonly, so patch both initializers before Terraria's entry point and
+/// allocate the exact vanilla section formula at the maximum supported THICC
+/// dimensions: maxTilesX/200+1 by maxTilesY/150+1.
 ///
-/// Exact client source contains one Main.maxTilesX and one Main.maxTilesY load
+/// Exact 1.4.5.8 source contains one Main.maxTilesX and one Main.maxTilesY load
 /// in each initializer's section-array allocation. Any shape change fails closed.
 /// </summary>
 [HarmonyPatch]
@@ -326,17 +326,19 @@ internal static class ExpandedWorldSectionStorageInitializerPatch
 /// each normal target covers 2000x1800 tiles, while the final allocated column
 /// and row are special 400x600 tails.
 ///
-/// Huge/THICC width reaches physical X target index 8. THICC height reaches
-/// physical Y target index 2. If either physical final index were also the final
-/// allocated index, MapRenderer.checkMap would apply its vanilla short-tail size
-/// and truncate the real 800-tile X tail or 1200-tile Y tail. Allocate one unused
-/// guard target after each expanded physical edge: 10 columns and 4 rows. Current
-/// world loops never create those guard RenderTarget2D objects; they only keep the
-/// real final targets on the ordinary full-size path.
+/// Canonical THICC width 14,800 reaches physical X target index 7 with an
+/// 800-tile tail. If index 7 were also the final allocated column,
+/// MapRenderer.checkMap would apply vanilla's special 400-tile final-column width
+/// and truncate that tail. One unused guard column keeps physical index 7 on the
+/// normal 2,000-wide path, so the backing grid needs 9 columns.
 ///
-/// DrawMap's X loop is separately hard-coded to 0..4 and therefore must be
-/// extended through index 8. Its Y loop is already derived from maxTilesY and
-/// automatically reaches THICC's index 2 once the backing grid has enough rows.
+/// Canonical THICC height 4,200 reaches physical Y target index 2 with an exact
+/// 600-tile tail. That already matches vanilla's special final-row height, so no
+/// vertical guard row is needed: 3 rows are both sufficient and exact.
+///
+/// DrawMap's X loop is separately hard-coded to 0..4 and therefore must extend
+/// through THICC's physical index 7. Its Y loop is already derived from
+/// Main.maxTilesY and naturally reaches index 2.
 /// </summary>
 internal static class ExpandedWorldMapRendererContract
 {
@@ -344,10 +346,10 @@ internal static class ExpandedWorldMapRendererContract
     public const int TextureMaxHeight = 1800;
     public const int VanillaTargetColumns = 5;
     public const int VanillaTargetRows = 2;
-    public const int HugeLastRenderableTargetIndex = ExpandedWorldMath.HugeWidth / TextureMaxWidth;
+    public const int ThiccLastRenderableTargetIndex = ExpandedWorldMath.ThiccWidth / TextureMaxWidth;
     public const int ThiccLastRenderableTargetRowIndex = ExpandedWorldMath.ThiccHeight / TextureMaxHeight;
-    public const int BackingTargetColumns = HugeLastRenderableTargetIndex + 2;
-    public const int BackingTargetRows = ThiccLastRenderableTargetRowIndex + 2;
+    public const int BackingTargetColumns = ThiccLastRenderableTargetIndex + 2;
+    public const int BackingTargetRows = ThiccLastRenderableTargetRowIndex + 1;
 
     public static Type RequireMapRendererType()
     {
@@ -516,7 +518,7 @@ internal static class ExpandedWorldMapRendererDrawPatch
 
         // Exact 1.4.5.8 source contains exactly one integer literal 4 here:
         //   for (int i = 0; i <= 4; i++)
-        // Continue the renderer through Huge/THICC's final physical X target 8.
+        // Continue the renderer through THICC's final physical X target 7.
         // The Y loop is already `j <= Main.maxTilesY / textureMaxHeight`.
         for (int i = 0; i < code.Count; i++)
         {
@@ -525,7 +527,7 @@ internal static class ExpandedWorldMapRendererDrawPatch
 
             ExpandedWorldMapRendererContract.ReplaceWithIntConstant(
                 code[i],
-                ExpandedWorldMapRendererContract.HugeLastRenderableTargetIndex);
+                ExpandedWorldMapRendererContract.ThiccLastRenderableTargetIndex);
             patched++;
         }
 

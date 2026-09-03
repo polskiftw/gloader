@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../../gmods/ExpandedWorlds/GenerationMath.cs" Link="GenerationMath.cs" />
+    <Compile Include="../../gmods/ExpandedWorlds/DiscreteCountContinuity.cs" Link="DiscreteCountContinuity.cs" />
+    <Compile Include="../../gmods/ExpandedWorlds/DiscreteTierContinuity.cs" Link="DiscreteTierContinuity.cs" />
+    <Compile Include="../../gmods/ExpandedWorlds/DungeonTierContinuity.cs" Link="DungeonTierContinuity.cs" />
+    <Compile Include="../../gmods/ExpandedWorlds/GenerationCapacityMath.cs" Link="GenerationCapacityMath.cs" />
+  </ItemGroup>
+</Project>

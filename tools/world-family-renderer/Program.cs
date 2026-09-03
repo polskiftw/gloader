@@ -98,10 +98,16 @@ internal static class SelfTest
             if (reactiveWorldProbe.Title != "World Family Renderer self-test")
                 throw new InvalidOperationException("TEdit ReactiveObject model probe failed.");
 
-            if (WorldPreset.All.Count != 6 || WorldPreset.All[^1].Width != 16800 || WorldPreset.All[^1].Height != 4800)
-                throw new InvalidOperationException("World preset table is invalid.");
+            WorldPreset[] presets = WorldPreset.All.ToArray();
+            if (presets.Length != 6 ||
+                presets[3].Width != 10600 || presets[3].Height != 3000 ||
+                presets[4].Width != 12600 || presets[4].Height != 3600 ||
+                presets[5].Width != 14800 || presets[5].Height != 4200)
+            {
+                throw new InvalidOperationException("World preset table is not synchronized with canonical vanilla-continuity dimensions.");
+            }
 
-            Console.WriteLine($"World Family Renderer self-test OK. Tiles={WorldConfiguration.TileProperties.Count}, Walls={WorldConfiguration.WallProperties.Count}, ReactiveUI=OK");
+            Console.WriteLine($"World Family Renderer self-test OK. Tiles={WorldConfiguration.TileProperties.Count}, Walls={WorldConfiguration.WallProperties.Count}, ReactiveUI=OK, ContinuityPresets=OK");
             return 0;
         }
         catch (Exception ex)

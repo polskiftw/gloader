@@ -30,9 +30,9 @@ If Windows redirected Documents into OneDrive, the GUI uses that redirected Docu
 ## The three sizes
 
 ```text
-XL     12,600 x 2,400
-Huge   16,800 x 2,400
-THICC  16,800 x 4,800
+XL     10,600 x 3,000
+Huge   12,600 x 3,600
+THICC  14,800 x 4,200
 ```
 
 ## Special Seeds
@@ -84,9 +84,9 @@ TerrariaServer does the actual worldgen. The normal Terraria game client is neve
 When TerrariaServer reaches ready state, the World Maker opens the **actual generated `.wld` file** and reads Terraria's binary world header. It checks the saved physical width and height against the preset you picked:
 
 ```text
-XL     must be 12,600 x 2,400
-Huge   must be 16,800 x 2,400
-THICC  must be 16,800 x 4,800
+XL     must be 10,600 x 3,000
+Huge   must be 12,600 x 3,600
+THICC  must be 14,800 x 4,200
 ```
 
 It no longer waits for a particular Expanded Worlds log sentence. If the `.wld` header reports the wrong dimensions, the app refuses to copy it into your Worlds folder.

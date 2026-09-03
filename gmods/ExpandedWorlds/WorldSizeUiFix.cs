@@ -12,14 +12,10 @@ using Terraria.ID;
 using Terraria.UI;
 
 /// <summary>
-/// Retail-client fallback for the New World size row.
-///
-/// Terraria 1.4.5.8 builds the vanilla Small/Medium/Large buttons inside
-/// UIWorldCreation.BuildPage().  The older Expanded Worlds hook tried to recover
-/// that row from AddWorldSizeOptions' runtime argument array.  On the retail
-/// client that path can leave the custom controls absent even though the mod is
-/// otherwise loaded.  This postfix runs after the whole page exists, gets the
-/// row directly from the live vanilla buttons, and installs XL/Huge/THICC there.
+/// Extends Terraria 1.4.5.8's New World size row after BuildPage() has created
+/// the three vanilla controls. The private vanilla size-button array remains
+/// exactly three elements; custom physical presets are carried separately so
+/// Terraria never receives a fake WorldSizeId value.
 /// </summary>
 [HarmonyPatch]
 internal static class ExpandedWorldBuildPageSizeRowFix
@@ -90,13 +86,6 @@ internal static class ExpandedWorldBuildPageSizeRowFix
         UIElement container = ParentProperty.GetValue(first, null) as UIElement;
         if (container == null)
             throw new InvalidOperationException("Terraria's world-size row did not have a live parent container.");
-
-        // The original AddWorldSizeOptions hook may have managed to create its
-        // temporary panels on some clients. Remove those first so this exact
-        // BuildPage-based path is the single visible row.
-        RemoveLegacyButton("_xlButton");
-        RemoveLegacyButton("_hugeButton");
-        RemoveLegacyButton("_thiccButton");
 
         RemoveOwnButton(_xlButton);
         RemoveOwnButton(_hugeButton);
@@ -172,11 +161,11 @@ internal static class ExpandedWorldBuildPageSizeRowFix
         switch (preset)
         {
             case ExpandedWorldPreset.XL:
-                return "XL world: 12,600 x 2,400 tiles.";
+                return "XL world: 10,600 x 3,000 tiles. Vanilla-continuity tier 4.";
             case ExpandedWorldPreset.Huge:
-                return "Huge world: 16,800 x 2,400 tiles.";
+                return "Huge world: 12,600 x 3,600 tiles. Vanilla-continuity tier 5.";
             case ExpandedWorldPreset.Thicc:
-                return "THICC world: 16,800 x 4,800 tiles.";
+                return "THICC world: 14,800 x 4,200 tiles. Vanilla-continuity tier 6.";
             default:
                 return string.Empty;
         }
@@ -282,20 +271,6 @@ internal static class ExpandedWorldBuildPageSizeRowFix
         {
             UIText description = DescriptionTextField.GetValue(owner) as UIText;
             description?.SetText(text ?? string.Empty);
-        }
-        catch
-        {
-        }
-    }
-
-    private static void RemoveLegacyButton(string fieldName)
-    {
-        try
-        {
-            FieldInfo field = AccessTools.Field(typeof(ExpandedWorldCreationSizeRowPatch), fieldName);
-            UIElement button = field?.GetValue(null) as UIElement;
-            RemoveOwnButton(button);
-            field?.SetValue(null, null);
         }
         catch
         {

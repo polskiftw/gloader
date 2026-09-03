@@ -60,8 +60,8 @@ Inside are only:
 
 `03_Large_8400x2400.png`
 
-`04_XL_12600x2400.png`
+`04_XL_10600x3000.png`
 
-`05_Huge_16800x2400.png`
+`05_Huge_12600x3600.png`
 
-`06_THICC_16800x4800.png`
+`06_THICC_14800x4200.png`

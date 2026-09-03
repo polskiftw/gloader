@@ -4,11 +4,11 @@ A native Windows GUI for generating **Expanded Worlds** outside the Terraria cli
 
 ## World sizes
 
-| Preset | Dimensions | Area vs vanilla Large |
-| --- | ---: | ---: |
-| XL | 12,600 × 2,400 | 1.5× |
-| Huge | 16,800 × 2,400 | 2× |
-| THICC | 16,800 × 4,800 | 4× |
+| Tier | Preset | Dimensions | Network sections |
+| ---: | --- | ---: | ---: |
+| 4 | XL | 10,600 × 3,000 | 53 × 20 |
+| 5 | Huge | 12,600 × 3,600 | 63 × 24 |
+| 6 | THICC | 14,800 × 4,200 | 74 × 28 |
 
 All three stay categorically **Large** inside Terraria. Expanded Worlds changes the physical canvas only.
 
