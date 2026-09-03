@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   apply:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout migration branch
@@ -26,49 +26,34 @@ jobs:
           python-version: "3.x"
 
       - name: Apply canonical vanilla-continuity payload
-        shell: pwsh
+        shell: bash
         run: |
-          $ErrorActionPreference = 'Stop'
+          set -euo pipefail
 
-          $parts = @(Get-ChildItem '.migration/payload.*' -File | Sort-Object Name)
-          if ($parts.Count -ne 5) {
-            throw "Expected 5 migration payload chunks, found $($parts.Count)."
-          }
+          mapfile -t parts < <(find .migration -maxdepth 1 -type f -name 'payload.*' | sort)
+          if [[ ${#parts[@]} -ne 5 ]]; then
+            echo "Expected 5 migration payload chunks, found ${#parts[@]}." >&2
+            exit 1
+          fi
 
-          $base64 = ($parts | ForEach-Object { Get-Content $_.FullName -Raw }) -join ''
-          $archive = Join-Path $env:RUNNER_TEMP 'vanilla-continuity-payload.tar.xz'
-          [System.IO.File]::WriteAllBytes($archive, [Convert]::FromBase64String($base64))
+          archive="$RUNNER_TEMP/vanilla-continuity-payload.tar.xz"
+          cat "${parts[@]}" | base64 --decode > "$archive"
 
-          $payloadDir = Join-Path $env:RUNNER_TEMP 'vanilla-continuity-payload'
-          Remove-Item $payloadDir -Recurse -Force -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Path $payloadDir | Out-Null
-          tar -xf $archive -C $payloadDir
-          if ($LASTEXITCODE -ne 0) {
-            throw "Could not extract the migration payload."
-          }
+          payload_dir="$RUNNER_TEMP/vanilla-continuity-payload"
+          rm -rf "$payload_dir"
+          mkdir -p "$payload_dir"
+          tar -xJf "$archive" -C "$payload_dir"
 
-          python (Join-Path $payloadDir 'apply.py')
-          if ($LASTEXITCODE -ne 0) {
-            throw "Continuity migration script failed with exit code $LASTEXITCODE."
-          }
-
-          Remove-Item '.migration' -Recurse -Force
+          python3 "$payload_dir/apply.py"
+          rm -rf .migration
 
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
-          git diff --cached --quiet
-          if ($LASTEXITCODE -eq 0) {
-            throw 'Migration produced no repository changes.'
-          }
-          $global:LASTEXITCODE = 0
+          if git diff --cached --quiet; then
+            echo 'Migration produced no repository changes.' >&2
+            exit 1
+          fi
 
           git commit -m 'Rebase Expanded Worlds on vanilla size continuity'
-          if ($LASTEXITCODE -ne 0) {
-            throw "Could not commit continuity migration."
-          }
-
           git push origin HEAD:fix/vanilla-world-size-continuity
-          if ($LASTEXITCODE -ne 0) {
-            throw "Could not push continuity migration."
-          }
