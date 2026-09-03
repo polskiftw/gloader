@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>gloader.compiler</AssemblyName>
+    <RootNamespace>GLoader.CompilerHost</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <AssemblyVersion>0.1.22.0</AssemblyVersion>
+    <FileVersion>0.1.22.0</FileVersion>
+    <Version>0.1.22-alpha</Version>
+    <InformationalVersion>0.1.22-alpha</InformationalVersion>
+    <Company>gloader</Company>
+    <Product>gloader compiler helper</Product>
+    <Description>Out-of-process C# source compiler helper for gloader mods</Description>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net48" Version="1.0.3" PrivateAssets="All" />
+  </ItemGroup>
+</Project>
