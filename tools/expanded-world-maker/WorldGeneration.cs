@@ -34,30 +34,86 @@ namespace GLoader.ExpandedWorldMaker
         public static readonly WorldPreset Thicc = new WorldPreset("THICC", "THICC", 16800, 4800);
     }
 
-    internal sealed class SecretSeedOption
+    internal sealed class SpecialSeedOption
     {
-        public SecretSeedOption(string configName, string label, string hint)
+        public SpecialSeedOption(string configName, string label, string hint, int serializedValue)
         {
             ConfigName = configName;
             Label = label;
             Hint = hint;
+            SerializedValue = serializedValue;
         }
 
         public string ConfigName { get; private set; }
         public string Label { get; private set; }
         public string Hint { get; private set; }
+        public int SerializedValue { get; private set; }
+
+        public static readonly SpecialSeedOption[] All =
+        {
+            new SpecialSeedOption("notthebees", "Not the Bees", "Bee-heavy world generation.", 2),
+            new SpecialSeedOption("drunk", "Drunk", "Drunk world generation.", 1),
+            new SpecialSeedOption("celebration", "Celebration Mk10", "10th-anniversary world generation.", 8),
+            new SpecialSeedOption("theconstant", "The Constant", "Don't Starve crossover world generation.", 16),
+            new SpecialSeedOption("fortheworthy", "For the Worthy", "Harder world-generation rules.", 4),
+            new SpecialSeedOption("notraps", "No Traps", "The extremely trap-heavy special world. The name is lying.", 64),
+            new SpecialSeedOption("remix", "Remix / Don't Dig Up", "Reversed progression / Remix world generation.", 32),
+            new SpecialSeedOption("zenith", "Zenith / Get Fixed Boi", "Enables Terraria's classic special-seed bundle.", 128),
+            new SpecialSeedOption("skyblock", "Skyblock", "Terraria 1.4.5 Skyblock world generation.", 256)
+        };
+    }
+
+    internal sealed class SecretSeedOption
+    {
+        public SecretSeedOption(string seedText, string label)
+        {
+            SeedText = seedText;
+            Label = label;
+        }
+
+        public string SeedText { get; private set; }
+        public string Label { get; private set; }
+        public string Hint { get { return "Terraria 1.4.5 secret seed code: " + SeedText; } }
 
         public static readonly SecretSeedOption[] All =
         {
-            new SecretSeedOption("notthebees", "Not the Bees", "Bee-heavy world generation."),
-            new SecretSeedOption("drunk", "Drunk", "Drunk world generation."),
-            new SecretSeedOption("celebration", "Celebration Mk10", "10th-anniversary world generation."),
-            new SecretSeedOption("theconstant", "The Constant", "Don't Starve crossover world generation."),
-            new SecretSeedOption("fortheworthy", "For the Worthy", "Harder world-generation rules."),
-            new SecretSeedOption("notraps", "No Traps", "The extremely trap-heavy secret world. The name is lying."),
-            new SecretSeedOption("remix", "Remix / Don't Dig Up", "Reversed progression / Remix world generation."),
-            new SecretSeedOption("zenith", "Zenith / Get Fixed Boi", "Enables Terraria's classic secret-seed bundle."),
-            new SecretSeedOption("skyblock", "Skyblock", "Terraria 1.4.5 Skyblock world generation.")
+            new SecretSeedOption("Abandoned manors", "Abandoned Manors"),
+            new SecretSeedOption("Arachnophobia", "Arachnophobia"),
+            new SecretSeedOption("Beam me up", "Beam Me Up"),
+            new SecretSeedOption("Bring a towel", "Bring a Towel"),
+            new SecretSeedOption("Calm before the storm", "Calm Before the Storm"),
+            new SecretSeedOption("Double daring dangers", "Double Daring Dangers"),
+            new SecretSeedOption("Electric Boogaloo", "Electric Boogaloo"),
+            new SecretSeedOption("Fish Mox", "Fish Mox"),
+            new SecretSeedOption("Hocus pocus", "Hocus Pocus"),
+            new SecretSeedOption("How did I get here", "How Did I Get Here"),
+            new SecretSeedOption("I am error", "I Am Error"),
+            new SecretSeedOption("Invisible plane", "Invisible Plane"),
+            new SecretSeedOption("Jagged rocks", "Jagged Rocks"),
+            new SecretSeedOption("Jingle all the way", "Jingle All the Way"),
+            new SecretSeedOption("Mole people", "Mole People"),
+            new SecretSeedOption("Monochrome", "Monochrome"),
+            new SecretSeedOption("More traps please", "More Traps Please"),
+            new SecretSeedOption("Negative infinity", "Negative Infinity"),
+            new SecretSeedOption("Night of the Living Dead", "Night of the Living Dead"),
+            new SecretSeedOption("Planetoids", "Planetoids"),
+            new SecretSeedOption("Pumpkin season", "Pumpkin Season"),
+            new SecretSeedOption("Purify this", "Purify This"),
+            new SecretSeedOption("Rainbow Road", "Rainbow Road"),
+            new SecretSeedOption("Royale with cheese", "Royale With Cheese"),
+            new SecretSeedOption("Does that sparkle", "Does That Sparkle"),
+            new SecretSeedOption("Too easy", "Too Easy"),
+            new SecretSeedOption("Waterpark", "Waterpark"),
+            new SecretSeedOption("What a horrible night to have a curse", "What a Horrible Night to Have a Curse"),
+            new SecretSeedOption("Winter is coming", "Winter Is Coming"),
+            new SecretSeedOption("X-ray vision", "X-Ray Vision"),
+            new SecretSeedOption("Truck stop", "Truck Stop"),
+            new SecretSeedOption("Sandy britches", "Sandy Britches"),
+            new SecretSeedOption("Save the rainforest", "Save the Rainforest"),
+            new SecretSeedOption("Such great heights", "Such Great Heights"),
+            new SecretSeedOption("The Care Bears Movie", "The Care Bears Movie"),
+            new SecretSeedOption("Toadstool", "Toadstool"),
+            new SecretSeedOption("We don't even test for that", "We Don't Even Test for That")
         };
     }
 
@@ -71,6 +127,7 @@ namespace GLoader.ExpandedWorldMaker
         public string Seed;
         public int Difficulty;
         public WorldPreset Preset;
+        public List<SpecialSeedOption> SpecialSeeds = new List<SpecialSeedOption>();
         public List<SecretSeedOption> SecretSeeds = new List<SecretSeedOption>();
     }
 
@@ -353,12 +410,15 @@ namespace GLoader.ExpandedWorldMaker
 
         private static string BuildServerConfig(GenerationRequest request, string worldPath, int port)
         {
+            bool hasSecretSeeds = request.SecretSeeds != null && request.SecretSeeds.Count > 0;
+            string seedValue = hasSecretSeeds ? BuildCopiedSeedValue(request) : (request.Seed ?? string.Empty).Trim();
+
             var lines = new List<string>
             {
                 "world=" + worldPath,
                 "autocreate=3",
                 "worldname=" + request.WorldName.Trim(),
-                "seed=" + (request.Seed ?? string.Empty).Trim(),
+                "seed=" + seedValue,
                 "difficulty=" + request.Difficulty.ToString(CultureInfo.InvariantCulture),
                 "maxplayers=1",
                 "port=" + port.ToString(CultureInfo.InvariantCulture),
@@ -367,10 +427,76 @@ namespace GLoader.ExpandedWorldMaker
                 "worldrollbackstokeep=0"
             };
 
-            foreach (SecretSeedOption option in request.SecretSeeds)
-                lines.Add("seed_" + option.ConfigName + "=1");
+            // Terraria's dedicated-server config exposes seed_x flags for Special Seeds,
+            // but not for the 1.4.5 Secret Seeds. When no Secret Seed is selected we keep
+            // the simple server-flag path. With Secret Seeds selected, BuildCopiedSeedValue
+            // serializes both sets into Terraria's native copied-seed format instead.
+            if (!hasSecretSeeds && request.SpecialSeeds != null)
+            {
+                foreach (SpecialSeedOption option in request.SpecialSeeds)
+                    lines.Add("seed_" + option.ConfigName + "=1");
+            }
 
             return string.Join(Environment.NewLine, lines) + Environment.NewLine;
+        }
+
+        private static string BuildCopiedSeedValue(GenerationRequest request)
+        {
+            string baseSeed = (request.Seed ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(baseSeed))
+                baseSeed = CreateRandomSeedText();
+
+            int serializedSpecialSeeds = 0;
+            if (request.SpecialSeeds != null)
+            {
+                foreach (SpecialSeedOption option in request.SpecialSeeds)
+                    serializedSpecialSeeds |= option.SerializedValue;
+            }
+
+            var payload = new StringBuilder();
+            foreach (SecretSeedOption option in request.SecretSeeds)
+            {
+                payload.Append(option.SeedText);
+                payload.Append('|');
+            }
+            payload.Append(baseSeed);
+
+            // Terraria's copied-seed parser requires an explicit evil value (1 Corruption,
+            // 2 Crimson) rather than its UI's Random setting. Keep the World Maker's existing
+            // no-evil-picker UI by choosing one deterministically from the effective seed text.
+            int copiedEvil = SelectDeterministicEvil(payload.ToString());
+            int copiedDifficulty = request.Difficulty + 1;
+
+            // The copied-seed format only knows vanilla Small/Medium/Large. Large (3) is used
+            // as the bootstrap size; ExpandedWorlds replaces it with the requested XL/Huge/THICC
+            // dimensions before generation, just as it already does for autocreate=3.
+            return "3." +
+                copiedDifficulty.ToString(CultureInfo.InvariantCulture) + "." +
+                copiedEvil.ToString(CultureInfo.InvariantCulture) + "." +
+                serializedSpecialSeeds.ToString(CultureInfo.InvariantCulture) + "." +
+                payload;
+        }
+
+        private static int SelectDeterministicEvil(string seedPayload)
+        {
+            unchecked
+            {
+                uint hash = 2166136261u;
+                string text = seedPayload ?? string.Empty;
+                for (int i = 0; i < text.Length; i++)
+                {
+                    hash ^= text[i];
+                    hash *= 16777619u;
+                }
+                return (hash & 1u) == 0u ? 1 : 2;
+            }
+        }
+
+        private static string CreateRandomSeedText()
+        {
+            int value = Guid.NewGuid().GetHashCode() & int.MaxValue;
+            if (value == 0) value = 1;
+            return value.ToString(CultureInfo.InvariantCulture);
         }
 
         private static void Validate(GenerationRequest request)

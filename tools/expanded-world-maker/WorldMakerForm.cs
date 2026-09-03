@@ -28,6 +28,7 @@ namespace GLoader.ExpandedWorldMaker
         private TextBox _worldName;
         private TextBox _seed;
         private ComboBox _difficulty;
+        private readonly Dictionary<SpecialSeedOption, CheckBox> _specialChecks = new Dictionary<SpecialSeedOption, CheckBox>();
         private readonly Dictionary<SecretSeedOption, CheckBox> _secretChecks = new Dictionary<SecretSeedOption, CheckBox>();
         private TextBox _outputFolder;
         private TextBox _serverPath;
@@ -69,7 +70,7 @@ namespace GLoader.ExpandedWorldMaker
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 9,
+                RowCount = 10,
                 Padding = new Padding(22, 18, 22, 18),
                 BackColor = _bg,
                 AutoScroll = true
@@ -97,6 +98,7 @@ namespace GLoader.ExpandedWorldMaker
             root.Controls.Add(subtitle);
 
             root.Controls.Add(BuildWorldCard());
+            root.Controls.Add(BuildSpecialSeedCard());
             root.Controls.Add(BuildSecretSeedCard());
             root.Controls.Add(BuildOutputCard());
             root.Controls.Add(BuildRuntimeCard());
@@ -173,21 +175,52 @@ namespace GLoader.ExpandedWorldMaker
             _seed = MakeTextBox();
             _seed.MaxLength = 40;
             body.Controls.Add(_seed, 0, body.RowCount++);
-            body.Controls.Add(MakeLabel("Leave blank for random. Legacy magic seed text still works here; the special-seed switches below can also be combined with any seed.", true), 0, body.RowCount++);
+            body.Controls.Add(MakeLabel("Leave blank for random. You can still type a normal seed; use the checkboxes below for Special Seeds and Secret Seeds.", true), 0, body.RowCount++);
 
             return card;
         }
 
-        private Control BuildSecretSeedCard()
+        private Control BuildSpecialSeedCard()
         {
-            var card = MakeCard("SPECIAL / SECRET SEEDS");
+            var card = MakeCard("SPECIAL SEEDS");
             var body = (TableLayoutPanel)card.Controls[0];
-            body.Controls.Add(MakeLabel("Terraria 1.4.5 server flags. Pick none, one, or combine them.", true), 0, body.RowCount++);
+            body.Controls.Add(MakeLabel("Terraria's 9 named Special Seeds. Pick none, one, or combine them.", true), 0, body.RowCount++);
 
             var grid = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 3, Margin = new Padding(0, 6, 0, 0) };
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.333f));
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.333f));
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.333f));
+            var tip = new ToolTip { AutomaticDelay = 250, AutoPopDelay = 12000 };
+
+            for (int i = 0; i < SpecialSeedOption.All.Length; i++)
+            {
+                SpecialSeedOption option = SpecialSeedOption.All[i];
+                var check = new CheckBox
+                {
+                    AutoSize = true,
+                    Text = option.Label,
+                    ForeColor = _text,
+                    BackColor = _panel,
+                    Margin = new Padding(3, 6, 10, 6)
+                };
+                _specialChecks[option] = check;
+                tip.SetToolTip(check, option.Hint + "  Server flag: seed_" + option.ConfigName + "=1");
+                grid.Controls.Add(check, i % 3, i / 3);
+            }
+
+            body.Controls.Add(grid, 0, body.RowCount++);
+            return card;
+        }
+
+        private Control BuildSecretSeedCard()
+        {
+            var card = MakeCard("SECRET SEEDS (1.4.5)");
+            var body = (TableLayoutPanel)card.Controls[0];
+            body.Controls.Add(MakeLabel("All 37 discovered Secret Seeds. Check them here instead of typing their phrases. They can be combined with each other and with the Special Seeds above.", true), 0, body.RowCount++);
+
+            var grid = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, Margin = new Padding(0, 6, 0, 0) };
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
             var tip = new ToolTip { AutomaticDelay = 250, AutoPopDelay = 12000 };
 
             for (int i = 0; i < SecretSeedOption.All.Length; i++)
@@ -199,11 +232,11 @@ namespace GLoader.ExpandedWorldMaker
                     Text = option.Label,
                     ForeColor = _text,
                     BackColor = _panel,
-                    Margin = new Padding(3, 6, 10, 6)
+                    Margin = new Padding(3, 6, 12, 6)
                 };
                 _secretChecks[option] = check;
-                tip.SetToolTip(check, option.Hint + "  Server flag: seed_" + option.ConfigName + "=1");
-                grid.Controls.Add(check, i % 3, i / 3);
+                tip.SetToolTip(check, option.Hint);
+                grid.Controls.Add(check, i % 2, i / 2);
             }
 
             body.Controls.Add(grid, 0, body.RowCount++);
@@ -520,6 +553,11 @@ namespace GLoader.ExpandedWorldMaker
                 Difficulty = _difficulty.SelectedIndex,
                 Preset = SelectedPreset()
             };
+            foreach (KeyValuePair<SpecialSeedOption, CheckBox> item in _specialChecks)
+            {
+                if (item.Value.Checked)
+                    request.SpecialSeeds.Add(item.Key);
+            }
             foreach (KeyValuePair<SecretSeedOption, CheckBox> item in _secretChecks)
             {
                 if (item.Value.Checked)
@@ -563,6 +601,7 @@ namespace GLoader.ExpandedWorldMaker
             _thicc.Enabled = !busy;
             _outputFolder.Enabled = !busy;
             _serverPath.Enabled = !busy;
+            foreach (CheckBox box in _specialChecks.Values) box.Enabled = !busy;
             foreach (CheckBox box in _secretChecks.Values) box.Enabled = !busy;
         }
 
