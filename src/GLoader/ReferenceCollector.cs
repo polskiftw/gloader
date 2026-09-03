@@ -36,9 +36,17 @@ namespace GLoader
                 AddManagedFiles(paths, Path.Combine(runtimeDirectory, "runtimes"), overwrite: false, recursive: true);
             }
 
-            // Terraria.exe and TerrariaServer.exe both define Terraria.Main. Never feed
-            // the opposite executable to Roslyn or source mods get CS0433 ambiguity.
-            RemoveOppositeTerrariaAssembly(paths, gameAssembly);
+            // The Steam client, TerrariaNetCore client variants, and dedicated server
+            // all define the Terraria namespace. Feed Roslyn only the exact client or
+            // server assembly that is actually running or every Terraria type becomes
+            // ambiguous (for example Terraria.Main in Terraria.dll + TerrariaRelease.dll).
+            RemoveOtherTerrariaAssemblies(paths, gameAssembly);
+
+            // TerrariaNetCore/FNA replaces the legacy XNA implementation while keeping
+            // the Microsoft.Xna.Framework namespaces. If the selected game assembly
+            // targets FNA, never also reference the original Steam XNA assemblies or
+            // mod source can see duplicate Color/Vector2/etc. definitions.
+            RemoveLegacyXnaAssembliesForFna(paths, gameAssembly);
 
             // The exact Terraria assembly selected by the user always wins over a
             // same-named assembly that might already have been visible elsewhere.
@@ -85,23 +93,45 @@ namespace GLoader
                 AddManagedPath(paths, path, overwrite: false);
         }
 
-        private static void RemoveOppositeTerrariaAssembly(
+        private static void RemoveOtherTerrariaAssemblies(
             IDictionary<string, string> paths,
             Assembly gameAssembly)
         {
             var targetName = gameAssembly.GetName().Name;
-            if (string.Equals(targetName, "Terraria", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(targetName, "TerrariaRelease", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(targetName, "TerrariaDebug", StringComparison.OrdinalIgnoreCase))
+            var knownTerrariaAssemblies = new[]
             {
-                paths.Remove("TerrariaServer");
-            }
-            else if (string.Equals(targetName, "TerrariaServer", StringComparison.OrdinalIgnoreCase))
+                "Terraria",
+                "TerrariaRelease",
+                "TerrariaDebug",
+                "TerrariaServer"
+            };
+
+            foreach (var assemblyName in knownTerrariaAssemblies)
             {
-                paths.Remove("Terraria");
-                paths.Remove("TerrariaRelease");
-                paths.Remove("TerrariaDebug");
+                if (!string.Equals(assemblyName, targetName, StringComparison.OrdinalIgnoreCase))
+                    paths.Remove(assemblyName);
             }
+        }
+
+        private static void RemoveLegacyXnaAssembliesForFna(
+            IDictionary<string, string> paths,
+            Assembly gameAssembly)
+        {
+            var usesFna = gameAssembly
+                .GetReferencedAssemblies()
+                .Any(reference => string.Equals(reference.Name, "FNA", StringComparison.OrdinalIgnoreCase));
+
+            if (!usesFna)
+                return;
+
+            var legacyXnaNames = paths.Keys
+                .Where(name =>
+                    name.Equals("Microsoft.Xna.Framework", StringComparison.OrdinalIgnoreCase) ||
+                    name.StartsWith("Microsoft.Xna.Framework.", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+
+            foreach (var name in legacyXnaNames)
+                paths.Remove(name);
         }
 
         private static void AddManagedFiles(
