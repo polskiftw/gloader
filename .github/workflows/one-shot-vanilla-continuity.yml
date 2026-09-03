@@ -45,6 +45,12 @@ jobs:
           tar -xJf "$archive" -C "$payload_dir"
 
           python3 "$payload_dir/apply.py"
+
+          # The Actions token may update ordinary repository contents but may not
+          # create workflow files. Push the source migration first; the permanent
+          # continuity workflow is added immediately afterward through the GitHub
+          # connector using the user's normal repository authorization.
+          rm -f .github/workflows/expanded-worlds-continuity.yml
           rm -rf .migration
 
           git config user.name 'github-actions[bot]'
