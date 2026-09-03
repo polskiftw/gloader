@@ -132,13 +132,16 @@ namespace GLoader
                 {
                     TerrariaStartupState.Prepare(gameAssembly, gameArguments);
 
-                    if (!isServerTarget)
-                    {
-                        HostPlayServerRedirect.Install(
-                            gameAssembly,
-                            Assembly.GetExecutingAssembly().Location,
-                            modsDirectory);
-                    }
+                    // The Host & Play redirect is shipped as raw C# in
+                    // gdeps\coremods rather than embedded inside gloader.exe. Give that
+                    // built-in source mod the two runtime values it needs, then let the
+                    // normal out-of-process source compiler load it like any other mod.
+                    AppDomain.CurrentDomain.SetData(
+                        "GLoader.LoaderPath",
+                        Assembly.GetExecutingAssembly().Location);
+                    AppDomain.CurrentDomain.SetData(
+                        "GLoader.ModsDirectory",
+                        modsDirectory);
 
                     ModRuntime.LoadAll(
                         modsDirectory,
