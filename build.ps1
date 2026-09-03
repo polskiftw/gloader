@@ -4,6 +4,7 @@ $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Project = Join-Path $Root "src\GLoader\GLoader.csproj"
 $CompilerProject = Join-Path $Root "src\GLoader.Compiler\GLoader.Compiler.csproj"
 $WorldMakerProject = Join-Path $Root "tools\expanded-world-maker\ExpandedWorldMaker.csproj"
+$CoreMods = Join-Path $Root "src\GLoader.CoreMods"
 $DistRoot = Join-Path $Root "dist"
 $Dist = Join-Path $DistRoot "gloader"
 $Publish = Join-Path $DistRoot "publish"
@@ -11,6 +12,7 @@ $CompilerPublish = Join-Path $DistRoot "compiler-publish"
 $WorldMakerPublish = Join-Path $DistRoot "world-maker-publish"
 $Deps = Join-Path $Dist "gdeps"
 $CompilerOut = Join-Path $Deps "compiler"
+$CoreModsOut = Join-Path $Deps "coremods"
 $ModsOut = Join-Path $Dist "gmods"
 $ToolsOut = Join-Path $Dist "tools"
 $Mods = Join-Path $Root "gmods"
@@ -54,6 +56,7 @@ if (Test-Path $DistRoot) {
 New-Item $Dist -ItemType Directory -Force | Out-Null
 New-Item $Deps -ItemType Directory -Force | Out-Null
 New-Item $CompilerOut -ItemType Directory -Force | Out-Null
+New-Item $CoreModsOut -ItemType Directory -Force | Out-Null
 New-Item $ModsOut -ItemType Directory -Force | Out-Null
 New-Item $ToolsOut -ItemType Directory -Force | Out-Null
 
@@ -85,6 +88,13 @@ if (-not (Test-Path $CompilerExe)) {
 Get-ChildItem $CompilerPublish -Force | Move-Item -Destination $CompilerOut -Force
 Remove-Item $CompilerPublish -Recurse -Force
 
+# Host & Play's Process.Start/Reflection.Emit redirect is also kept out of the
+# distributed gloader.exe. Ship it as raw C# and compile it only after launch.
+if (-not (Test-Path (Join-Path $CoreMods "HostPlay\Main.cs"))) {
+    throw "Built-in Host Play source mod is missing."
+}
+Copy-Item (Join-Path $CoreMods "*") $CoreModsOut -Recurse -Force
+
 # Keep the separation enforceable: Roslyn must never leak back into the main
 # gdeps probing directory. It belongs only beside the short-lived compiler helper.
 $roslynInMainDeps = @(Get-ChildItem $Deps -File -Filter "Microsoft.CodeAnalysis*.dll" -ErrorAction SilentlyContinue)
@@ -93,6 +103,9 @@ if ($roslynInMainDeps.Count -ne 0) {
 }
 if (-not (Test-Path (Join-Path $CompilerOut "gloader.compiler.exe"))) {
     throw "Packaged compiler helper is missing from gdeps\\compiler."
+}
+if (-not (Test-Path (Join-Path $CoreModsOut "HostPlay\Main.cs"))) {
+    throw "Packaged Host Play core source is missing from gdeps\\coremods."
 }
 
 Copy-Item (Join-Path $Mods "*") $ModsOut -Recurse -Force
