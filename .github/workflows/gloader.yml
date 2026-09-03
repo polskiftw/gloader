@@ -7,6 +7,7 @@ on:
       - "src/**"
       - "gmods/**"
       - "tests/**"
+      - "tools/x64-runtime/**"
       - "build.ps1"
       - "gloader.sln"
       - ".github/workflows/gloader.yml"
@@ -16,6 +17,7 @@ on:
       - "src/**"
       - "gmods/**"
       - "tests/**"
+      - "tools/x64-runtime/**"
       - "build.ps1"
       - "gloader.sln"
       - ".github/workflows/gloader.yml"
@@ -101,6 +103,17 @@ jobs:
         shell: pwsh
         run: ./build.ps1
 
+      - name: Verify x64 gloader host
+        shell: pwsh
+        run: |
+          $output = (& "dist/gloader/gloader.exe" --help 2>&1 | Out-String)
+          if ($LASTEXITCODE -ne 0) {
+            throw "Published gloader host failed to execute. Output:`n$output"
+          }
+          if ($output -notmatch '64-bit raw C# source mod loader') {
+            throw "Published gloader did not report the expected x64/CoreCLR build. Output:`n$output"
+          }
+
       - name: Verify clean Terraria root layout
         shell: pwsh
         run: |
@@ -136,7 +149,7 @@ jobs:
         shell: pwsh
         run: |
           $loader = (Resolve-Path "dist/gloader/gloader.exe").Path
-          $target = (Resolve-Path "tests/HostPlayFixture/bin/Release/net48/Terraria.exe").Path
+          $target = (Resolve-Path "tests/HostPlayFixture/bin/Release/net10.0-windows/Terraria.dll").Path
           $mods = Join-Path $env:RUNNER_TEMP "gloader-hostplay-mods"
           $anglerMod = Join-Path $mods "InfiniteAngler"
 
@@ -216,17 +229,6 @@ jobs:
 
           The decompiler is self-contained for Windows x64 and performs no dependency downloads while you use it. It harvests managed reference DLLs from your own Terraria install and does not include Terraria or decompiled Terraria source.
           "@
-
-          if ($env:RELEASE_VERSION -eq '0.1.20-alpha') {
-            $notes += @"
-
-          ## v0.1.20-alpha highlights
-
-          - Native launcher GUI built directly into `gloader.exe`, including mod enable/disable, Configure, logs, console, vanilla launch, and normal Terraria launch controls.
-          - New included mods/tools added since v0.1.19-alpha, including Difficulty Cycler, Hardcore Save Protection, and World Capture.
-          - Terraria reference/decompiler tooling added for maintaining version-sensitive mods without shipping Terraria binaries or source.
-          "@
-          }
 
           $releaseArgs = @(
             'release', 'create', $tag,
