@@ -20,6 +20,14 @@ namespace GLoader
                 AddAssemblyLocation(paths, assembly, overwrite: false);
             }
 
+            // Terraria's XNA Framework dependencies normally live in the Windows GAC,
+            // not beside Terraria.exe. Merely loading Terraria's managed assembly does
+            // not force those references into the AppDomain before source-mod compilation,
+            // so scanning loaded assemblies/directories alone misses Microsoft.Xna.Framework
+            // and friends. Resolve the target's direct assembly references now and add any
+            // file-backed locations (including GAC paths) to the Roslyn reference manifest.
+            AddReferencedAssemblyLocations(paths, gameAssembly);
+
             // Source mods are allowed to use loader-provided runtime libraries such as
             // Harmony. Those assemblies may not have been JIT-loaded yet when reference
             // collection runs, so scan the loader output directory explicitly.
@@ -38,6 +46,45 @@ namespace GLoader
             return paths.Values
                 .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
+        }
+
+        private static void AddReferencedAssemblyLocations(
+            IDictionary<string, string> paths,
+            Assembly gameAssembly)
+        {
+            foreach (var referenceName in gameAssembly.GetReferencedAssemblies())
+            {
+                try
+                {
+                    var assembly = AppDomain.CurrentDomain.GetAssemblies()
+                        .FirstOrDefault(candidate =>
+                            AssemblyName.ReferenceMatchesDefinition(
+                                candidate.GetName(),
+                                referenceName));
+
+                    if (assembly == null)
+                    {
+                        assembly = Assembly.Load(referenceName);
+                    }
+
+                    AddAssemblyLocation(paths, assembly, overwrite: false);
+                }
+                catch (FileNotFoundException)
+                {
+                    // Some Terraria dependencies are embedded and intentionally have no
+                    // file-backed compiler reference. The embedded resolver can still load
+                    // those later at runtime; only usable on-disk locations belong here.
+                }
+                catch (FileLoadException)
+                {
+                    // Keep collecting the remaining references. Roslyn will report a
+                    // concrete missing-reference diagnostic if source actually needs this one.
+                }
+                catch (BadImageFormatException)
+                {
+                    // Native/wrong-architecture dependency, not a C# metadata reference.
+                }
+            }
         }
 
         private static void RemoveOppositeTerrariaAssembly(
