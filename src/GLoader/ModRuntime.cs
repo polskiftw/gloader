@@ -100,7 +100,23 @@ namespace GLoader
                     Log.Warn("Patch cleanup failed for " + mod.DisplayName + ": " + cleanupEx.Message);
                 }
 
-                Log.Error("Mod failed: " + mod.DisplayName + Environment.NewLine + Unwrap(ex));
+                var unwrapped = Unwrap(ex);
+                Log.Error("Mod failed: " + mod.DisplayName + Environment.NewLine + unwrapped);
+
+                // GLOADER_EXPANDED_WORLD is an explicit contract: the caller is asking
+                // this process to generate an XL/Huge/THICC world through ExpandedWorlds.
+                // Continuing vanilla after that required mod fails silently produces a
+                // perfectly valid 8400x2400 world and wastes the entire generation run.
+                // Fail the process immediately instead so World Maker can surface the log.
+                if (!string.IsNullOrWhiteSpace(
+                        Environment.GetEnvironmentVariable("GLOADER_EXPANDED_WORLD")) &&
+                    string.Equals(mod.Id, "ExpandedWorlds", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        "ExpandedWorlds is required for the requested headless expanded-world generation, but it failed to load. " +
+                        "Terraria will not be started in vanilla fallback mode.",
+                        unwrapped);
+                }
             }
         }
 
