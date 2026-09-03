@@ -25,6 +25,17 @@ namespace FixtureClient
                     return 93;
                 }
 
+                var fnaForceBasePath = Environment.GetEnvironmentVariable("FNA_SDL_FORCE_BASE_PATH");
+                var fnaLegacyForceBasePath = Environment.GetEnvironmentVariable("FNA_SDL2_FORCE_BASE_PATH");
+                Console.WriteLine("[fixture client] FNA_SDL_FORCE_BASE_PATH:  " + fnaForceBasePath);
+                Console.WriteLine("[fixture client] FNA_SDL2_FORCE_BASE_PATH: " + fnaLegacyForceBasePath);
+
+                if (fnaForceBasePath != "1" || fnaLegacyForceBasePath != "1")
+                {
+                    Console.Error.WriteLine("Private runtime did not force FNA to the executable/game root.");
+                    return 94;
+                }
+
                 return 0;
             }
 
