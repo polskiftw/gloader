@@ -52,9 +52,10 @@ When present, gloader selects it automatically. The same managed Terraria build 
 
 Requirements on the Windows machine performing the build:
 
-- the normal Steam Terraria 1.4.5.8 installation, including `Terraria.exe` and `TerrariaServer.exe`
+- your Steam Terraria 1.4.5.8 installation with `Terraria.exe`
 - Git
 - .NET 10 SDK
+- internet access for the pinned upstream source/dependencies and, if your install does not contain `TerrariaServer.exe`, Re-Logic's matching dedicated-server package
 
 From the Terraria directory after extracting gloader:
 
@@ -64,9 +65,9 @@ powershell -ExecutionPolicy Bypass -File .\gdeps\tools\x64-runtime\Build-X64Runt
 
 The script:
 
-1. verifies the local Terraria installation;
+1. verifies the local Terraria client executable;
 2. clones the exact pinned upstream workspace into `%LOCALAPPDATA%\gloader\x64-runtime-workspace`;
-3. decompiles your own Terraria executable;
+3. decompiles your own Terraria executable; the pinned setup fetches the exact 1.4.5.8 server executable from `terraria.org` when needed;
 4. applies only the vanilla cleanup and TerrariaNetCore platform patches;
 5. builds Release with .NET 10/FNA;
 6. redirects the upstream install target into `gdeps\x64-runtime` instead of overwriting Steam Terraria;
