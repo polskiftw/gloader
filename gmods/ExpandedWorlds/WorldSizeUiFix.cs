@@ -143,8 +143,8 @@ internal static class ExpandedWorldBuildPageSizeRowFix
     {
         var button = new UITextPanel<string>(text, 0.8f, false);
         button.Width.Set(widthPixels, widthPercent);
-        button.Height.Set(template.Height.Pixels, template.Height.Percent);
-        button.Top.Set(template.Top.Pixels, template.Top.Percent);
+        button.Height.Set(template.Height.Pixels, template.Height.Precent);
+        button.Top.Set(template.Top.Pixels, template.Top.Precent);
         button.HAlign = index / (float)lastIndex;
         button.SetPadding(0f);
         button.SetSnapPoint("size", index);
