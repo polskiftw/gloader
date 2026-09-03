@@ -1,0 +1,146 @@
+name: Expanded Worlds Continuity
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "gmods/ExpandedWorlds/**"
+      - "tests/ExpandedWorldsMath/**"
+      - "tools/expanded-world-maker/**"
+      - "tools/world-family-renderer/**"
+      - ".github/workflows/expanded-worlds-continuity.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "gmods/ExpandedWorlds/**"
+      - "tests/ExpandedWorldsMath/**"
+      - "tools/expanded-world-maker/**"
+      - "tools/world-family-renderer/**"
+      - ".github/workflows/expanded-worlds-continuity.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  continuity-math:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        shell: pwsh
+        run: dotnet restore tests/ExpandedWorldsMath/ExpandedWorldsMath.csproj
+
+      - name: Build
+        shell: pwsh
+        run: dotnet build tests/ExpandedWorldsMath/ExpandedWorldsMath.csproj -c Release --no-restore
+
+      - name: Run continuity audit
+        shell: pwsh
+        run: dotnet run --project tests/ExpandedWorldsMath/ExpandedWorldsMath.csproj -c Release --no-build
+
+      - name: Reject retired aspect-ratio patches and dimensions
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $retiredFiles = @(
+            'gmods/ExpandedWorlds/DesertScaling.cs',
+            'gmods/ExpandedWorlds/JungleScaling.cs',
+            'gmods/ExpandedWorlds/BeeScaling.cs',
+            'gmods/ExpandedWorlds/FeatureGeometryScaling.cs',
+            'gmods/ExpandedWorlds/SecretSeedScaling.cs',
+            'gmods/ExpandedWorlds/TempleScaling.cs',
+            'gmods/ExpandedWorlds/StatueScaling.cs',
+            'gmods/ExpandedWorlds/DiscreteCountScaling.cs',
+            'gmods/ExpandedWorlds/DiscreteTierScaling.cs'
+          )
+          $present = @($retiredFiles | Where-Object { Test-Path $_ })
+          if ($present.Count -ne 0) {
+            throw "Retired Expanded Worlds patch files returned: $($present -join ', ')"
+          }
+
+          $activeRoots = @('gmods/ExpandedWorlds', 'tools/expanded-world-maker', 'tools/world-family-renderer')
+          $bad = Get-ChildItem $activeRoots -Recurse -File -Include *.cs,*.md,*.csproj |
+            Select-String -Pattern '12600\s*[x×]\s*2400|16800\s*[x×]\s*2400|16800\s*[x×]\s*4800|12600x2400|16800x2400|16800x4800'
+          if ($bad) {
+            throw "Retired expanded dimensions remain:`n$($bad | Out-String)"
+          }
+
+  retail-source-contracts:
+    runs-on: windows-latest
+    env:
+      TERRARIA_URL: ${{ secrets.TERRARIA_BINARY_URL }}
+      TERRARIA_SHA: ${{ secrets.TERRARIA_BINARY_SHA256 }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine source availability
+        id: source
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:TERRARIA_URL)) {
+            'available=false' >> $env:GITHUB_OUTPUT
+            Write-Host 'TERRARIA_BINARY_URL is not configured; skipping private retail source-contract verification.'
+          }
+          else {
+            'available=true' >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Set up .NET 10
+        if: steps.source.outputs.available == 'true'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Prepare decompiler references
+        if: steps.source.outputs.available == 'true'
+        shell: pwsh
+        run: |
+          ./tools/terraria-decompiler/Prepare-References.ps1 `
+            -OutputDirectory "$env:RUNNER_TEMP\terraria-refs" `
+            -WorkDirectory "$env:RUNNER_TEMP\terraria-ref-work"
+
+      - name: Download matching retail input
+        if: steps.source.outputs.available == 'true'
+        id: input
+        shell: pwsh
+        run: |
+          $download = Join-Path $env:RUNNER_TEMP 'TerrariaInput.bin'
+          Invoke-WebRequest -Uri $env:TERRARIA_URL -OutFile $download
+          if (-not [string]::IsNullOrWhiteSpace($env:TERRARIA_SHA)) {
+            $actual = (Get-FileHash -LiteralPath $download -Algorithm SHA256).Hash
+            if ($actual -ne $env:TERRARIA_SHA) {
+              throw "Terraria input SHA-256 mismatch. Expected $env:TERRARIA_SHA, got $actual"
+            }
+          }
+          $bytes = [System.IO.File]::ReadAllBytes($download)
+          $isZip = $bytes.Length -ge 2 -and $bytes[0] -eq 0x50 -and $bytes[1] -eq 0x4B
+          $final = if ($isZip) { Join-Path $env:RUNNER_TEMP 'TerrariaInput.zip' } else { Join-Path $env:RUNNER_TEMP 'Terraria.exe' }
+          Move-Item -LiteralPath $download -Destination $final -Force
+          "path=$final" >> $env:GITHUB_OUTPUT
+
+      - name: Decompile exact retail source
+        if: steps.source.outputs.available == 'true'
+        shell: pwsh
+        run: |
+          ./tools/terraria-decompiler/Invoke-TerrariaDecompile.ps1 `
+            -TerrariaInput '${{ steps.input.outputs.path }}' `
+            -OutputDirectory "$env:RUNNER_TEMP\terraria-source" `
+            -ReferencesDirectory "$env:RUNNER_TEMP\terraria-refs" `
+            -ExpectedVersion '1.4.5.8' `
+            -NoSourceZip
+
+      - name: Verify source contracts
+        if: steps.source.outputs.available == 'true'
+        shell: pwsh
+        run: python tests/ExpandedWorldsMath/verify_source.py "$env:RUNNER_TEMP\terraria-source\source"
