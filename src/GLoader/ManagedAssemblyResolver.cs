@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -116,11 +117,12 @@ namespace GLoader
                             continue;
                         }
 
-                        // Do not use Assembly.LoadFrom here. We are already inside the
-                        // AssemblyResolve event precisely because normal probing did not
-                        // find this file (the release package keeps dependencies in gdeps).
-                        // LoadFrom can re-enter the binder for the same strong-name identity.
-                        return Assembly.Load(File.ReadAllBytes(candidate));
+                        // Keep every managed dependency file-backed. Older builds used
+                        // Assembly.Load(File.ReadAllBytes(...)) here, which creates an
+                        // in-memory assembly with no backing file and is a common malware
+                        // heuristic. LoadFile gives the CLR the exact dependency path
+                        // without turning normal packaged DLLs into fileless payloads.
+                        return Assembly.LoadFile(Path.GetFullPath(candidate));
                     }
                     catch (BadImageFormatException)
                     {
@@ -133,7 +135,7 @@ namespace GLoader
                 }
             }
 
-            return ResolveEmbedded(requested);
+            return ResolveEmbeddedFileBacked(requested);
         }
 
         private static bool IsCompatibleIdentity(AssemblyName candidate, AssemblyName requested)
@@ -218,7 +220,7 @@ namespace GLoader
                 StringComparison.OrdinalIgnoreCase);
         }
 
-        private Assembly ResolveEmbedded(AssemblyName requested)
+        private Assembly ResolveEmbeddedFileBacked(AssemblyName requested)
         {
             if (_resourceAssembly == null || string.IsNullOrWhiteSpace(requested.Name))
             {
@@ -250,6 +252,17 @@ namespace GLoader
 
                 try
                 {
+                    var cacheRoot = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        "gloader",
+                        "cache",
+                        "embedded",
+                        Process.GetCurrentProcess().Id.ToString());
+                    Directory.CreateDirectory(cacheRoot);
+
+                    var safeName = SanitizeFileName(fileName);
+                    var extractedPath = Path.Combine(cacheRoot, safeName);
+
                     using (var stream = _resourceAssembly.GetManifestResourceStream(resourceName))
                     {
                         if (stream == null)
@@ -257,20 +270,29 @@ namespace GLoader
                             continue;
                         }
 
-                        using (var memory = new MemoryStream())
+                        using (var output = new FileStream(
+                            extractedPath,
+                            FileMode.Create,
+                            FileAccess.Write,
+                            FileShare.Read))
                         {
-                            stream.CopyTo(memory);
-                            if (memory.Length == 0)
-                            {
-                                continue;
-                            }
-
-                            var assembly = Assembly.Load(memory.ToArray());
-                            return IsCompatibleIdentity(assembly.GetName(), requested)
-                                ? assembly
-                                : null;
+                            stream.CopyTo(output);
                         }
                     }
+
+                    if (!File.Exists(extractedPath) || new FileInfo(extractedPath).Length == 0)
+                    {
+                        continue;
+                    }
+
+                    var extractedName = AssemblyName.GetAssemblyName(extractedPath);
+                    if (!IsCompatibleIdentity(extractedName, requested))
+                    {
+                        try { File.Delete(extractedPath); } catch { }
+                        continue;
+                    }
+
+                    return Assembly.LoadFile(Path.GetFullPath(extractedPath));
                 }
                 catch (BadImageFormatException)
                 {
@@ -280,9 +302,23 @@ namespace GLoader
                 {
                     // Continue searching other embedded candidates.
                 }
+                catch (IOException)
+                {
+                    // An embedded fallback is optional. Disk/cache failures must not
+                    // hide a normal dependency resolution path.
+                }
             }
 
             return null;
+        }
+
+        private static string SanitizeFileName(string value)
+        {
+            var invalid = Path.GetInvalidFileNameChars();
+            var chars = value
+                .Select(character => invalid.Contains(character) ? '_' : character)
+                .ToArray();
+            return new string(chars);
         }
     }
 }
