@@ -12,23 +12,56 @@ namespace GLoader.CompilerHost
     {
         private static int Main(string[] args)
         {
+            string diagnosticsPath = null;
+
             try
             {
-                if (args == null || args.Length != 2 || !string.Equals(args[0], "--manifest", StringComparison.OrdinalIgnoreCase))
+                if (args == null || args.Length != 4 ||
+                    !string.Equals(args[0], "--manifest", StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(args[2], "--diagnostics", StringComparison.OrdinalIgnoreCase))
                 {
-                    Console.Error.WriteLine("Usage: gloader.compiler.exe --manifest <compile-job.txt>");
                     return 64;
                 }
 
                 var manifestPath = Path.GetFullPath(args[1]);
+                diagnosticsPath = Path.GetFullPath(args[3]);
+
+                try
+                {
+                    if (File.Exists(diagnosticsPath))
+                        File.Delete(diagnosticsPath);
+                }
+                catch
+                {
+                    // A stale diagnostic file is non-fatal; a new error will overwrite it.
+                }
+
                 var job = CompileJob.Load(manifestPath);
                 Compile(job);
                 return 0;
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine(ex.ToString());
+                WriteDiagnosticsSafely(diagnosticsPath, ex.ToString());
                 return 1;
+            }
+        }
+
+        private static void WriteDiagnosticsSafely(string diagnosticsPath, string text)
+        {
+            if (string.IsNullOrWhiteSpace(diagnosticsPath))
+                return;
+
+            try
+            {
+                var directory = Path.GetDirectoryName(diagnosticsPath);
+                if (!string.IsNullOrWhiteSpace(directory))
+                    Directory.CreateDirectory(directory);
+                File.WriteAllText(diagnosticsPath, text ?? string.Empty);
+            }
+            catch
+            {
+                // The exit code still tells the parent process compilation failed.
             }
         }
 
