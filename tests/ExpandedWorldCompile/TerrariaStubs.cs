@@ -72,6 +72,7 @@ namespace Terraria
     public static class WorldGen
     {
         public static RandomStub genRand = new RandomStub();
+        public static bool generatingWorld;
         public static int GetWorldSize() => 2;
         public static void SetWorldSize(int size) { }
         public static void setWorldSize() { }
