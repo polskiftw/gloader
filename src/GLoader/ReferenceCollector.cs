@@ -3,13 +3,12 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using Microsoft.CodeAnalysis;
 
 namespace GLoader
 {
     internal static class ReferenceCollector
     {
-        public static IReadOnlyList<MetadataReference> Collect(
+        public static IReadOnlyList<string> Collect(
             Assembly gameAssembly,
             string gameDirectory,
             string supportDirectory)
@@ -22,38 +21,23 @@ namespace GLoader
             }
 
             // Source mods are allowed to use loader-provided runtime libraries such as
-            // Harmony. Those assemblies may not have been JIT-loaded yet when Roslyn
-            // reference collection runs, so scan the loader output directory explicitly.
+            // Harmony. Those assemblies may not have been JIT-loaded yet when reference
+            // collection runs, so scan the loader output directory explicitly.
             AddManagedFiles(paths, AppDomain.CurrentDomain.BaseDirectory, overwrite: false);
             AddManagedFiles(paths, supportDirectory, overwrite: false);
             AddManagedFiles(paths, gameDirectory, overwrite: false);
 
             // Terraria.exe and TerrariaServer.exe both define Terraria.Main. Never feed
-            // the opposite executable to Roslyn or source mods get CS0433 ambiguity.
+            // the opposite executable to the compiler or source mods get CS0433 ambiguity.
             RemoveOppositeTerrariaAssembly(paths, gameAssembly);
 
             // The exact Terraria assembly selected by the user always wins over a
             // same-named assembly that might already have been visible elsewhere.
             AddAssemblyLocation(paths, gameAssembly, overwrite: true);
 
-            var references = new List<MetadataReference>();
-            foreach (var path in paths.Values.OrderBy(value => value, StringComparer.OrdinalIgnoreCase))
-            {
-                try
-                {
-                    references.Add(MetadataReference.CreateFromFile(path));
-                }
-                catch (BadImageFormatException)
-                {
-                    // Ignore native binaries.
-                }
-                catch (IOException ex)
-                {
-                    Log.Warn("Could not use compiler reference " + path + ": " + ex.Message);
-                }
-            }
-
-            return references;
+            return paths.Values
+                .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
         }
 
         private static void RemoveOppositeTerrariaAssembly(
@@ -108,7 +92,7 @@ namespace GLoader
             }
             catch (NotSupportedException)
             {
-                // Dynamic or byte-loaded assembly with no usable location.
+                // Dynamic assembly with no usable location.
             }
         }
 
@@ -138,6 +122,10 @@ namespace GLoader
             catch (FileNotFoundException)
             {
                 // File disappeared while scanning; ignore it.
+            }
+            catch (IOException ex)
+            {
+                Log.Warn("Could not inspect compiler reference " + path + ": " + ex.Message);
             }
         }
     }
