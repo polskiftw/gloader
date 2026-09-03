@@ -5,7 +5,6 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text;
-using System.Threading.Tasks;
 
 namespace GLoader
 {
@@ -39,12 +38,13 @@ namespace GLoader
             Directory.CreateDirectory(targetCache);
 
             var outputPath = Path.Combine(targetCache, safeId + ".dll");
-            var manifestPath = Path.Combine(
-                targetCache,
-                safeId + ".compile-job-" + Guid.NewGuid().ToString("N") + ".txt");
+            var manifestPath = Path.Combine(targetCache, safeId + ".compile-job.txt");
+            var diagnosticsPath = Path.Combine(targetCache, safeId + ".compile-errors.txt");
 
             try
             {
+                TryDelete(diagnosticsPath);
+
                 WriteManifest(
                     manifestPath,
                     assemblyName,
@@ -53,7 +53,7 @@ namespace GLoader
                     references,
                     isServerTarget);
 
-                RunCompiler(compilerPath, manifestPath, mod.DisplayName);
+                RunCompiler(compilerPath, manifestPath, diagnosticsPath, mod.DisplayName);
 
                 if (!File.Exists(outputPath) || new FileInfo(outputPath).Length == 0)
                 {
@@ -63,21 +63,13 @@ namespace GLoader
                 }
 
                 // The compiled mod is a normal file-backed assembly. Roslyn itself runs
-                // in gloader.compiler.exe and exits before Terraria starts, so the main
-                // loader no longer contains an in-process arbitrary-code compiler.
+                // in gloader.compiler.exe and exits before Terraria starts.
                 return Assembly.LoadFrom(outputPath);
             }
             finally
             {
-                try
-                {
-                    if (File.Exists(manifestPath))
-                        File.Delete(manifestPath);
-                }
-                catch
-                {
-                    // Cleanup must never hide the actual compile/load failure.
-                }
+                TryDelete(manifestPath);
+                TryDelete(diagnosticsPath);
             }
         }
 
@@ -106,41 +98,60 @@ namespace GLoader
             File.WriteAllLines(manifestPath, lines, new UTF8Encoding(false));
         }
 
-        private static void RunCompiler(string compilerPath, string manifestPath, string modDisplayName)
+        private static void RunCompiler(
+            string compilerPath,
+            string manifestPath,
+            string diagnosticsPath,
+            string modDisplayName)
         {
             var start = new ProcessStartInfo
             {
                 FileName = compilerPath,
-                Arguments = "--manifest " + Quote(manifestPath),
+                Arguments =
+                    "--manifest " + Quote(manifestPath) +
+                    " --diagnostics " + Quote(diagnosticsPath),
                 WorkingDirectory = Path.GetDirectoryName(compilerPath),
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true
+                UseShellExecute = false
             };
 
-            using (var process = new Process { StartInfo = start })
+            using (var process = Process.Start(start))
             {
-                if (!process.Start())
+                if (process == null)
                     throw new ModCompilationException(modDisplayName, "Windows could not start gloader.compiler.exe.");
 
-                Task<string> stdoutTask = process.StandardOutput.ReadToEndAsync();
-                Task<string> stderrTask = process.StandardError.ReadToEndAsync();
                 process.WaitForExit();
-                Task.WaitAll(stdoutTask, stderrTask);
-
-                var stdout = stdoutTask.Result == null ? string.Empty : stdoutTask.Result.Trim();
-                var stderr = stderrTask.Result == null ? string.Empty : stderrTask.Result.Trim();
 
                 if (process.ExitCode != 0)
                 {
-                    var details = string.Join(
-                        Environment.NewLine,
-                        new[] { stderr, stdout }.Where(value => !string.IsNullOrWhiteSpace(value)));
+                    string details = null;
+                    try
+                    {
+                        if (File.Exists(diagnosticsPath))
+                            details = File.ReadAllText(diagnosticsPath).Trim();
+                    }
+                    catch
+                    {
+                        // Fall through to the exit-code-only diagnostic below.
+                    }
+
                     if (string.IsNullOrWhiteSpace(details))
                         details = "Compiler helper exited with code " + process.ExitCode + ".";
+
                     throw new ModCompilationException(modDisplayName, details);
                 }
+            }
+        }
+
+        private static void TryDelete(string path)
+        {
+            try
+            {
+                if (File.Exists(path))
+                    File.Delete(path);
+            }
+            catch
+            {
+                // Cleanup must never hide the actual compile/load failure.
             }
         }
 
