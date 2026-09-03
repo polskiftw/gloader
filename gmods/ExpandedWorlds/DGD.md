@@ -131,7 +131,7 @@ reloaded the saved world successfully
 
 The same-size world was also included in a six-size same-seed generation/statistics pass.
 
-The expensive sanity-world generator and six-size comparison are manual workflows. Ordinary Expanded Worlds source pushes no longer automatically manufacture Large/XL/Huge test worlds just because the mod was recompiled.
+Automatic source pushes now run compile/source-contract checks only. The obsolete dedicated world-generation workflows were removed entirely, so rebuilding Expanded Worlds does not manufacture `.wld` files. The six-size real-world/TEdit comparison remains available as a manual-only workflow when an intentional map comparison is wanted.
 
 ## What still needs a literal eyeball test
 
