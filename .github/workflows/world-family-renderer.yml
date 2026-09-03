@@ -65,9 +65,9 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $exe = "tools/world-family-renderer/bin/Release/net10.0-windows/win-x64/publish/WorldFamilyRenderer.exe"
-          & $exe --self-test
-          if ($LASTEXITCODE -ne 0) {
-            throw "World Family Renderer self-test failed with exit code $LASTEXITCODE"
+          $process = Start-Process -FilePath $exe -ArgumentList '--self-test' -Wait -PassThru -NoNewWindow
+          if ($process.ExitCode -ne 0) {
+            throw "World Family Renderer self-test failed with exit code $($process.ExitCode)"
           }
 
       - name: Package portable ZIP
