@@ -42,6 +42,7 @@ jobs:
         shell: pwsh
         run: |
           dotnet restore gloader.sln
+          dotnet restore src/GLoader.Compiler/GLoader.Compiler.csproj
           dotnet restore tools/expanded-world-maker/ExpandedWorldMaker.csproj
           dotnet restore tests/InfiniteAnglerCompile/InfiniteAnglerCompile.csproj
           dotnet restore tests/InfiniteAnglerDebugFixture/InfiniteAnglerDebugFixture.csproj
@@ -59,6 +60,7 @@ jobs:
         shell: pwsh
         run: |
           dotnet build gloader.sln -c Release --no-restore
+          dotnet build src/GLoader.Compiler/GLoader.Compiler.csproj -c Release --no-restore
           dotnet build tools/expanded-world-maker/ExpandedWorldMaker.csproj -c Release --no-restore
           dotnet build tests/InfiniteAnglerCompile/InfiniteAnglerCompile.csproj -c Release --no-restore
           dotnet build tests/InfiniteAnglerDebugFixture/InfiniteAnglerDebugFixture.csproj -c Release --no-restore
@@ -158,6 +160,15 @@ jobs:
             throw "gdeps must contain the published gloader runtime/support files."
           }
 
+          if (-not (Test-Path "dist/gloader/gdeps/compiler/gloader.compiler.exe")) {
+            throw "Published package must contain gdeps/compiler/gloader.compiler.exe."
+          }
+
+          $roslynInMainDeps = @(Get-ChildItem "dist/gloader/gdeps" -File -Filter "Microsoft.CodeAnalysis*.dll")
+          if ($roslynInMainDeps.Count -ne 0) {
+            throw "Roslyn must not be loaded by gloader.exe from main gdeps. Found: $($roslynInMainDeps.Name -join ', ')"
+          }
+
           if (-not (Test-Path "dist/gloader/gmods/Radio/Main.cs")) {
             throw "Published package must contain the General Radio mod."
           }
@@ -174,7 +185,7 @@ jobs:
             throw "VGMRadio is retired and must not be shipped as a separate mod."
           }
 
-      - name: Steam Host & Play + Infinite Angler raw packet-82 integration test
+      - name: Steam Host & Play + source compiler integration test
         shell: pwsh
         run: |
           $loader = (Resolve-Path "dist/gloader/gloader.exe").Path
@@ -196,7 +207,7 @@ jobs:
 
           & $loader --target $target --mods $mods
           if ($LASTEXITCODE -ne 0) {
-            throw "Steam Host & Play / Infinite Angler raw packet-82 fixture failed with exit code $LASTEXITCODE"
+            throw "Steam Host & Play / out-of-process compiler fixture failed with exit code $LASTEXITCODE"
           }
 
       - name: Remove integration-test logs
@@ -230,14 +241,14 @@ jobs:
             gh release upload $tag $asset --clobber --repo "${{ github.repository }}"
             gh release edit $tag `
               --repo "${{ github.repository }}" `
-              --notes "## Downloads`n`n- **gloader-$env:RELEASE_VERSION.zip** — full gloader package. Extract it into the Terraria install folder. It includes the current `gmods`, the native **tools\\ExpandedWorldMaker.exe**, Expanded Worlds XL/Huge/THICC support, and a Large Address Aware gloader.exe for the 32-bit Terraria host.`n- **ExpandedWorldMaker-$env:RELEASE_VERSION.zip** — optional small World Maker overlay when available.`n- **TerrariaDecompilerOffline-win-x64.zip** — optional standalone GUI reference decompiler when available.`n`nThis refresh also keeps loader/runtime assemblies file-backed instead of loading packaged DLL bytes as fileless assemblies, reducing behavior that antivirus ML commonly treats as suspicious."
+              --notes "## Downloads`n`n- **gloader-$env:RELEASE_VERSION.zip** — full gloader package. Extract it into the Terraria install folder. It includes the current `gmods`, the native **tools\\ExpandedWorldMaker.exe**, Expanded Worlds XL/Huge/THICC support, and a Large Address Aware gloader.exe for the 32-bit Terraria host.`n- **ExpandedWorldMaker-$env:RELEASE_VERSION.zip** — optional small World Maker overlay when available.`n- **TerrariaDecompilerOffline-win-x64.zip** — optional standalone GUI reference decompiler when available.`n`nAV cleanup: packaged managed dependencies are file-backed, and raw C# compilation now runs in the short-lived `gdeps\\compiler\\gloader.compiler.exe` helper instead of embedding Roslyn compilation inside `gloader.exe`."
           }
           else {
             gh release create $tag $asset `
               --repo "${{ github.repository }}" `
               --target "${{ github.sha }}" `
               --title "gloader v$env:RELEASE_VERSION" `
-              --notes "Includes the current gmods package, native Expanded World Maker, Expanded Worlds XL/Huge/THICC support, Large Address Aware hosting, and file-backed managed dependency loading."
+              --notes "Includes file-backed loader dependencies, an out-of-process source compiler helper, native Expanded World Maker, and Expanded Worlds XL/Huge/THICC support."
           }
 
       - name: Upload
