@@ -24,13 +24,30 @@ function Invoke-Checked {
         [Parameter(Mandatory = $true)]
         [string]$FilePath,
 
-        [string[]]$Arguments = @()
+        [string[]]$Arguments = @(),
+
+        [string]$WorkingDirectory
     )
 
-    Write-Host "> $FilePath $($Arguments -join ' ')"
-    & $FilePath @Arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "Command failed with exit code ${LASTEXITCODE}: $FilePath $($Arguments -join ' ')"
+    $pushedLocation = $false
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
+            Push-Location $WorkingDirectory
+            $pushedLocation = $true
+        }
+
+        Write-Host "> $FilePath $($Arguments -join ' ')"
+        & $FilePath @Arguments
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        if ($pushedLocation) {
+            Pop-Location
+        }
+    }
+
+    if ($exitCode -ne 0) {
+        throw "Command failed with exit code ${exitCode}: $FilePath $($Arguments -join ' ')"
     }
 }
 
@@ -129,22 +146,40 @@ Invoke-Checked -FilePath "git" -Arguments @(
 Invoke-Checked -FilePath "git" -Arguments @(
     "-C", $WorkspaceDirectory, "submodule", "update", "--init", "--recursive", "--depth", "1")
 
-$SetupCli = Join-Path $WorkspaceDirectory "setup-cli.bat"
-if (-not (Test-Path $SetupCli -PathType Leaf)) {
-    throw "The pinned upstream workspace does not contain setup-cli.bat."
+$SetupProject = Join-Path $WorkspaceDirectory "setup\CLI\Setup.CLI.csproj"
+if (-not (Test-Path $SetupProject -PathType Leaf)) {
+    throw "The pinned upstream workspace does not contain setup/CLI/Setup.CLI.csproj."
+}
+
+function Invoke-UpstreamSetup {
+    param([string[]]$CommandArguments)
+
+    # The pinned v0.3.3 Windows setup-cli.bat has an upstream cwd bug: it
+    # changes into setup/ even though the CLI itself expects paths such as
+    # setup/user.settings and src/WorkspaceInfo.targets to be relative to the
+    # repository root. Its trailing `cd ..` also masks dotnet's non-zero exit
+    # code. Invoke the CLI project directly from the workspace root instead.
+    Invoke-Checked -FilePath "dotnet" -WorkingDirectory $WorkspaceDirectory -Arguments @(
+        "run",
+        "--project", $SetupProject,
+        "-c", "Release",
+        "-p:WarningLevel=0",
+        "-v", "q",
+        "--"
+    ) + $CommandArguments
 }
 
 # Generate source from the user's own installed 1.4.5.8 executable. If the
 # matching TerrariaServer.exe is absent, the pinned upstream setup retrieves
 # that exact server version from Re-Logic's terraria.org dedicated-server API.
-Invoke-Checked -FilePath $SetupCli -Arguments @(
+Invoke-UpstreamSetup -CommandArguments @(
     "decompile", "--no-prompts", "--plain-progress",
     "--terraria-steam-dir", $TerrariaDirectory)
 
 # Apply only the vanilla cleanup stage and platform/runtime port.
-Invoke-Checked -FilePath $SetupCli -Arguments @(
+Invoke-UpstreamSetup -CommandArguments @(
     "patch", "terraria", "--no-prompts", "--strict", "--plain-progress")
-Invoke-Checked -FilePath $SetupCli -Arguments @(
+Invoke-UpstreamSetup -CommandArguments @(
     "patch", "netcore", "--no-prompts", "--strict", "--plain-progress")
 
 $Project = Join-Path $WorkspaceDirectory "src\TerrariaNetCore\Terraria\Terraria.csproj"
