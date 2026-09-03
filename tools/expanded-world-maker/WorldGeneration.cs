@@ -216,8 +216,6 @@ namespace GLoader.ExpandedWorldMaker
         private readonly object _sync = new object();
         private readonly StringBuilder _log = new StringBuilder();
         private Process _process;
-        private volatile bool _sawExpectedVerification;
-        private string _expectedVerification;
 
         public event Action<string> LogLine;
         public event Action<int, string> ProgressChanged;
@@ -244,9 +242,6 @@ namespace GLoader.ExpandedWorldMaker
             string configPath = Path.Combine(jobDir, "serverconfig.txt");
             int port = ReserveLoopbackPort();
             File.WriteAllText(configPath, BuildServerConfig(request, generatedWorld, port), new UTF8Encoding(false));
-
-            _expectedVerification = "verified " + request.Preset.Label + " " + request.Preset.Width + "x" + request.Preset.Height;
-            _sawExpectedVerification = false;
 
             string finalPath = Path.Combine(request.OutputFolder, FileNameTools.MakeWorldFileName(request.WorldName));
             string lastLogPath = Path.Combine(appData, "last-generation.log");
@@ -282,25 +277,41 @@ namespace GLoader.ExpandedWorldMaker
 
                 ReportProgress(98, "Terraria finished generation; validating the saved world...");
 
-                DateTime verifyDeadline = DateTime.UtcNow.AddSeconds(8);
-                while (!_sawExpectedVerification && DateTime.UtcNow < verifyDeadline)
+                int actualWidth = 0;
+                int actualHeight = 0;
+                string validationError = null;
+                bool validHeader = false;
+                DateTime fileDeadline = DateTime.UtcNow.AddSeconds(15);
+                while (!validHeader && DateTime.UtcNow < fileDeadline)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    await Task.Delay(100, cancellationToken).ConfigureAwait(false);
+                    validHeader = TryReadWorldDimensions(generatedWorld, out actualWidth, out actualHeight, out validationError);
+                    if (!validHeader)
+                        await Task.Delay(100, cancellationToken).ConfigureAwait(false);
                 }
 
-                if (!_sawExpectedVerification)
+                if (!validHeader)
                 {
-                    throw new InvalidOperationException(
-                        "The server became ready, but Expanded Worlds did not report the expected " + request.Preset.Label +
-                        " dimensions. The .wld was not copied into your Worlds folder.");
+                    throw new InvalidDataException(
+                        "Terraria reached server-ready state, but the generated .wld header could not be read. " +
+                        (string.IsNullOrWhiteSpace(validationError) ? "No parser detail was available." : validationError));
                 }
-                if (!File.Exists(generatedWorld))
-                    throw new FileNotFoundException("Terraria reached server-ready state but the generated .wld file is missing.", generatedWorld);
+
+                if (actualWidth != request.Preset.Width || actualHeight != request.Preset.Height)
+                {
+                    throw new InvalidDataException(
+                        "Generated .wld has the wrong dimensions. Expected " + request.Preset.Label + " " +
+                        request.Preset.Width + "x" + request.Preset.Height + ", got " +
+                        actualWidth + "x" + actualHeight + ". The .wld was not copied into your Worlds folder.");
+                }
 
                 FileInfo generatedInfo = new FileInfo(generatedWorld);
                 if (generatedInfo.Length <= 0)
                     throw new InvalidDataException("Terraria created an empty .wld file.");
+
+                AppendLog(
+                    "[World Maker] Validated generated .wld header: " + request.Preset.Label + " " +
+                    actualWidth + "x" + actualHeight + ", " + generatedInfo.Length.ToString(CultureInfo.InvariantCulture) + " bytes.");
 
                 StopServerGracefully();
                 Directory.CreateDirectory(request.OutputFolder);
@@ -369,8 +380,6 @@ namespace GLoader.ExpandedWorldMaker
             if (e.Data == null) return;
             AppendLog(e.Data);
             ParseProgress(e.Data);
-            if (e.Data.IndexOf(_expectedVerification, StringComparison.OrdinalIgnoreCase) >= 0)
-                _sawExpectedVerification = true;
         }
 
         private void OnErrorDataReceived(object sender, DataReceivedEventArgs e)
@@ -497,6 +506,98 @@ namespace GLoader.ExpandedWorldMaker
             int value = Guid.NewGuid().GetHashCode() & int.MaxValue;
             if (value == 0) value = 1;
             return value.ToString(CultureInfo.InvariantCulture);
+        }
+
+        private static bool TryReadWorldDimensions(string path, out int width, out int height, out string error)
+        {
+            width = 0;
+            height = 0;
+            error = null;
+
+            try
+            {
+                if (!File.Exists(path))
+                {
+                    error = "The generated .wld does not exist yet.";
+                    return false;
+                }
+
+                using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                using (var reader = new BinaryReader(stream, Encoding.UTF8))
+                {
+                    if (stream.Length < 32)
+                    {
+                        error = "The generated .wld is still too small to contain a complete header.";
+                        return false;
+                    }
+
+                    uint version = reader.ReadUInt32();
+                    if (version < 179)
+                    {
+                        error = "Unsupported Terraria world-file version " + version.ToString(CultureInfo.InvariantCulture) + ".";
+                        return false;
+                    }
+
+                    // Terraria desktop world files from 1.3+ store the section count at 0x18.
+                    // Pointer zero is the byte offset of the normal world header/flags section.
+                    if (version < 140)
+                    {
+                        error = "Unsupported legacy Terraria world-file header.";
+                        return false;
+                    }
+
+                    stream.Position = 0x18L;
+                    short sectionCount = reader.ReadInt16();
+                    if (sectionCount < 2 || sectionCount > 64)
+                    {
+                        error = "The generated .wld has an invalid section count: " + sectionCount.ToString(CultureInfo.InvariantCulture) + ".";
+                        return false;
+                    }
+
+                    int headerOffset = reader.ReadInt32();
+                    if (headerOffset <= stream.Position || headerOffset >= stream.Length)
+                    {
+                        error = "The generated .wld has an invalid header offset: " + headerOffset.ToString(CultureInfo.InvariantCulture) + ".";
+                        return false;
+                    }
+
+                    stream.Position = headerOffset;
+                    reader.ReadString(); // world name
+                    if (version == 179)
+                        reader.ReadInt32();
+                    else
+                        reader.ReadString(); // seed text
+                    reader.ReadUInt64(); // world generator version
+
+                    if (version >= 181)
+                    {
+                        byte[] guid = reader.ReadBytes(16);
+                        if (guid.Length != 16)
+                            throw new EndOfStreamException("World GUID is incomplete.");
+                    }
+
+                    reader.ReadInt32(); // world ID
+                    reader.ReadInt32(); // left world edge
+                    reader.ReadInt32(); // right world edge
+                    reader.ReadInt32(); // top world edge
+                    reader.ReadInt32(); // bottom world edge
+                    height = reader.ReadInt32();
+                    width = reader.ReadInt32();
+
+                    if (width <= 0 || height <= 0)
+                    {
+                        error = "The generated .wld reported invalid dimensions " + width + "x" + height + ".";
+                        return false;
+                    }
+
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                error = ex.GetType().Name + ": " + ex.Message;
+                return false;
+            }
         }
 
         private static void Validate(GenerationRequest request)
