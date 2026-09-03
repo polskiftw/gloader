@@ -43,9 +43,10 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $stage = Join-Path $env:RUNNER_TEMP 'expanded-worlds-package'
           $dest = Join-Path $stage 'ExpandedWorlds'
+          $mod = Join-Path $env:GITHUB_WORKSPACE 'gmods\ExpandedWorlds'
           $zip = Join-Path $env:GITHUB_WORKSPACE 'ExpandedWorlds-x64-ready.zip'
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
-          Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'gmods\ExpandedWorlds\*') -Destination $dest -Recurse -Force
+          Get-ChildItem -LiteralPath $mod | Copy-Item -Destination $dest -Recurse -Force
           if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
           Compress-Archive -LiteralPath $dest -DestinationPath $zip -CompressionLevel Optimal
 
