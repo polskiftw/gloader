@@ -8,6 +8,7 @@ $Publish = Join-Path $DistRoot "publish"
 $Deps = Join-Path $Dist "gdeps"
 $ModsOut = Join-Path $Dist "gmods"
 $Mods = Join-Path $Root "gmods"
+$ExpandedWorlds = Join-Path $Mods "ExpandedWorlds"
 $RuntimeBuilder = Join-Path $Root "tools\x64-runtime"
 $RuntimeBuilderOut = Join-Path $Deps "tools\x64-runtime"
 
@@ -80,6 +81,10 @@ if (Test-Path $DistRoot) {
     Remove-Item $DistRoot -Recurse -Force
 }
 
+if (-not (Test-Path (Join-Path $ExpandedWorlds "Main.cs") -PathType Leaf)) {
+    throw "Expanded Worlds is missing from gmods/ExpandedWorlds."
+}
+
 New-Item $Dist -ItemType Directory -Force | Out-Null
 New-Item $Deps -ItemType Directory -Force | Out-Null
 New-Item $ModsOut -ItemType Directory -Force | Out-Null
@@ -104,7 +109,7 @@ Set-AppHostManagedPath `
 Remove-Item $PublishedAppHost -Force
 
 Get-ChildItem $Publish -Force | Move-Item -Destination $Deps -Force
-Copy-Item (Join-Path $Mods "*") $ModsOut -Recurse -Force
+Copy-Item $ExpandedWorlds $ModsOut -Recurse -Force
 Copy-Item (Join-Path $RuntimeBuilder "*") $RuntimeBuilderOut -Recurse -Force
 Copy-Item (Join-Path $Root "LICENSE.md") (Join-Path $Deps "LICENSE.md") -Force
 Copy-Item (Join-Path $Root "THIRD-PARTY-NOTICES.txt") (Join-Path $Deps "THIRD-PARTY-NOTICES.txt") -Force
@@ -116,8 +121,13 @@ foreach ($required in @("gloader.dll", "gloader.runtimeconfig.json", "gloader.de
     }
 }
 
+$bundledMods = @(Get-ChildItem $ModsOut -Directory | Select-Object -ExpandProperty Name | Sort-Object)
+if (($bundledMods -join ',') -ne "ExpandedWorlds") {
+    throw "Release package must contain only ExpandedWorlds under gmods. Found: $($bundledMods -join ', ')"
+}
+
 Write-Host ""
 Write-Host "Built: $Dist"
 Write-Host "Copy the contents of that folder directly into the Terraria installation folder."
 Write-Host "gloader.exe is the only root file; its managed host and x64 CoreCLR runtime live under gdeps."
-Write-Host "Mods live under gmods. The private Terraria x64 runtime builder is under gdeps\tools\x64-runtime."
+Write-Host "Expanded Worlds is the only bundled gmod. The required private Terraria x64 runtime builder is under gdeps\tools\x64-runtime."
