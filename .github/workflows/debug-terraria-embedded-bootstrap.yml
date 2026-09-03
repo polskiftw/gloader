@@ -1,0 +1,104 @@
+name: Debug Terraria embedded dependency bootstrap
+
+on:
+  push:
+    branches:
+      - fix/terraria-embedded-deps-bootstrap
+
+permissions:
+  contents: read
+
+jobs:
+  real-server-load:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Install XNA 4.0
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msi = Join-Path $env:RUNNER_TEMP 'xnafx40_redist.msi'
+          Invoke-WebRequest 'https://download.microsoft.com/download/5/3/A/53A804C8-EC78-43CD-A0F0-2FB4D45603D3/xnafx40_redist.msi' -OutFile $msi
+          $p = Start-Process msiexec.exe -ArgumentList @('/i', ('"' + $msi + '"'), '/qn', '/norestart') -Wait -PassThru
+          if ($p.ExitCode -notin @(0,3010)) { throw "XNA install failed: $($p.ExitCode)" }
+
+      - name: Build gloader package from this branch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./build.ps1
+          if (-not (Test-Path 'dist/gloader/gloader.exe')) { throw 'Built gloader.exe missing.' }
+          if (-not (Test-Path 'dist/gloader/gmods/ExpandedWorlds/ServerRuntime.cs')) { throw 'Built ExpandedWorlds missing.' }
+
+      - name: Download official TerrariaServer 1.4.5.8
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Join-Path $env:RUNNER_TEMP 'terraria-server-1458.zip'
+          $root = Join-Path $env:RUNNER_TEMP 'terraria-server-1458'
+          Invoke-WebRequest 'https://terraria.org/api/download/pc-dedicated-server/terraria-server-1458.zip' -OutFile $zip
+          Expand-Archive $zip $root -Force
+          $server = Join-Path $root '1458/Windows/TerrariaServer.exe'
+          if (-not (Test-Path $server)) { throw 'Official TerrariaServer.exe missing.' }
+          "TERRARIA_SERVER=$server" >> $env:GITHUB_ENV
+          "SERVER_DIR=$(Split-Path -Parent $server)" >> $env:GITHUB_ENV
+
+      - name: Require ExpandedWorlds to survive Harmony patching
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $loader = (Resolve-Path 'dist/gloader/gloader.exe').Path
+          $mods = Join-Path $env:RUNNER_TEMP 'only-expanded-worlds'
+          New-Item -ItemType Directory -Force $mods | Out-Null
+          Copy-Item 'gmods/ExpandedWorlds' (Join-Path $mods 'ExpandedWorlds') -Recurse -Force
+
+          $stdout = Join-Path $env:RUNNER_TEMP 'server.stdout.txt'
+          $stderr = Join-Path $env:RUNNER_TEMP 'server.stderr.txt'
+          $env:GLOADER_EXPANDED_WORLD = 'THICC'
+          $arguments = @('--target', ('"' + $env:TERRARIA_SERVER + '"'), '--mods', ('"' + $mods + '"'))
+          $p = Start-Process -FilePath $loader -ArgumentList $arguments -WorkingDirectory $env:SERVER_DIR -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+
+          $deadline = (Get-Date).AddSeconds(60)
+          $loaded = $false
+          while ((Get-Date) -lt $deadline) {
+            if (Test-Path $stdout) {
+              $text = Get-Content $stdout -Raw -ErrorAction SilentlyContinue
+              if ($text -match 'Mod failed:\s*ExpandedWorlds') { break }
+              if ($text -match 'Loaded mod:\s*ExpandedWorlds') { $loaded = $true; break }
+            }
+            if ($p.HasExited) { break }
+            Start-Sleep -Milliseconds 250
+          }
+
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+          try { $p.WaitForExit(5000) | Out-Null } catch {}
+          Write-Host '===== STDOUT ====='
+          if (Test-Path $stdout) { Get-Content $stdout }
+          Write-Host '===== STDERR ====='
+          if (Test-Path $stderr) { Get-Content $stderr }
+          Write-Host '===== GLOADER SERVER LOG ====='
+          $log = Join-Path (Resolve-Path 'dist/gloader/gdeps').Path 'logs/gloader-server.log'
+          if (Test-Path $log) { Get-Content $log }
+
+          if (-not $loaded) { throw 'ExpandedWorlds did not reach Loaded mod state on official TerrariaServer 1.4.5.8.' }
+          $all = Get-Content $stdout -Raw
+          if ($all -notmatch 'Loaded Terraria embedded dependency before entry point:\s*ReLogic') { throw 'ReLogic was not resolved from Terraria embedded resources before mod patching.' }
+          if ($all -notmatch '\[Expanded Worlds\].*Dedicated-server headless preset:\s*THICC\s+16800x4800') { throw 'ExpandedWorlds did not observe THICC before patching.' }
+          Write-Host 'PASS: embedded dependency bootstrap is early enough for ExpandedWorlds Harmony patching.'
+
+      - name: Upload probe logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraria-embedded-bootstrap-probe
+          path: |
+            ${{ runner.temp }}/server.stdout.txt
+            ${{ runner.temp }}/server.stderr.txt
+            dist/gloader/gdeps/logs/gloader-server.log
+          if-no-files-found: warn
