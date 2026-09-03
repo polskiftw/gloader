@@ -12,15 +12,24 @@ namespace GLoader
     {
         private readonly string[] _directories;
         private readonly Assembly _resourceAssembly;
+        private readonly AssemblyDependencyResolver _componentResolver;
         private readonly Dictionary<string, string> _managedPaths;
         private readonly Dictionary<string, string> _nativePaths;
 
         public ManagedAssemblyResolver(params string[] directories)
-            : this(null, directories)
+            : this(null, null, directories)
         {
         }
 
         public ManagedAssemblyResolver(Assembly resourceAssembly, params string[] directories)
+            : this(resourceAssembly, null, directories)
+        {
+        }
+
+        private ManagedAssemblyResolver(
+            Assembly resourceAssembly,
+            string componentAssemblyPath,
+            params string[] directories)
         {
             _resourceAssembly = resourceAssembly;
             _directories = directories
@@ -30,11 +39,34 @@ namespace GLoader
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
 
+            if (!string.IsNullOrWhiteSpace(componentAssemblyPath))
+            {
+                try
+                {
+                    var fullComponentPath = Path.GetFullPath(componentAssemblyPath);
+                    if (File.Exists(fullComponentPath))
+                        _componentResolver = new AssemblyDependencyResolver(fullComponentPath);
+                }
+                catch
+                {
+                    // Some test/fixture assemblies do not have component dependency metadata.
+                    // The indexed fallback below remains available for them.
+                }
+            }
+
             _managedPaths = BuildIndex(managed: true);
             _nativePaths = BuildIndex(managed: false);
 
             AssemblyLoadContext.Default.Resolving += Resolve;
             AssemblyLoadContext.Default.ResolvingUnmanagedDll += ResolveUnmanaged;
+        }
+
+        public static ManagedAssemblyResolver ForComponent(
+            string componentAssemblyPath,
+            Assembly resourceAssembly,
+            params string[] directories)
+        {
+            return new ManagedAssemblyResolver(resourceAssembly, componentAssemblyPath, directories);
         }
 
         public void Dispose()
@@ -67,6 +99,28 @@ namespace GLoader
             if (loaded != null)
                 return loaded;
 
+            if (_componentResolver != null)
+            {
+                try
+                {
+                    var dependencyPath = _componentResolver.ResolveAssemblyToPath(requested);
+                    if (!string.IsNullOrWhiteSpace(dependencyPath) && File.Exists(dependencyPath))
+                        return context.LoadFromAssemblyPath(Path.GetFullPath(dependencyPath));
+                }
+                catch (BadImageFormatException)
+                {
+                    // Fall through to the indexed runtime tree.
+                }
+                catch (FileLoadException)
+                {
+                    // Fall through to the indexed runtime tree.
+                }
+                catch (FileNotFoundException)
+                {
+                    // Fall through to the indexed runtime tree.
+                }
+            }
+
             if (_managedPaths.TryGetValue(requested.Name, out var candidate))
             {
                 try
@@ -81,6 +135,10 @@ namespace GLoader
                 {
                     // Fall through to embedded resources.
                 }
+                catch (FileNotFoundException)
+                {
+                    // Fall through to embedded resources.
+                }
             }
 
             return ResolveEmbedded(context, requested);
@@ -90,6 +148,20 @@ namespace GLoader
         {
             if (string.IsNullOrWhiteSpace(unmanagedDllName))
                 return IntPtr.Zero;
+
+            if (_componentResolver != null)
+            {
+                try
+                {
+                    var dependencyPath = _componentResolver.ResolveUnmanagedDllToPath(unmanagedDllName);
+                    if (!string.IsNullOrWhiteSpace(dependencyPath) && File.Exists(dependencyPath))
+                        return NativeLibrary.Load(Path.GetFullPath(dependencyPath));
+                }
+                catch
+                {
+                    // Fall through to the architecture-aware runtime index.
+                }
+            }
 
             var key = Path.GetFileNameWithoutExtension(unmanagedDllName);
             if (!_nativePaths.TryGetValue(key, out var candidate))
@@ -161,9 +233,7 @@ namespace GLoader
         private Dictionary<string, string> BuildIndex(bool managed)
         {
             var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            var nativeScores = managed
-                ? null
-                : new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var scores = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var directory in _directories)
             {
@@ -187,8 +257,16 @@ namespace GLoader
                         try
                         {
                             var name = AssemblyName.GetAssemblyName(path).Name;
-                            if (!string.IsNullOrWhiteSpace(name) && !result.ContainsKey(name))
-                                result[name] = Path.GetFullPath(path);
+                            if (string.IsNullOrWhiteSpace(name))
+                                continue;
+
+                            var fullPath = Path.GetFullPath(path);
+                            var score = GetManagedRuntimeScore(fullPath);
+                            if (!scores.TryGetValue(name, out var currentScore) || score > currentScore)
+                            {
+                                scores[name] = score;
+                                result[name] = fullPath;
+                            }
                         }
                         catch (BadImageFormatException)
                         {
@@ -219,9 +297,9 @@ namespace GLoader
                             var fullPath = Path.GetFullPath(path);
                             var score = GetNativeArchitectureScore(fullPath);
 
-                            if (!nativeScores.TryGetValue(name, out var currentScore) || score > currentScore)
+                            if (!scores.TryGetValue(name, out var currentScore) || score > currentScore)
                             {
-                                nativeScores[name] = score;
+                                scores[name] = score;
                                 result[name] = fullPath;
                             }
                         }
@@ -236,11 +314,46 @@ namespace GLoader
             return result;
         }
 
+        private static int GetManagedRuntimeScore(string path)
+        {
+            var normalized = NormalizePath(path);
+            var separator = Path.DirectorySeparatorChar.ToString();
+            var runtimes = separator + "runtimes" + separator;
+            var winX64 = runtimes + "win-x64" + separator;
+            var winX86 = runtimes + "win-x86" + separator;
+            var win = runtimes + "win" + separator;
+            var lib = separator + "lib" + separator;
+
+            if (Environment.Is64BitProcess)
+            {
+                if (normalized.Contains(winX64, StringComparison.Ordinal))
+                    return 400;
+                if (normalized.Contains(winX86, StringComparison.Ordinal))
+                    return -400;
+            }
+            else
+            {
+                if (normalized.Contains(winX86, StringComparison.Ordinal))
+                    return 400;
+                if (normalized.Contains(winX64, StringComparison.Ordinal))
+                    return -400;
+            }
+
+            if (normalized.Contains(win, StringComparison.Ordinal))
+                return 300;
+
+            if (normalized.Contains(runtimes, StringComparison.Ordinal))
+                return -200;
+
+            if (normalized.Contains(lib, StringComparison.Ordinal))
+                return 100;
+
+            return 0;
+        }
+
         private static int GetNativeArchitectureScore(string path)
         {
-            var normalized = path
-                .Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar)
-                .ToLowerInvariant();
+            var normalized = NormalizePath(path);
             var separator = Path.DirectorySeparatorChar.ToString();
 
             var hasX64 =
@@ -269,6 +382,13 @@ namespace GLoader
             }
 
             return 0;
+        }
+
+        private static string NormalizePath(string path)
+        {
+            return path
+                .Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar)
+                .ToLowerInvariant();
         }
     }
 }
