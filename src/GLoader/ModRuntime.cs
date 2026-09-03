@@ -16,7 +16,8 @@ namespace GLoader
             Assembly gameAssembly,
             string gameDirectory,
             string supportDirectory,
-            bool isServerTarget)
+            bool isServerTarget,
+            string compilerPath)
         {
             var mods = ModDiscovery.Discover(modsDirectory);
             Log.Info("Discovered " + mods.Count + " source mod(s).");
@@ -34,15 +35,16 @@ namespace GLoader
 
             foreach (var mod in mods)
             {
-                LoadOne(mod, references, isServerTarget, compiledModCache);
+                LoadOne(mod, references, isServerTarget, compiledModCache, compilerPath);
             }
         }
 
         private static void LoadOne(
             ModSource mod,
-            System.Collections.Generic.IReadOnlyList<Microsoft.CodeAnalysis.MetadataReference> references,
+            System.Collections.Generic.IReadOnlyList<string> references,
             bool isServerTarget,
-            string compiledModCache)
+            string compiledModCache,
+            string compilerPath)
         {
             var harmonyId = "gloader.mod." + mod.Id;
             Harmony harmony = null;
@@ -54,7 +56,8 @@ namespace GLoader
                     mod,
                     references,
                     isServerTarget,
-                    compiledModCache);
+                    compiledModCache,
+                    compilerPath);
 
                 InvokeOptionalLoad(assembly, GetModDirectory(mod));
 
