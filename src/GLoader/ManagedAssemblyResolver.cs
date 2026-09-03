@@ -1,7 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Runtime.Loader;
 
 namespace GLoader
 {
@@ -9,6 +12,8 @@ namespace GLoader
     {
         private readonly string[] _directories;
         private readonly Assembly _resourceAssembly;
+        private readonly Dictionary<string, string> _managedPaths;
+        private readonly Dictionary<string, string> _nativePaths;
 
         public ManagedAssemblyResolver(params string[] directories)
             : this(null, directories)
@@ -21,20 +26,27 @@ namespace GLoader
             _directories = directories
                 .Where(path => !string.IsNullOrWhiteSpace(path))
                 .Select(Path.GetFullPath)
+                .Where(Directory.Exists)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
 
-            AppDomain.CurrentDomain.AssemblyResolve += Resolve;
+            _managedPaths = BuildIndex(managed: true);
+            _nativePaths = BuildIndex(managed: false);
+
+            AssemblyLoadContext.Default.Resolving += Resolve;
+            AssemblyLoadContext.Default.ResolvingUnmanagedDll += ResolveUnmanaged;
         }
 
         public void Dispose()
         {
-            AppDomain.CurrentDomain.AssemblyResolve -= Resolve;
+            AssemblyLoadContext.Default.Resolving -= Resolve;
+            AssemblyLoadContext.Default.ResolvingUnmanagedDll -= ResolveUnmanaged;
         }
 
-        private Assembly Resolve(object sender, ResolveEventArgs args)
+        private Assembly Resolve(AssemblyLoadContext context, AssemblyName requested)
         {
-            var requested = new AssemblyName(args.Name);
+            if (requested == null || string.IsNullOrWhiteSpace(requested.Name))
+                return null;
 
             var loaded = AppDomain.CurrentDomain.GetAssemblies()
                 .FirstOrDefault(assembly =>
@@ -53,44 +65,50 @@ namespace GLoader
                 });
 
             if (loaded != null)
-            {
                 return loaded;
-            }
 
-            foreach (var directory in _directories)
+            if (_managedPaths.TryGetValue(requested.Name, out var candidate))
             {
-                foreach (var extension in new[] { ".dll", ".exe" })
+                try
                 {
-                    var candidate = Path.Combine(directory, requested.Name + extension);
-                    if (!File.Exists(candidate))
-                    {
-                        continue;
-                    }
-
-                    try
-                    {
-                        return Assembly.LoadFrom(candidate);
-                    }
-                    catch (BadImageFormatException)
-                    {
-                        // Native library; not a managed assembly candidate.
-                    }
-                    catch (FileLoadException)
-                    {
-                        // Continue searching other locations.
-                    }
+                    return context.LoadFromAssemblyPath(candidate);
+                }
+                catch (BadImageFormatException)
+                {
+                    // Indexed file was not a managed assembly after all.
+                }
+                catch (FileLoadException)
+                {
+                    // Fall through to embedded resources.
                 }
             }
 
-            return ResolveEmbedded(requested);
+            return ResolveEmbedded(context, requested);
         }
 
-        private Assembly ResolveEmbedded(AssemblyName requested)
+        private IntPtr ResolveUnmanaged(Assembly requestingAssembly, string unmanagedDllName)
+        {
+            if (string.IsNullOrWhiteSpace(unmanagedDllName))
+                return IntPtr.Zero;
+
+            var key = Path.GetFileNameWithoutExtension(unmanagedDllName);
+            if (!_nativePaths.TryGetValue(key, out var candidate))
+                return IntPtr.Zero;
+
+            try
+            {
+                return NativeLibrary.Load(candidate);
+            }
+            catch
+            {
+                return IntPtr.Zero;
+            }
+        }
+
+        private Assembly ResolveEmbedded(AssemblyLoadContext context, AssemblyName requested)
         {
             if (_resourceAssembly == null || string.IsNullOrWhiteSpace(requested.Name))
-            {
                 return null;
-            }
 
             string[] resourceNames;
             try
@@ -111,30 +129,21 @@ namespace GLoader
                     name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
 
                 if (resourceName == null)
-                {
                     continue;
-                }
 
                 try
                 {
-                    using (var stream = _resourceAssembly.GetManifestResourceStream(resourceName))
-                    {
-                        if (stream == null)
-                        {
-                            continue;
-                        }
+                    using var stream = _resourceAssembly.GetManifestResourceStream(resourceName);
+                    if (stream == null)
+                        continue;
 
-                        using (var memory = new MemoryStream())
-                        {
-                            stream.CopyTo(memory);
-                            if (memory.Length == 0)
-                            {
-                                continue;
-                            }
+                    using var memory = new MemoryStream();
+                    stream.CopyTo(memory);
+                    memory.Position = 0;
+                    if (memory.Length == 0)
+                        continue;
 
-                            return Assembly.Load(memory.ToArray());
-                        }
-                    }
+                    return context.LoadFromStream(memory);
                 }
                 catch (BadImageFormatException)
                 {
@@ -147,6 +156,72 @@ namespace GLoader
             }
 
             return null;
+        }
+
+        private Dictionary<string, string> BuildIndex(bool managed)
+        {
+            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var directory in _directories)
+            {
+                IEnumerable<string> files;
+                try
+                {
+                    files = Directory.EnumerateFiles(directory, "*.*", SearchOption.AllDirectories)
+                        .Where(path =>
+                            path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ||
+                            path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase));
+                }
+                catch
+                {
+                    continue;
+                }
+
+                foreach (var path in files)
+                {
+                    if (managed)
+                    {
+                        try
+                        {
+                            var name = AssemblyName.GetAssemblyName(path).Name;
+                            if (!string.IsNullOrWhiteSpace(name) && !result.ContainsKey(name))
+                                result[name] = Path.GetFullPath(path);
+                        }
+                        catch (BadImageFormatException)
+                        {
+                            // Native file.
+                        }
+                        catch (FileLoadException)
+                        {
+                            // Invalid managed file.
+                        }
+                        catch (FileNotFoundException)
+                        {
+                            // File disappeared while indexing.
+                        }
+                    }
+                    else
+                    {
+                        try
+                        {
+                            AssemblyName.GetAssemblyName(path);
+                            continue;
+                        }
+                        catch (BadImageFormatException)
+                        {
+                            var name = Path.GetFileNameWithoutExtension(path);
+                            if (!string.IsNullOrWhiteSpace(name) && !result.ContainsKey(name))
+                                result[name] = Path.GetFullPath(path);
+                        }
+                        catch
+                        {
+                            // Ignore unreadable files.
+                        }
+                    }
+                }
+            }
+
+            return result;
         }
     }
 }
