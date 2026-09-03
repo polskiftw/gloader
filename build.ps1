@@ -2,11 +2,14 @@ $ErrorActionPreference = "Stop"
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Project = Join-Path $Root "src\GLoader\GLoader.csproj"
+$WorldMakerProject = Join-Path $Root "tools\expanded-world-maker\ExpandedWorldMaker.csproj"
 $DistRoot = Join-Path $Root "dist"
 $Dist = Join-Path $DistRoot "gloader"
 $Publish = Join-Path $DistRoot "publish"
+$WorldMakerPublish = Join-Path $DistRoot "world-maker-publish"
 $Deps = Join-Path $Dist "gdeps"
 $ModsOut = Join-Path $Dist "gmods"
+$ToolsOut = Join-Path $Dist "tools"
 $Mods = Join-Path $Root "gmods"
 
 function Enable-LargeAddressAware([string]$Path) {
@@ -48,6 +51,7 @@ if (Test-Path $DistRoot) {
 New-Item $Dist -ItemType Directory -Force | Out-Null
 New-Item $Deps -ItemType Directory -Force | Out-Null
 New-Item $ModsOut -ItemType Directory -Force | Out-Null
+New-Item $ToolsOut -ItemType Directory -Force | Out-Null
 
 dotnet publish $Project -c Release -o $Publish
 
@@ -67,7 +71,20 @@ Copy-Item (Join-Path $Root "LICENSE.md") (Join-Path $Deps "LICENSE.md") -Force
 Copy-Item (Join-Path $Root "THIRD-PARTY-NOTICES.txt") (Join-Path $Deps "THIRD-PARTY-NOTICES.txt") -Force
 Remove-Item $Publish -Recurse -Force
 
+# Expanded World Maker is part of the normal package, not a post-release overlay.
+# This prevents a later gloader refresh from accidentally publishing a ZIP that
+# drops the GUI world generator.
+dotnet publish $WorldMakerProject -c Release -o $WorldMakerPublish
+$WorldMakerExe = Join-Path $WorldMakerPublish "ExpandedWorldMaker.exe"
+if (-not (Test-Path $WorldMakerExe)) {
+    throw "ExpandedWorldMaker.exe was not produced."
+}
+Copy-Item $WorldMakerExe (Join-Path $ToolsOut "ExpandedWorldMaker.exe") -Force
+Copy-Item (Join-Path $Root "tools\expanded-world-maker\README.md") (Join-Path $ToolsOut "ExpandedWorldMaker.README.md") -Force
+Copy-Item (Join-Path $Root "tools\expanded-world-maker\DGD.md") (Join-Path $ToolsOut "ExpandedWorldMaker.DGD.md") -Force
+Remove-Item $WorldMakerPublish -Recurse -Force
+
 Write-Host ""
 Write-Host "Built: $Dist"
 Write-Host "Copy the contents of that folder directly into the Terraria installation folder."
-Write-Host "gloader.exe lives in the game root, mods live under gmods, and loader dependencies live under gdeps."
+Write-Host "gloader.exe lives in the game root, mods live under gmods, dependencies under gdeps, and tools under tools."
