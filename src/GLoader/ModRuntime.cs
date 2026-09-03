@@ -103,18 +103,20 @@ namespace GLoader
                 var unwrapped = Unwrap(ex);
                 Log.Error("Mod failed: " + mod.DisplayName + Environment.NewLine + unwrapped);
 
-                // GLOADER_EXPANDED_WORLD is an explicit contract: the caller is asking
-                // this process to generate an XL/Huge/THICC world through ExpandedWorlds.
-                // Continuing vanilla after that required mod fails silently produces a
-                // perfectly valid 8400x2400 world and wastes the entire generation run.
-                // Fail the process immediately instead so World Maker can surface the log.
-                if (!string.IsNullOrWhiteSpace(
-                        Environment.GetEnvironmentVariable("GLOADER_EXPANDED_WORLD")) &&
-                    string.Equals(mod.Id, "ExpandedWorlds", StringComparison.OrdinalIgnoreCase))
+                // ExpandedWorlds is not a cosmetic/optional source mod. If it is present
+                // but fails to compile or patch, continuing into vanilla Terraria makes
+                // expanded .wld files fail with Terraria's generic "Load failed" screen,
+                // and headless generation can silently fall back to a vanilla Large world.
+                // Fail closed everywhere so the real mod error is surfaced immediately.
+                if (string.Equals(mod.Id, "ExpandedWorlds", StringComparison.OrdinalIgnoreCase))
                 {
+                    bool headlessGenerationRequested = !string.IsNullOrWhiteSpace(
+                        Environment.GetEnvironmentVariable("GLOADER_EXPANDED_WORLD"));
+
                     throw new InvalidOperationException(
-                        "ExpandedWorlds is required for the requested headless expanded-world generation, but it failed to load. " +
-                        "Terraria will not be started in vanilla fallback mode.",
+                        headlessGenerationRequested
+                            ? "ExpandedWorlds is required for the requested headless expanded-world generation, but it failed to load. Terraria will not be started in vanilla fallback mode."
+                            : "ExpandedWorlds is installed but failed to load. Terraria will not be started without it because expanded .wld files cannot be safely loaded in vanilla fallback mode.",
                         unwrapped);
                 }
             }
