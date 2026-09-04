@@ -1,6 +1,7 @@
 #if GLOADER_SERVER
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -226,6 +227,35 @@ internal static class InfiniteAnglerDebugQuestFishRuntime
             var modsDirectory = (args[index + 1] ?? string.Empty).Trim().Trim('"');
             if (!string.IsNullOrWhiteSpace(modsDirectory))
                 return Path.Combine(modsDirectory, "InfiniteAngler");
+        }
+
+        // The x64 apphost intentionally keeps gloader.exe in the Terraria root while
+        // its managed entry assembly lives under gdeps/. A lazy helper must therefore
+        // anchor the default gmods path to the actual process executable, not assume
+        // AppDomain.BaseDirectory identifies the public launcher directory.
+        try
+        {
+            using (var process = Process.GetCurrentProcess())
+            {
+                var processPath = process.MainModule == null ? null : process.MainModule.FileName;
+                var processDirectory = string.IsNullOrWhiteSpace(processPath)
+                    ? null
+                    : Path.GetDirectoryName(processPath);
+
+                if (!string.IsNullOrWhiteSpace(processDirectory))
+                {
+                    var defaultModDirectory = Path.Combine(
+                        processDirectory,
+                        "gmods",
+                        "InfiniteAngler");
+
+                    if (Directory.Exists(defaultModDirectory))
+                        return defaultModDirectory;
+                }
+            }
+        }
+        catch
+        {
         }
 
         return Path.Combine(
