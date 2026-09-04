@@ -217,6 +217,73 @@ internal static class ExpandedWorldMath
 }
 
 /// <summary>
+/// Pure map-target math for Terraria 1.4.5.8's MapRenderer. Logical target counts
+/// are ceil(width/2000) x ceil(height/1800). The retail renderer makes its final
+/// allocated column only 400 pixels wide and final row only 600 high, so a guard
+/// column/row is required whenever the physical final target does not have that
+/// exact special-tail extent. Guard targets preserve retail checkMap semantics;
+/// they do not add world tiles.
+/// </summary>
+internal static class ExpandedWorldMapMath
+{
+    public const int TextureMaxWidth = 2000;
+    public const int TextureMaxHeight = 1800;
+    public const int RetailFinalColumnWidth = 400;
+    public const int RetailFinalRowHeight = 600;
+
+    public static int LogicalTargetColumns(int width)
+    {
+        if (width <= 0)
+            throw new ArgumentOutOfRangeException(nameof(width));
+        return checked((width - 1) / TextureMaxWidth + 1);
+    }
+
+    public static int LogicalTargetRows(int height)
+    {
+        if (height <= 0)
+            throw new ArgumentOutOfRangeException(nameof(height));
+        return checked((height - 1) / TextureMaxHeight + 1);
+    }
+
+    public static int PhysicalFinalColumnWidth(int width)
+    {
+        int remainder = width % TextureMaxWidth;
+        return remainder == 0 ? TextureMaxWidth : remainder;
+    }
+
+    public static int PhysicalFinalRowHeight(int height)
+    {
+        int remainder = height % TextureMaxHeight;
+        return remainder == 0 ? TextureMaxHeight : remainder;
+    }
+
+    public static bool NeedsGuardColumn(int width)
+    {
+        return PhysicalFinalColumnWidth(width) != RetailFinalColumnWidth;
+    }
+
+    public static bool NeedsGuardRow(int height)
+    {
+        return PhysicalFinalRowHeight(height) != RetailFinalRowHeight;
+    }
+
+    public static int BackingTargetColumns(int width)
+    {
+        return checked(LogicalTargetColumns(width) + (NeedsGuardColumn(width) ? 1 : 0));
+    }
+
+    public static int BackingTargetRows(int height)
+    {
+        return checked(LogicalTargetRows(height) + (NeedsGuardRow(height) ? 1 : 0));
+    }
+
+    public static int LastRenderableTargetColumn(int width)
+    {
+        return LogicalTargetColumns(width) - 1;
+    }
+}
+
+/// <summary>
 /// One generation context is shared by client and server builds. Every
 /// source-backed discrete continuation and capacity guard therefore sees the
 /// same selected physical tier regardless of how Terraria was launched.
