@@ -10,11 +10,11 @@ using Terraria.UI;
 /// Last-resort retail UI guard for Expanded Worlds.
 ///
 /// UIWorldCreation normally builds its page after gloader installs Harmony
-/// patches, so WorldSizeUiFix.cs can inject XL/Huge/THICC from BuildPage(). If
-/// Terraria has already constructed that UI state before the mod patch set is
-/// installed, however, the BuildPage postfix cannot retroactively run. Draw is
-/// guaranteed to execute when the New World page is actually shown, so this
-/// guard performs one idempotent recovery attempt for that live UI instance.
+/// patches, so WorldSizeUiFix.cs can inject THICC through THICC 11 from
+/// BuildPage(). If Terraria has already constructed that UI state before the mod
+/// patch set is installed, however, the BuildPage postfix cannot retroactively
+/// run. Draw is guaranteed to execute when the New World page is actually shown,
+/// so this guard performs one idempotent recovery attempt for that live instance.
 /// </summary>
 [HarmonyPatch]
 internal static class ExpandedWorldCreationDrawGuardPatch
@@ -28,8 +28,8 @@ internal static class ExpandedWorldCreationDrawGuardPatch
     private static readonly FieldInfo OwnerField =
         AccessTools.Field(typeof(ExpandedWorldBuildPageSizeRowFix), "_owner");
 
-    private static readonly FieldInfo XlButtonField =
-        AccessTools.Field(typeof(ExpandedWorldBuildPageSizeRowFix), "_xlButton");
+    private static readonly FieldInfo ExpandedButtonsField =
+        AccessTools.Field(typeof(ExpandedWorldBuildPageSizeRowFix), "_expandedButtons");
 
     private static readonly PropertyInfo ParentProperty =
         AccessTools.Property(typeof(UIElement), "Parent");
@@ -82,7 +82,7 @@ internal static class ExpandedWorldCreationDrawGuardPatch
                     "Expanded Worlds injected a size row, but it was not attached to the live UIWorldCreation instance.");
             }
 
-            Console.WriteLine("[Expanded Worlds] Draw guard verified the custom world-size row on the live New World screen.");
+            Console.WriteLine("[Expanded Worlds] Draw guard verified the THICC world-size row on the live New World screen.");
         }
         catch (TargetInvocationException ex)
         {
@@ -97,7 +97,7 @@ internal static class ExpandedWorldCreationDrawGuardPatch
 
     private static bool IsInstalledFor(UIWorldCreation owner)
     {
-        if (owner == null || OwnerField == null || XlButtonField == null || ParentProperty == null)
+        if (owner == null || OwnerField == null || ExpandedButtonsField == null || ParentProperty == null)
             return false;
 
         try
@@ -106,8 +106,18 @@ internal static class ExpandedWorldCreationDrawGuardPatch
             if (!ReferenceEquals(owner, installedOwner))
                 return false;
 
-            UIElement button = XlButtonField.GetValue(null) as UIElement;
-            return button != null && ParentProperty.GetValue(button, null) != null;
+            Array buttons = ExpandedButtonsField.GetValue(null) as Array;
+            if (buttons == null || buttons.Length != ExpandedWorldMath.ExpandedPresetCount)
+                return false;
+
+            for (int i = 0; i < buttons.Length; i++)
+            {
+                UIElement button = buttons.GetValue(i) as UIElement;
+                if (button == null || ParentProperty.GetValue(button, null) == null)
+                    return false;
+            }
+
+            return true;
         }
         catch
         {
