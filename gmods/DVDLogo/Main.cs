@@ -7,6 +7,15 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Terraria;
 
+public static class Mod
+{
+    public static void Load()
+    {
+        var modDirectory = AppDomain.CurrentDomain.GetData("GLoader.ModDirectory") as string;
+        DvdLogoScreensaver.Initialize(modDirectory);
+    }
+}
+
 internal static class DvdLogoScreensaver
 {
     private const float Speed = 190f;
@@ -28,6 +37,13 @@ internal static class DvdLogoScreensaver
     private static double _lastSeconds = -1.0;
     private static bool _initialized;
     private static bool _disabled;
+    private static string _modDirectory;
+
+    internal static void Initialize(string modDirectory)
+    {
+        if (!string.IsNullOrWhiteSpace(modDirectory))
+            _modDirectory = Path.GetFullPath(modDirectory);
+    }
 
     [HarmonyPatch(typeof(Main), "DrawInterface_33_MouseText")]
     private static class DrawPatch
@@ -89,10 +105,14 @@ internal static class DvdLogoScreensaver
         if (_logo != null)
             return;
 
-        var modDirectory = Path.Combine(
-            AppDomain.CurrentDomain.BaseDirectory,
-            "gmods",
-            "DVDLogo");
+        var modDirectory = _modDirectory;
+        if (string.IsNullOrWhiteSpace(modDirectory))
+        {
+            modDirectory = Path.Combine(
+                AppDomain.CurrentDomain.BaseDirectory,
+                "gmods",
+                "DVDLogo");
+        }
 
         using (var stream = File.OpenRead(Path.Combine(modDirectory, "dvd-logo.png")))
             _logo = Texture2D.FromStream(graphicsDevice, stream);
