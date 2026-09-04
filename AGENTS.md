@@ -14,3 +14,13 @@ Before choosing what to use, inspect all relevant sources of newer work, includi
 Use the newest relevant state of the work, even when it is unmerged, unless Claire explicitly names a specific release, tag, branch, commit, or other fixed version.
 
 **Thus is the law: "latest" means latest across the whole repository, not merely latest merged.**
+
+# The Second Commandment
+
+> **Thou shalt not overthink the six seed problem.**
+
+Whenever Claire refers to the **six seed problem**, first read and follow:
+
+`gmods/ExpandedWorlds/SIX-SEED-PROBLEM.md`
+
+That document is the canonical definition of the task.
