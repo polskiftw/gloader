@@ -69,7 +69,8 @@ jobs:
             throw "Retired Expanded Worlds patch files returned: $($present -join ', ')"
           }
 
-          $activeRoots = @('gmods/ExpandedWorlds', 'tools/expanded-world-maker', 'tools/world-family-renderer')
+          $candidateRoots = @('gmods/ExpandedWorlds', 'tools/expanded-world-maker', 'tools/world-family-renderer')
+          $activeRoots = @($candidateRoots | Where-Object { Test-Path $_ -PathType Container })
           $bad = Get-ChildItem $activeRoots -Recurse -File -Include *.cs,*.md,*.csproj |
             Select-String -Pattern '12600\s*[x×]\s*2400|16800\s*[x×]\s*2400|12600x2400|16800x2400'
           if ($bad) {
