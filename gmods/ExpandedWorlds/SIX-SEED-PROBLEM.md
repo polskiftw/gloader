@@ -2,7 +2,7 @@
 
 The **six seed problem** means:
 
-Use **one seed number** across **all six world sizes**, generate all six worlds, render them as PNGs, and produce **one final comparison image** showing all six results.
+Use **one seed number** across **all fourteen world sizes**, generate all fourteen worlds, render them as PNGs, and produce **one final comparison image** showing all fourteen results.
 
 ## Critical loading requirement
 
@@ -19,19 +19,19 @@ In short: **ExpandedWorlds first, world-load callback second, world generation t
 If Claire does **not** provide a seed:
 
 1. Pick one random seed number.
-2. Use that exact same seed for all six world sizes.
-3. Generate all six worlds fresh.
-4. Render all six worlds to PNG.
-5. Combine the six renders into one comparison image.
+2. Use that exact same seed for all fourteen world sizes.
+3. Generate all fourteen worlds fresh.
+4. Render all fourteen worlds to PNG.
+5. Combine the fourteen renders into one comparison image.
 
 ## Supplied-seed mode
 
 If Claire provides a seed:
 
-1. Use that exact seed for all six world sizes.
-2. Generate all six worlds fresh.
-3. Render all six worlds to PNG.
-4. Combine the six renders into one comparison image.
+1. Use that exact seed for all fourteen world sizes.
+2. Generate all fourteen worlds fresh.
+3. Render all fourteen worlds to PNG.
+4. Combine the fourteen renders into one comparison image.
 
 ## Rules
 
@@ -44,14 +44,22 @@ If Claire provides a seed:
 
 ## Required world sizes
 
-Generate exactly these six sizes:
+Generate exactly these fourteen sizes:
 
 1. **Small** — 4200 x 1200
 2. **Medium** — 6400 x 1800
 3. **Large** — 8400 x 2400
-4. **XL** — 10600 x 3000
-5. **Huge** — 12600 x 3600
-6. **THICC** — 14800 x 4200
+4. **THICC** — 10600 x 3000
+5. **THICC 2** — 12600 x 3600
+6. **THICC 3** — 14800 x 4200
+7. **THICC 4** — 16800 x 4800
+8. **THICC 5** — 19000 x 5400
+9. **THICC 6** — 21000 x 6000
+10. **THICC 7** — 23200 x 6600
+11. **THICC 8** — 25200 x 7200
+12. **THICC 9** — 27400 x 7800
+13. **THICC 10** — 29400 x 8400
+14. **THICC 11** — 31600 x 9000
 
 ## Proven runner workflow
 
@@ -63,13 +71,13 @@ This is the known-good path from the successful seed `1337420` run. Prefer this 
 4. Build the current ExpandedWorlds dedicated-server bootstrap against that Linux/FNA server bundle.
 5. Inject the bootstrap call into `Terraria.WorldGen.serverLoadWorld()` immediately **before** the code takes/references `serverLoadWorldCallBack` (the `ldftn` site used by the proven patcher).
 6. Run one isolated GitHub Actions job per world size so each generator gets its own runner memory budget.
-7. Pass the seed literally through Terraria's server config. For expanded sizes, set `GLOADER_EXPANDED_WORLD` to `XL`, `HUGE`, or `THICC`; leave it unset for Small/Medium/Large.
+7. Pass the seed literally through Terraria's server config. For expanded sizes, set `GLOADER_EXPANDED_WORLD` to `THICC`, `THICC2`, `THICC3`, `THICC4`, `THICC5`, `THICC6`, `THICC7`, `THICC8`, `THICC9`, `THICC10`, or `THICC11`; leave it unset for Small/Medium/Large.
 8. Require proof that ExpandedWorlds loaded early and `Environment.Is64BitProcess` is `True`.
-9. Require the expanded generation completion log for XL/Huge/THICC at the exact expected dimensions. Do not accept a run merely because a `.wld` file exists.
+9. Require the expanded generation completion log for THICC through THICC 11 at the exact expected dimensions. Do not accept a run merely because a `.wld` file exists.
 10. Upload each fresh `.wld` separately.
-11. In the compose job, download all six worlds and independently verify every world header/dimension before rendering.
+11. In the compose job, download all fourteen worlds and independently verify every world header/dimension before rendering.
 12. Render with the existing **pinned TEdit render-only compositor** using the full pinned TEdit palette.
-13. Produce the six individual PNGs plus one final combined comparison PNG.
+13. Produce the fourteen individual PNGs plus one final combined comparison PNG.
 
 ## Do not repeat these dead ends
 
@@ -85,31 +93,41 @@ The successful run established several things that should be treated as settled 
 
 A six-seed job is accepted only when all of these are true:
 
-- The exact requested/random seed was used for all six worlds.
-- All six worlds were generated fresh.
+- The exact requested/random seed was used for all fourteen worlds.
+- All fourteen worlds were generated fresh.
 - ExpandedWorlds reports successful early load.
 - The generator process reports **64-bit**.
 - Small is 4200 x 1200.
 - Medium is 6400 x 1800.
 - Large is 8400 x 2400.
-- XL is 10600 x 3000.
-- Huge is 12600 x 3600.
-- THICC is 14800 x 4200.
-- The compositor independently verifies all six world dimensions before rendering.
-- All six renders use the pinned TEdit palette implementation.
+- THICC is 10600 x 3000.
+- THICC 2 is 12600 x 3600.
+- THICC 3 is 14800 x 4200.
+- THICC 4 is 16800 x 4800.
+- THICC 5 is 19000 x 5400.
+- THICC 6 is 21000 x 6000.
+- THICC 7 is 23200 x 6600.
+- THICC 8 is 25200 x 7200.
+- THICC 9 is 27400 x 7800.
+- THICC 10 is 29400 x 8400.
+- THICC 11 is 31600 x 9000.
+- The compositor independently verifies all fourteen world dimensions before rendering.
+- All fourteen renders use the pinned TEdit palette implementation.
 - The final combined PNG is produced successfully.
 
 ## Reference success
 
-The seed `1337420` run proved this workflow end to end:
+The seed `1337420` run proved this workflow end to end for the original six-size ladder:
 
 - official Terraria 1.4.5.8 Linux x64 server path
 - FNA instead of Windows XNA
 - early ExpandedWorlds injection
 - six isolated generation jobs
-- all six dimension gates passing through THICC
+- all six dimension gates passing through the then-current THICC
 - final pinned-TEdit render/composite job passing
+
+The current definition keeps that exact process and extends only the size count to the full fourteen-size ladder.
 
 ## Short version
 
-**Six seed problem = pick one seed, load ExpandedWorlds before Terraria queues worldgen, run all six sizes on the official Linux x64/FNA server path, verify every dimension, render with pinned TEdit, make the picture.**
+**Six seed problem = pick one seed, load ExpandedWorlds before Terraria queues worldgen, run all fourteen sizes on the official Linux x64/FNA server path, verify every dimension, render with pinned TEdit, make the picture.**
