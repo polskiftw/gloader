@@ -9,6 +9,7 @@ on:
       - "tools/expanded-world-maker/**"
       - "tools/world-family-renderer/**"
       - ".github/workflows/expanded-worlds-continuity.yml"
+      - ".github/workflows/expanded-worlds-thicc-stress.yml"
   push:
     branches:
       - main
@@ -18,6 +19,7 @@ on:
       - "tools/expanded-world-maker/**"
       - "tools/world-family-renderer/**"
       - ".github/workflows/expanded-worlds-continuity.yml"
+      - ".github/workflows/expanded-worlds-thicc-stress.yml"
 
 permissions:
   contents: read
@@ -47,7 +49,7 @@ jobs:
         shell: pwsh
         run: dotnet run --project tests/ExpandedWorldsMath/ExpandedWorldsMath.csproj -c Release --no-build
 
-      - name: Reject retired aspect-ratio patches and dimensions
+      - name: Reject retired patch files and pre-canonical dimensions
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -67,11 +69,12 @@ jobs:
             throw "Retired Expanded Worlds patch files returned: $($present -join ', ')"
           }
 
-          $activeRoots = @('gmods/ExpandedWorlds', 'tools/expanded-world-maker', 'tools/world-family-renderer')
+          $candidateRoots = @('gmods/ExpandedWorlds', 'tools/expanded-world-maker', 'tools/world-family-renderer')
+          $activeRoots = @($candidateRoots | Where-Object { Test-Path $_ -PathType Container })
           $bad = Get-ChildItem $activeRoots -Recurse -File -Include *.cs,*.md,*.csproj |
-            Select-String -Pattern '12600\s*[x×]\s*2400|16800\s*[x×]\s*2400|16800\s*[x×]\s*4800|12600x2400|16800x2400|16800x4800'
+            Select-String -Pattern '12600\s*[x×]\s*2400|16800\s*[x×]\s*2400|12600x2400|16800x2400'
           if ($bad) {
-            throw "Retired expanded dimensions remain:`n$($bad | Out-String)"
+            throw "Pre-canonical expanded dimensions remain:`n$($bad | Out-String)"
           }
 
   retail-source-contracts:

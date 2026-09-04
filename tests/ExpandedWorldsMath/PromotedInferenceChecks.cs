@@ -5,13 +5,13 @@ internal static class PromotedInferenceChecks
     [ModuleInitializer]
     internal static void Run()
     {
-        int[] evilExpected = { 8, 14, 18, 22, 26, 30 };
-        int[] spiderExpected = { 2, 6, 8, 10, 12, 14 };
-
-        for (int tier = 1; tier <= 6; tier++)
+        for (int tier = 1; tier <= ExpandedWorldMath.MaximumSupportedOverallTier; tier++)
         {
-            Equal(evilExpected[tier - 1], ExpandedWorldInferredTierMath.EvilOrbHeartQuota(tier), $"evil Orb/Heart quota tier {tier}");
-            Equal(spiderExpected[tier - 1], ExpandedWorldInferredTierMath.SpiderSpecializedRoomCount(tier), $"Spider specialized-room quota tier {tier}");
+            int evilExpected = tier == 1 ? 8 : 4 * tier + 6;
+            int spiderExpected = tier == 1 ? 2 : 2 * tier + 2;
+
+            Equal(evilExpected, ExpandedWorldInferredTierMath.EvilOrbHeartQuota(tier), $"evil Orb/Heart quota tier {tier}");
+            Equal(spiderExpected, ExpandedWorldInferredTierMath.SpiderSpecializedRoomCount(tier), $"Spider specialized-room quota tier {tier}");
         }
 
         Equal(3, ExpandedWorldInferredTierMath.ExpandedLihzahrdPaintingMaxFromVanillaLarge(2), "expanded Lihzahrd painting low roll");

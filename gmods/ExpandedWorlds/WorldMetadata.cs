@@ -6,9 +6,9 @@ using Terraria.IO;
 
 /// <summary>
 /// WorldFileData's vanilla full-seed prefix recognizes only the three exact
-/// Small/Medium/Large dimension pairs. Expanded Worlds intentionally keeps XL,
-/// Huge and THICC categorically Large, so their copied/displayed full seed must
-/// use the vanilla Large prefix (3), not Unknown (0).
+/// Small/Medium/Large dimension pairs. Expanded Worlds intentionally keeps every
+/// THICC tier categorically Large, so copied/displayed full seeds use the vanilla
+/// Large prefix (3), not Unknown (0).
 /// </summary>
 [HarmonyPatch(typeof(WorldFileData), nameof(WorldFileData.GetFullSeedText))]
 internal static class ExpandedWorldFullSeedPatch
@@ -52,8 +52,10 @@ internal static class ExpandedWorldFullSeedPatch
 
 /// <summary>
 /// Vanilla labels any nonstandard physical dimensions as "Unknown". This is only
-/// presentation state; expose the three explicit Expanded Worlds presets by name
-/// while leaving all gameplay/category logic at vanilla Large.
+/// presentation state; expose the canonical THICC tier name while leaving all
+/// gameplay/category logic at vanilla Large. Old worlds automatically relabel by
+/// dimensions: former XL becomes THICC, former Huge becomes THICC 2, and former
+/// THICC becomes THICC 3. No .wld migration or custom size identifier is needed.
 /// </summary>
 [HarmonyPatch]
 internal static class ExpandedWorldSizeNamePatch
@@ -72,15 +74,13 @@ internal static class ExpandedWorldSizeNamePatch
         if (__instance == null)
             return;
 
-        int width = __instance.WorldSizeX;
-        int height = __instance.WorldSizeY;
-
-        if (width == ExpandedWorldMath.XLWidth && height == ExpandedWorldMath.XLHeight)
-            __result = "XL";
-        else if (width == ExpandedWorldMath.HugeWidth && height == ExpandedWorldMath.HugeHeight)
-            __result = "Huge";
-        else if (width == ExpandedWorldMath.ThiccWidth && height == ExpandedWorldMath.ThiccHeight)
-            __result = "THICC";
+        if (ExpandedWorldMath.TryGetPresetByDimensions(
+                __instance.WorldSizeX,
+                __instance.WorldSizeY,
+                out ExpandedWorldPreset preset))
+        {
+            __result = ExpandedWorldMath.LabelFor(preset);
+        }
     }
 }
 #endif

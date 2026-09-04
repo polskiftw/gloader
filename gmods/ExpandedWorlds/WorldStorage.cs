@@ -15,8 +15,8 @@ using Terraria;
 ///
 /// This support is intentionally shared by GLOADER_CLIENT and GLOADER_SERVER:
 /// a client needs it for generation, local reload and joining an expanded
-/// server; the Host & Play / dedicated-server process needs it while loading
-/// the expanded .wld before accepting players.
+/// server; a Host & Play / dedicated-server process needs it while loading the
+/// expanded .wld before accepting players.
 /// </summary>
 internal static class ExpandedWorldBackingStorage
 {
@@ -33,23 +33,26 @@ internal static class ExpandedWorldBackingStorage
 
     public static int RequiredBackingWidth(int logicalWidth)
     {
-        // Exact Terraria 1.4.5.8 Main.tile allocation is [maxTilesX,maxTilesY].
+        if (logicalWidth <= 0)
+            throw new ArgumentOutOfRangeException(nameof(logicalWidth));
         return logicalWidth;
     }
 
     public static int RequiredBackingHeight(int logicalHeight)
     {
+        if (logicalHeight <= 0)
+            throw new ArgumentOutOfRangeException(nameof(logicalHeight));
         return logicalHeight;
     }
 
     public static int RequiredSectionColumns(int logicalWidth)
     {
-        return checked(logicalWidth / 200 + 1);
+        return checked(logicalWidth / ExpandedWorldMath.SectionWidth + 1);
     }
 
     public static int RequiredSectionRows(int logicalHeight)
     {
-        return checked(logicalHeight / 150 + 1);
+        return checked(logicalHeight / ExpandedWorldMath.SectionHeight + 1);
     }
 
     public static void EnsureForCurrentDimensions(string stage)
@@ -62,8 +65,9 @@ internal static class ExpandedWorldBackingStorage
 
         int requiredWidth = RequiredBackingWidth(width);
         int requiredHeight = RequiredBackingHeight(height);
+        long tileArea = ExpandedWorldMath.TileArea(requiredWidth, requiredHeight);
 
-        EnsureTileStorage(requiredWidth, requiredHeight, stage);
+        EnsureTileStorage(requiredWidth, requiredHeight, tileArea, stage);
         EnsureRemoteClientSectionStorage(width, height, stage);
 
 #if GLOADER_CLIENT
@@ -74,7 +78,7 @@ internal static class ExpandedWorldBackingStorage
 #endif
     }
 
-    private static void EnsureTileStorage(int requiredWidth, int requiredHeight, string stage)
+    private static void EnsureTileStorage(int requiredWidth, int requiredHeight, long tileArea, string stage)
     {
         Tile[,] current = Main.tile;
         if (current != null &&
@@ -85,23 +89,18 @@ internal static class ExpandedWorldBackingStorage
         }
 
         // clearWorld is about to discard/clear the previous world's tile state,
-        // so copying the old canvas is both unnecessary and very expensive.
+        // so copying the old canvas is both unnecessary and extremely expensive.
+        // The checked Int64 area calculation above keeps the capacity arithmetic
+        // valid even though THICC 11 contains 284,400,000 logical tiles.
         Main.tile = new Tile[requiredWidth, requiredHeight];
 
         Console.WriteLine(
             "[Expanded Worlds] " + stage + ": tile backing storage enlarged to " +
-            requiredWidth + "x" + requiredHeight + ".");
+            requiredWidth + "x" + requiredHeight + " (" + tileArea.ToString("N0") + " tiles)." );
     }
 
     private static void EnsureRemoteClientSectionStorage(int logicalWidth, int logicalHeight, string stage)
     {
-        // RemoteClient.TileSections and TileSectionsCheckTime are instance field
-        // initializers in exact 1.4.5.8. Netplay.Initialize can construct those
-        // RemoteClient objects while Main still has startup dimensions, before an
-        // expanded .wld header or custom generation preset supplies the real
-        // canvas. Resize any already-created clients once the physical dimensions
-        // are known. RemoteClients constructed later automatically use the current
-        // Main.maxTilesX/maxTilesY and already have sufficient storage.
         Type netplayType = AccessTools.TypeByName(NetplayTypeName);
         if (netplayType == null)
             throw new TypeLoadException("[Expanded Worlds] Terraria.Netplay was not found.");
@@ -156,10 +155,8 @@ internal static class ExpandedWorldBackingStorage
             if (!sectionsTooSmall && !timesTooSmall)
                 continue;
 
-            // clearWorld is a world-transition/allocation boundary. Section-send
-            // state from the previous/startup canvas must not carry into the new
-            // world anyway, so fresh arrays are both safer and cheaper than trying
-            // to remap row-major storage across a dimension change.
+            // clearWorld is a world-transition boundary. Section-send state from
+            // the old/startup canvas must not carry into the new world anyway.
             sectionsField.SetValue(client, new bool[requiredColumns, requiredRows]);
             sectionTimesField.SetValue(client, new uint[requiredColumns, requiredRows]);
             resized++;
@@ -177,9 +174,7 @@ internal static class ExpandedWorldBackingStorage
     private static void EnsureClientMapStorage(int requiredWidth, int requiredHeight, string stage)
     {
         if (MainMapField == null || !MainMapField.IsStatic)
-        {
             throw new MissingFieldException(typeof(Main).FullName, "Map");
-        }
 
         object current = MainMapField.GetValue(null);
         Type mapType = MainMapField.FieldType;
@@ -202,13 +197,9 @@ internal static class ExpandedWorldBackingStorage
                 return;
         }
 
-        ConstructorInfo constructor = AccessTools.Constructor(
-            mapType,
-            new[] { typeof(int), typeof(int) });
+        ConstructorInfo constructor = AccessTools.Constructor(mapType, new[] { typeof(int), typeof(int) });
         if (constructor == null)
-        {
             throw new MissingMethodException(mapType.FullName, ".ctor(int,int)");
-        }
 
         object replacement = constructor.Invoke(new object[] { requiredWidth, requiredHeight });
         MainMapField.SetValue(null, replacement);
@@ -230,11 +221,7 @@ internal static class ExpandedWorldBackingStorage
 
             ConstructorInfo initializer = type.TypeInitializer;
             if (initializer == null)
-            {
-                throw new MissingMethodException(
-                    type.FullName,
-                    ".cctor");
-            }
+                throw new MissingMethodException(type.FullName, ".cctor");
 
             yield return initializer;
         }
@@ -243,9 +230,9 @@ internal static class ExpandedWorldBackingStorage
 
 /// <summary>
 /// Grow the physical tile/map canvas immediately before Terraria clearWorld()
-/// touches it. Priority.Last deliberately runs after ExpandedWorldClearPatch's
-/// normal-priority generation-dimension prefix on the client. For .wld loads and
-/// multiplayer joins Terraria has already read/received maxTilesX/maxTilesY.
+/// touches it. Priority.Last deliberately runs after the generation-dimension
+/// prefix on the client. For .wld loads and multiplayer joins Terraria has
+/// already read/received maxTilesX/maxTilesY.
 /// </summary>
 [HarmonyPatch(typeof(WorldGen), "clearWorld")]
 internal static class ExpandedWorldBackingStoragePatch
@@ -259,14 +246,10 @@ internal static class ExpandedWorldBackingStoragePatch
 }
 
 /// <summary>
-/// Two 1.4.5.8 section tables are allocated once during type initialization:
-/// ActiveSections.LastActiveTime and LeashedEntity.BySection. The latter is
-/// static readonly, so patch both initializers before Terraria's entry point and
-/// allocate the exact vanilla section formula at the maximum supported THICC
-/// dimensions: maxTilesX/200+1 by maxTilesY/150+1.
-///
-/// Exact 1.4.5.8 source contains one Main.maxTilesX and one Main.maxTilesY load
-/// in each initializer's section-array allocation. Any shape change fails closed.
+/// ActiveSections.LastActiveTime and LeashedEntity.BySection are allocated once
+/// during type initialization. Patch both initializers before Terraria's entry
+/// point and allocate the retail section formula at THICC 11's maximum supported
+/// dimensions: 31,600/200+1 by 9,000/150+1 = 159x61.
 /// </summary>
 [HarmonyPatch]
 internal static class ExpandedWorldSectionStorageInitializerPatch
@@ -295,13 +278,13 @@ internal static class ExpandedWorldSectionStorageInitializerPatch
             if (instruction.opcode == OpCodes.Ldsfld && Equals(instruction.operand, MaxTilesXField))
             {
                 instruction.opcode = OpCodes.Ldc_I4;
-                instruction.operand = ExpandedWorldMath.ThiccWidth;
+                instruction.operand = ExpandedWorldMath.MaximumSupportedWidth;
                 widthLoads++;
             }
             else if (instruction.opcode == OpCodes.Ldsfld && Equals(instruction.operand, MaxTilesYField))
             {
                 instruction.opcode = OpCodes.Ldc_I4;
-                instruction.operand = ExpandedWorldMath.ThiccHeight;
+                instruction.operand = ExpandedWorldMath.MaximumSupportedHeight;
                 heightLoads++;
             }
 
@@ -321,35 +304,26 @@ internal static class ExpandedWorldSectionStorageInitializerPatch
 
 #if GLOADER_CLIENT
 /// <summary>
-/// Terraria's client map has independent world-width and world-height ceilings
-/// beyond WorldMap._tiles. Exact 1.4.5.8 MapRenderer allocates a 5x2 target grid:
-/// each normal target covers 2000x1800 tiles, while the final allocated column
-/// and row are special 400x600 tails.
-///
-/// Canonical THICC width 14,800 reaches physical X target index 7 with an
-/// 800-tile tail. If index 7 were also the final allocated column,
-/// MapRenderer.checkMap would apply vanilla's special 400-tile final-column width
-/// and truncate that tail. One unused guard column keeps physical index 7 on the
-/// normal 2,000-wide path, so the backing grid needs 9 columns.
-///
-/// Canonical THICC height 4,200 reaches physical Y target index 2 with an exact
-/// 600-tile tail. That already matches vanilla's special final-row height, so no
-/// vertical guard row is needed: 3 rows are both sufficient and exact.
-///
-/// DrawMap's X loop is separately hard-coded to 0..4 and therefore must extend
-/// through THICC's physical index 7. Its Y loop is already derived from
-/// Main.maxTilesY and naturally reaches index 2.
+/// Exact 1.4.5.8 MapRenderer allocates 5x2 targets. Each normal target covers
+/// 2,000x1,800 tiles, but the final allocated column/row are hard-coded 400x600.
+/// THICC 11 logically needs 16x5 targets. Its final physical column is 1,600
+/// tiles wide and final row is a full 1,800 tiles, so both require one unused
+/// guard target to keep the physical edge on the normal-size path. Maximum
+/// backing therefore becomes 17x6 while the final renderable X index is 15.
 /// </summary>
 internal static class ExpandedWorldMapRendererContract
 {
-    public const int TextureMaxWidth = 2000;
-    public const int TextureMaxHeight = 1800;
     public const int VanillaTargetColumns = 5;
     public const int VanillaTargetRows = 2;
-    public const int ThiccLastRenderableTargetIndex = ExpandedWorldMath.ThiccWidth / TextureMaxWidth;
-    public const int ThiccLastRenderableTargetRowIndex = ExpandedWorldMath.ThiccHeight / TextureMaxHeight;
-    public const int BackingTargetColumns = ThiccLastRenderableTargetIndex + 2;
-    public const int BackingTargetRows = ThiccLastRenderableTargetRowIndex + 1;
+
+    public static readonly int BackingTargetColumns =
+        ExpandedWorldMapMath.BackingTargetColumns(ExpandedWorldMath.MaximumSupportedWidth);
+
+    public static readonly int BackingTargetRows =
+        ExpandedWorldMapMath.BackingTargetRows(ExpandedWorldMath.MaximumSupportedHeight);
+
+    public static readonly int LastRenderableTargetColumn =
+        ExpandedWorldMapMath.LastRenderableTargetColumn(ExpandedWorldMath.MaximumSupportedWidth);
 
     public static Type RequireMapRendererType()
     {
@@ -443,31 +417,27 @@ internal static class ExpandedWorldMapRendererInitializerPatch
             if (Equals(code[i].operand, TargetColumnsField))
             {
                 if (!ExpandedWorldMapRendererContract.IsIntConstant(
-                        code[i - 1],
-                        ExpandedWorldMapRendererContract.VanillaTargetColumns))
+                        code[i - 1], ExpandedWorldMapRendererContract.VanillaTargetColumns))
                 {
                     throw new InvalidOperationException(
                         "[Expanded Worlds] MapRenderer.numTargetsX initializer no longer stores audited value 5.");
                 }
 
                 ExpandedWorldMapRendererContract.ReplaceWithIntConstant(
-                    code[i - 1],
-                    ExpandedWorldMapRendererContract.BackingTargetColumns);
+                    code[i - 1], ExpandedWorldMapRendererContract.BackingTargetColumns);
                 patchedColumns++;
             }
             else if (Equals(code[i].operand, TargetRowsField))
             {
                 if (!ExpandedWorldMapRendererContract.IsIntConstant(
-                        code[i - 1],
-                        ExpandedWorldMapRendererContract.VanillaTargetRows))
+                        code[i - 1], ExpandedWorldMapRendererContract.VanillaTargetRows))
                 {
                     throw new InvalidOperationException(
                         "[Expanded Worlds] MapRenderer.numTargetsY initializer no longer stores audited value 2.");
                 }
 
                 ExpandedWorldMapRendererContract.ReplaceWithIntConstant(
-                    code[i - 1],
-                    ExpandedWorldMapRendererContract.BackingTargetRows);
+                    code[i - 1], ExpandedWorldMapRendererContract.BackingTargetRows);
                 patchedRows++;
             }
         }
@@ -516,18 +486,17 @@ internal static class ExpandedWorldMapRendererDrawPatch
         var code = instructions.ToList();
         int patched = 0;
 
-        // Exact 1.4.5.8 source contains exactly one integer literal 4 here:
-        //   for (int i = 0; i <= 4; i++)
-        // Continue the renderer through THICC's final physical X target 7.
-        // The Y loop is already `j <= Main.maxTilesY / textureMaxHeight`.
+        // Exact retail source contains exactly one integer literal 4 here:
+        // `for (int i = 0; i <= 4; i++)`. Continue through THICC 11's final
+        // physical X target index 15. The Y loop is already dimension-derived;
+        // the backing guard row covers the exact-height floor+1 iteration.
         for (int i = 0; i < code.Count; i++)
         {
             if (!ExpandedWorldMapRendererContract.IsIntConstant(code[i], 4))
                 continue;
 
             ExpandedWorldMapRendererContract.ReplaceWithIntConstant(
-                code[i],
-                ExpandedWorldMapRendererContract.ThiccLastRenderableTargetIndex);
+                code[i], ExpandedWorldMapRendererContract.LastRenderableTargetColumn);
             patched++;
         }
 

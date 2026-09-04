@@ -1,0 +1,354 @@
+name: Expanded Worlds THICC x64 stress
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prepare-x64-runtime:
+    runs-on: windows-latest
+    timeout-minutes: 180
+    env:
+      TERRARIA_URL: ${{ secrets.TERRARIA_BINARY_URL }}
+      TERRARIA_SHA: ${{ secrets.TERRARIA_BINARY_SHA256 }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Require private retail input
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:TERRARIA_URL)) {
+            throw 'TERRARIA_BINARY_URL is required for the real x64 stress matrix.'
+          }
+
+      - name: Build gloader package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./build.ps1
+          $stage = (Resolve-Path 'dist/gloader').Path
+          if (-not (Test-Path (Join-Path $stage 'gloader.exe'))) {
+            throw 'dist/gloader/gloader.exe was not produced.'
+          }
+          "GLOADER_STAGE=$stage" >> $env:GITHUB_ENV
+
+      - name: Stage matching retail Terraria.exe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $download = Join-Path $env:RUNNER_TEMP 'TerrariaInput.bin'
+          Invoke-WebRequest -Uri $env:TERRARIA_URL -OutFile $download
+
+          if (-not [string]::IsNullOrWhiteSpace($env:TERRARIA_SHA)) {
+            $actual = (Get-FileHash -LiteralPath $download -Algorithm SHA256).Hash
+            if ($actual -ne $env:TERRARIA_SHA) {
+              throw "Terraria input SHA-256 mismatch. Expected $env:TERRARIA_SHA, got $actual"
+            }
+          }
+
+          $bytes = [System.IO.File]::ReadAllBytes($download)
+          $isZip = $bytes.Length -ge 2 -and $bytes[0] -eq 0x50 -and $bytes[1] -eq 0x4B
+          $target = Join-Path $env:GLOADER_STAGE 'Terraria.exe'
+
+          if ($isZip) {
+            $expanded = Join-Path $env:RUNNER_TEMP 'terraria-retail-input'
+            Remove-Item $expanded -Recurse -Force -ErrorAction SilentlyContinue
+            Expand-Archive -LiteralPath $download -DestinationPath $expanded -Force
+            $matches = @(Get-ChildItem $expanded -Recurse -File -Filter Terraria.exe)
+            if ($matches.Count -ne 1) {
+              throw "Expected one Terraria.exe in private retail archive, found $($matches.Count)."
+            }
+            Copy-Item $matches[0].FullName $target -Force
+          }
+          else {
+            Move-Item $download $target -Force
+          }
+
+          if (-not (Test-Path $target -PathType Leaf)) {
+            throw 'Private retail Terraria.exe was not staged.'
+          }
+
+      - name: Build private x64 Terraria runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./tools/x64-runtime/Build-X64Runtime.ps1 `
+            -TerrariaDirectory $env:GLOADER_STAGE `
+            -OutputDirectory (Join-Path $env:GLOADER_STAGE 'gdeps/x64-runtime') `
+            -WorkspaceDirectory (Join-Path $env:RUNNER_TEMP 'thicc-x64-runtime-workspace')
+
+          $runtime = Join-Path $env:GLOADER_STAGE 'gdeps/x64-runtime/TerrariaRelease.dll'
+          if (-not (Test-Path $runtime -PathType Leaf)) {
+            throw 'Private x64 TerrariaRelease.dll was not produced.'
+          }
+
+          Remove-Item (Join-Path $env:GLOADER_STAGE 'Terraria.exe') -Force -ErrorAction SilentlyContinue
+
+      - name: Upload x64 stress runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: thicc-x64-runtime
+          path: dist/gloader/
+          if-no-files-found: error
+          retention-days: 1
+
+  stress:
+    needs: prepare-x64-runtime
+    name: ${{ matrix.preset }} x64 stress
+    runs-on: windows-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - preset: THICC
+            selector: THICC
+            width: 10600
+            height: 3000
+            port: 7911
+          - preset: THICC 2
+            selector: THICC2
+            width: 12600
+            height: 3600
+            port: 7912
+          - preset: THICC 3
+            selector: THICC3
+            width: 14800
+            height: 4200
+            port: 7913
+          - preset: THICC 4
+            selector: THICC4
+            width: 16800
+            height: 4800
+            port: 7914
+          - preset: THICC 5
+            selector: THICC5
+            width: 19000
+            height: 5400
+            port: 7915
+          - preset: THICC 6
+            selector: THICC6
+            width: 21000
+            height: 6000
+            port: 7916
+          - preset: THICC 7
+            selector: THICC7
+            width: 23200
+            height: 6600
+            port: 7917
+          - preset: THICC 8
+            selector: THICC8
+            width: 25200
+            height: 7200
+            port: 7918
+          - preset: THICC 9
+            selector: THICC9
+            width: 27400
+            height: 7800
+            port: 7919
+          - preset: THICC 10
+            selector: THICC10
+            width: 29400
+            height: 8400
+            port: 7920
+          - preset: THICC 11
+            selector: THICC11
+            width: 31600
+            height: 9000
+            port: 7921
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: thicc-x64-runtime
+          path: runtime
+
+      - name: Stage Expanded Worlds only
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = (Resolve-Path 'runtime').Path
+          $mods = Join-Path $env:RUNNER_TEMP 'stress-gmods'
+          New-Item -ItemType Directory -Force $mods | Out-Null
+          Copy-Item (Join-Path $stage 'gmods/ExpandedWorlds') (Join-Path $mods 'ExpandedWorlds') -Recurse -Force
+          "GLOADER_STAGE=$stage" >> $env:GITHUB_ENV
+          "MODS_DIR=$mods" >> $env:GITHUB_ENV
+
+      - name: Generate, save, reload, and measure
+        shell: pwsh
+        env:
+          PRESET: ${{ matrix.preset }}
+          SELECTOR: ${{ matrix.selector }}
+          EXPECTED_WIDTH: ${{ matrix.width }}
+          EXPECTED_HEIGHT: ${{ matrix.height }}
+          PORT: ${{ matrix.port }}
+          GLOADER_EXPANDED_WORLD: ${{ matrix.selector }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $seed = '1337420'
+          $width = [int]$env:EXPECTED_WIDTH
+          $height = [int]$env:EXPECTED_HEIGHT
+          $port = [int]$env:PORT
+          $slug = ($env:SELECTOR).ToLowerInvariant()
+          $outDir = Join-Path $PWD ("stress-" + $slug)
+          $save = Join-Path $env:RUNNER_TEMP ("thicc-save-" + $slug)
+          $worlds = Join-Path $save 'Worlds'
+          $world = Join-Path $worlds ("stress-" + $slug + '.wld')
+          New-Item -ItemType Directory -Force $outDir,$worlds | Out-Null
+
+          function Test-Port([int]$p) {
+            $client = New-Object System.Net.Sockets.TcpClient
+            try {
+              $task = $client.ConnectAsync('127.0.0.1', $p)
+              return ($task.Wait(350) -and $client.Connected)
+            }
+            catch { return $false }
+            finally { $client.Dispose() }
+          }
+
+          function Stop-TestProcess($process) {
+            if ($null -ne $process -and -not $process.HasExited) {
+              Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            }
+            try { $process.WaitForExit(10000) | Out-Null } catch {}
+          }
+
+          $genOut = Join-Path $outDir 'generation.stdout.txt'
+          $genErr = Join-Path $outDir 'generation.stderr.txt'
+          $args = @(
+            '--server', '--mods', $env:MODS_DIR, '--',
+            '-savedirectory', $save,
+            '-world', $world,
+            '-autocreate', '3',
+            '-worldname', ('Stress' + $env:SELECTOR),
+            '-seed', $seed,
+            '-difficulty', '0',
+            '-port', $port,
+            '-maxplayers', '1',
+            '-noupnp'
+          )
+
+          $clock = [Diagnostics.Stopwatch]::StartNew()
+          $p = Start-Process -FilePath (Join-Path $env:GLOADER_STAGE 'gloader.exe') `
+            -ArgumentList $args -WorkingDirectory $env:GLOADER_STAGE -PassThru -NoNewWindow `
+            -RedirectStandardOutput $genOut -RedirectStandardError $genErr
+
+          [long]$peakWorking = 0
+          [long]$peakPrivate = 0
+          $ready = $false
+          try {
+            while ($clock.Elapsed.TotalMinutes -lt 345) {
+              if ($p.HasExited) { break }
+              try {
+                $p.Refresh()
+                if ($p.WorkingSet64 -gt $peakWorking) { $peakWorking = $p.WorkingSet64 }
+                if ($p.PrivateMemorySize64 -gt $peakPrivate) { $peakPrivate = $p.PrivateMemorySize64 }
+              } catch {}
+              if (Test-Port $port) { $ready = $true; break }
+              Start-Sleep -Seconds 1
+            }
+          }
+          finally {
+            $clock.Stop()
+            Stop-TestProcess $p
+          }
+
+          if (-not $ready) {
+            if (Test-Path $genOut) { Get-Content -Raw $genOut | Write-Host }
+            if (Test-Path $genErr) { Get-Content -Raw $genErr | Write-Host }
+            throw "$($env:PRESET) generation never reached server-ready state."
+          }
+          if (-not (Test-Path $world -PathType Leaf)) {
+            throw "$($env:PRESET) did not save a .wld file."
+          }
+
+          $generationText = Get-Content -Raw $genOut
+          $dimensionToken = "dimensions=$width" + 'x' + "$height"
+          if (-not $generationText.Contains($dimensionToken)) {
+            throw "Generation log did not report expected $dimensionToken."
+          }
+
+          $chestMatch = [regex]::Match($generationText, 'chests=(\d+)/(\d+)')
+          if (-not $chestMatch.Success) {
+            throw 'Generation log did not report realized chest usage.'
+          }
+          $chestCount = [int]$chestMatch.Groups[1].Value
+          $chestCapacity = [int]$chestMatch.Groups[2].Value
+          if ($chestCapacity -ne 8000) {
+            throw "Retail chest capacity changed unexpectedly: $chestCapacity"
+          }
+
+          $worldBytes = (Get-Item $world).Length
+
+          $reloadOut = Join-Path $outDir 'reload.stdout.txt'
+          $reloadErr = Join-Path $outDir 'reload.stderr.txt'
+          $reloadPort = $port + 100
+          $reloadArgs = @(
+            '--server', '--mods', $env:MODS_DIR, '--',
+            '-savedirectory', $save,
+            '-world', $world,
+            '-port', $reloadPort,
+            '-maxplayers', '1',
+            '-noupnp'
+          )
+          $r = Start-Process -FilePath (Join-Path $env:GLOADER_STAGE 'gloader.exe') `
+            -ArgumentList $reloadArgs -WorkingDirectory $env:GLOADER_STAGE -PassThru -NoNewWindow `
+            -RedirectStandardOutput $reloadOut -RedirectStandardError $reloadErr
+          $reloadReady = $false
+          $reloadDeadline = (Get-Date).AddMinutes(60)
+          try {
+            while ((Get-Date) -lt $reloadDeadline) {
+              if ($r.HasExited) { break }
+              if (Test-Port $reloadPort) { $reloadReady = $true; break }
+              Start-Sleep -Seconds 1
+            }
+          }
+          finally {
+            Stop-TestProcess $r
+          }
+
+          if (-not $reloadReady) {
+            if (Test-Path $reloadOut) { Get-Content -Raw $reloadOut | Write-Host }
+            if (Test-Path $reloadErr) { Get-Content -Raw $reloadErr | Write-Host }
+            throw "$($env:PRESET) reload never reached server-ready state."
+          }
+
+          $reloadText = Get-Content -Raw $reloadOut
+          $verifyToken = "LoadWorld verified $($env:PRESET) $width" + 'x' + "$height"
+          if (-not $reloadText.Contains($verifyToken)) {
+            Get-Content -Raw $reloadOut | Write-Host
+            throw "Reload did not report exact dimension verification token: $verifyToken"
+          }
+
+          $metrics = [ordered]@{
+            preset = $env:PRESET
+            selector = $env:SELECTOR
+            seed = [int]$seed
+            width = $width
+            height = $height
+            generationSeconds = [math]::Round($clock.Elapsed.TotalSeconds, 3)
+            peakWorkingSetBytes = $peakWorking
+            peakPrivateBytes = $peakPrivate
+            worldFileBytes = $worldBytes
+            chestCount = $chestCount
+            chestCapacity = $chestCapacity
+            reloadVerified = $true
+          }
+          $metrics | ConvertTo-Json | Set-Content (Join-Path $outDir 'metrics.json') -Encoding UTF8
+          $metrics | Format-List | Out-String | Write-Host
+
+      - name: Upload stress logs and metrics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: thicc-stress-${{ matrix.selector }}
+          path: stress-*/
+          if-no-files-found: warn
+          retention-days: 7
