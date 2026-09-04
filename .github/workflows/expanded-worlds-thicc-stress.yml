@@ -11,8 +11,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 180
     env:
-      TERRARIA_URL: ${{ secrets.TERRARIA_BINARY_URL }}
-      TERRARIA_SHA: ${{ secrets.TERRARIA_BINARY_SHA256 }}
+      GH_TOKEN: ${{ github.token }}
+      RETAIL_RELEASE_NAME: gloader-private-input
 
     steps:
       - uses: actions/checkout@v4
@@ -21,12 +21,37 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
-      - name: Require private retail input
+      - name: Locate private retail input
         shell: pwsh
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:TERRARIA_URL)) {
-            throw 'TERRARIA_BINARY_URL is required for the real x64 stress matrix.'
+          $ErrorActionPreference = 'Stop'
+          $releasesJson = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100"
+          $releases = @($releasesJson | ConvertFrom-Json)
+          $release = @(
+            $releases | Where-Object {
+              $_.draft -and (
+                $_.name -eq $env:RETAIL_RELEASE_NAME -or
+                $_.tag_name -eq $env:RETAIL_RELEASE_NAME
+              )
+            }
+          ) | Select-Object -First 1
+
+          if ($null -eq $release) {
+            throw "Create a draft release named or tagged '$env:RETAIL_RELEASE_NAME', attach Terraria.exe (or Terraria.zip), and keep the release as a draft."
           }
+
+          $assets = @($release.assets | Where-Object { $_.name -in @('Terraria.exe', 'Terraria.zip') })
+          if ($assets.Count -ne 1) {
+            throw "Draft release '$env:RETAIL_RELEASE_NAME' must contain exactly one supported retail asset named Terraria.exe or Terraria.zip; found $($assets.Count)."
+          }
+
+          $asset = $assets[0]
+          "TERRARIA_ASSET_ID=$($asset.id)" >> $env:GITHUB_ENV
+          "TERRARIA_ASSET_NAME=$($asset.name)" >> $env:GITHUB_ENV
+          if (-not [string]::IsNullOrWhiteSpace([string]$asset.digest)) {
+            "TERRARIA_ASSET_DIGEST=$($asset.digest)" >> $env:GITHUB_ENV
+          }
+          Write-Host "Using unpublished draft-release asset $($asset.name) ($($asset.size) bytes)."
 
       - name: Build gloader package
         shell: pwsh
@@ -43,13 +68,20 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $download = Join-Path $env:RUNNER_TEMP 'TerrariaInput.bin'
-          Invoke-WebRequest -Uri $env:TERRARIA_URL -OutFile $download
+          $download = Join-Path $env:RUNNER_TEMP $env:TERRARIA_ASSET_NAME
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = 'application/octet-stream'
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          $assetUri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/assets/$env:TERRARIA_ASSET_ID"
+          Invoke-WebRequest -Uri $assetUri -Headers $headers -OutFile $download
 
-          if (-not [string]::IsNullOrWhiteSpace($env:TERRARIA_SHA)) {
+          if (-not [string]::IsNullOrWhiteSpace($env:TERRARIA_ASSET_DIGEST) -and $env:TERRARIA_ASSET_DIGEST.StartsWith('sha256:', [System.StringComparison]::OrdinalIgnoreCase)) {
+            $expected = $env:TERRARIA_ASSET_DIGEST.Substring(7)
             $actual = (Get-FileHash -LiteralPath $download -Algorithm SHA256).Hash
-            if ($actual -ne $env:TERRARIA_SHA) {
-              throw "Terraria input SHA-256 mismatch. Expected $env:TERRARIA_SHA, got $actual"
+            if ($actual -ne $expected) {
+              throw "Terraria draft-release asset SHA-256 mismatch. Expected $expected, got $actual"
             }
           }
 
