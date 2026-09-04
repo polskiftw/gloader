@@ -2,14 +2,6 @@ name: Expanded Worlds THICC x64 stress
 
 on:
   workflow_dispatch:
-  # Temporary branch trigger so this handoff can collect runtime evidence even
-  # though the connector cannot dispatch workflows. Removed in the next commit;
-  # the final workflow is manual-only.
-  push:
-    branches:
-      - feat/thicc-11-ladder
-    paths:
-      - ".github/workflows/expanded-worlds-thicc-stress.yml"
 
 permissions:
   contents: read
@@ -295,8 +287,6 @@ jobs:
 
           $worldBytes = (Get-Item $world).Length
 
-          # Fresh process: load the just-saved world and require the mod's own
-          # post-load dimension verifier to report the exact same physical tier.
           $reloadOut = Join-Path $outDir 'reload.stdout.txt'
           $reloadErr = Join-Path $outDir 'reload.stderr.txt'
           $reloadPort = $port + 100
