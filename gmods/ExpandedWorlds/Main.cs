@@ -11,7 +11,7 @@ public static class Mod
     {
         ExpandedWorldDimensions.ValidateVanillaSizeContract();
         Console.WriteLine(
-            "[Expanded Worlds] XL (10600x3000), Huge (12600x3600), and THICC (14800x4200) world sizes enabled.");
+            "[Expanded Worlds] THICC through THICC 11 world sizes enabled (10,600x3,000 through 31,600x9,000).");
         Console.WriteLine(
             "[Expanded Worlds] Custom dimensions continue Terraria's Small/Medium/Large section cadence; vanilla still categorizes them as Large.");
     }
@@ -25,6 +25,8 @@ internal static class ExpandedWorldState
 
     public static void Select(ExpandedWorldPreset preset)
     {
+        if (preset != ExpandedWorldPreset.None)
+            ExpandedWorldMath.DefinitionFor(preset);
         Selected = preset;
     }
 
