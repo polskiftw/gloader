@@ -14,7 +14,7 @@ using Terraria.UI;
 /// <summary>
 /// Extends Terraria 1.4.5.8's New World size row after BuildPage() has created
 /// the three vanilla controls. The private vanilla size-button array remains
-/// exactly three elements; custom physical presets are carried separately so
+/// exactly three elements; expanded physical presets are carried separately so
 /// Terraria never receives a fake WorldSizeId value.
 /// </summary>
 [HarmonyPatch]
@@ -36,9 +36,7 @@ internal static class ExpandedWorldBuildPageSizeRowFix
         AccessTools.Method(typeof(UIElement), "Remove", Type.EmptyTypes);
 
     private static UIWorldCreation _owner;
-    private static UITextPanel<string> _xlButton;
-    private static UITextPanel<string> _hugeButton;
-    private static UITextPanel<string> _thiccButton;
+    private static UITextPanel<string>[] _expandedButtons = new UITextPanel<string>[0];
 
     private static MethodBase TargetMethod()
     {
@@ -62,7 +60,7 @@ internal static class ExpandedWorldBuildPageSizeRowFix
         }
         catch (Exception ex)
         {
-            Console.WriteLine("[Expanded Worlds] Could not install XL/Huge/THICC world-size buttons: " + ex);
+            Console.WriteLine("[Expanded Worlds] Could not install THICC world-size buttons: " + ex);
         }
     }
 
@@ -87,12 +85,11 @@ internal static class ExpandedWorldBuildPageSizeRowFix
         if (container == null)
             throw new InvalidOperationException("Terraria's world-size row did not have a live parent container.");
 
-        RemoveOwnButton(_xlButton);
-        RemoveOwnButton(_hugeButton);
-        RemoveOwnButton(_thiccButton);
+        RemoveOwnButtons();
 
-        const int totalChoices = 6;
-        const int lastIndex = totalChoices - 1;
+        int expandedCount = ExpandedWorldMath.ExpandedPresetCount;
+        int totalChoices = 3 + expandedCount;
+        int lastIndex = totalChoices - 1;
         const float usableWidthPercent = 1f;
         float widthPixels = -4f * lastIndex;
         float widthPercent = usableWidthPercent / totalChoices;
@@ -108,29 +105,42 @@ internal static class ExpandedWorldBuildPageSizeRowFix
         }
 
         _owner = owner;
-        _xlButton = MakeButton(owner, first, "XL", ExpandedWorldPreset.XL, 3, lastIndex, widthPixels, widthPercent);
-        _hugeButton = MakeButton(owner, first, "Huge", ExpandedWorldPreset.Huge, 4, lastIndex, widthPixels, widthPercent);
-        _thiccButton = MakeButton(owner, first, "THICC", ExpandedWorldPreset.Thicc, 5, lastIndex, widthPixels, widthPercent);
+        _expandedButtons = new UITextPanel<string>[expandedCount];
+        for (int i = 0; i < expandedCount; i++)
+        {
+            ExpandedWorldDefinition definition = ExpandedWorldMath.DefinitionAt(i);
+            int choiceIndex = i + 3;
+            UITextPanel<string> button = MakeButton(
+                owner,
+                first,
+                definition,
+                choiceIndex,
+                lastIndex,
+                widthPixels,
+                widthPercent);
+            _expandedButtons[i] = button;
+            container.Append(button);
+        }
 
-        container.Append(_xlButton);
-        container.Append(_hugeButton);
-        container.Append(_thiccButton);
         Refresh(owner);
 
-        Console.WriteLine("[Expanded Worlds] New World size row installed: Small | Medium | Large | XL | Huge | THICC.");
+        Console.WriteLine(
+            "[Expanded Worlds] New World size row installed: Small | Medium | Large | THICC ... THICC 11.");
     }
 
     private static UITextPanel<string> MakeButton(
         UIWorldCreation owner,
         UIElement template,
-        string text,
-        ExpandedWorldPreset preset,
+        ExpandedWorldDefinition definition,
         int index,
         int lastIndex,
         float widthPixels,
         float widthPercent)
     {
-        var button = new UITextPanel<string>(text, 0.8f, false);
+        // Fourteen total choices share Terraria's existing row. A slightly
+        // smaller label scale keeps THICC 10/11 readable without changing the
+        // surrounding vanilla page layout.
+        var button = new UITextPanel<string>(definition.Label, 0.55f, false);
         button.Width.Set(widthPixels, widthPercent);
         button.Height.Set(template.Height.Pixels, template.Height.Precent);
         button.Top.Set(template.Top.Pixels, template.Top.Precent);
@@ -140,12 +150,12 @@ internal static class ExpandedWorldBuildPageSizeRowFix
 
         button.OnLeftClick += delegate
         {
-            SelectCustom(owner, preset);
+            SelectCustom(owner, definition.Preset);
         };
 
         button.OnMouseOver += delegate
         {
-            SetDescription(owner, DescriptionFor(preset));
+            SetDescription(owner, DescriptionFor(definition.Preset));
         };
 
         button.OnMouseOut += delegate
@@ -158,17 +168,13 @@ internal static class ExpandedWorldBuildPageSizeRowFix
 
     private static string DescriptionFor(ExpandedWorldPreset preset)
     {
-        switch (preset)
-        {
-            case ExpandedWorldPreset.XL:
-                return "XL world: 10,600 x 3,000 tiles. Vanilla-continuity tier 4.";
-            case ExpandedWorldPreset.Huge:
-                return "Huge world: 12,600 x 3,600 tiles. Vanilla-continuity tier 5.";
-            case ExpandedWorldPreset.Thicc:
-                return "THICC world: 14,800 x 4,200 tiles. Vanilla-continuity tier 6.";
-            default:
-                return string.Empty;
-        }
+        if (preset == ExpandedWorldPreset.None)
+            return string.Empty;
+
+        ExpandedWorldDefinition definition = ExpandedWorldMath.DefinitionFor(preset);
+        return definition.Label + " world: " +
+               definition.Width.ToString("N0") + " x " + definition.Height.ToString("N0") +
+               " tiles. Vanilla-continuity tier " + definition.OverallTier + ".";
     }
 
     private static void SelectCustom(UIWorldCreation owner, ExpandedWorldPreset preset)
@@ -203,9 +209,13 @@ internal static class ExpandedWorldBuildPageSizeRowFix
     internal static void Refresh(UIWorldCreation owner)
     {
         bool sameOwner = owner != null && ReferenceEquals(owner, _owner);
-        SetButtonVisual(_xlButton, sameOwner && ExpandedWorldState.Selected == ExpandedWorldPreset.XL);
-        SetButtonVisual(_hugeButton, sameOwner && ExpandedWorldState.Selected == ExpandedWorldPreset.Huge);
-        SetButtonVisual(_thiccButton, sameOwner && ExpandedWorldState.Selected == ExpandedWorldPreset.Thicc);
+        for (int i = 0; i < _expandedButtons.Length; i++)
+        {
+            ExpandedWorldDefinition definition = ExpandedWorldMath.DefinitionAt(i);
+            SetButtonVisual(
+                _expandedButtons[i],
+                sameOwner && ExpandedWorldState.Selected == definition.Preset);
+        }
 
         if (sameOwner && ExpandedWorldState.IsCustomSelected)
             DeselectVanillaButtons(owner);
@@ -275,6 +285,15 @@ internal static class ExpandedWorldBuildPageSizeRowFix
         catch
         {
         }
+    }
+
+    private static void RemoveOwnButtons()
+    {
+        if (_expandedButtons == null)
+            return;
+
+        for (int i = 0; i < _expandedButtons.Length; i++)
+            RemoveOwnButton(_expandedButtons[i]);
     }
 
     private static void RemoveOwnButton(UIElement button)
