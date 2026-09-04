@@ -79,6 +79,20 @@ This is the known-good path from the successful seed `1337420` run. Prefer this 
 12. Render with the existing **pinned TEdit render-only compositor** using the full pinned TEdit palette.
 13. Produce the fourteen individual PNGs plus one final combined comparison PNG.
 
+## Timeout budget
+
+The largest ExpandedWorlds tiers can legitimately take **multiple hours** to finish world generation.
+
+For every six-seed generation run:
+
+- Set the GitHub Actions generation-job timeout to **at least five hours** (`timeout-minutes: 300` or higher).
+- Any separate shell/harness/watchdog deadline must also allow **at least five hours**. Prefer removing the extra watchdog entirely when the Actions job timeout already provides the hard stop.
+- Check for both timeout layers before launching. A generous Actions timeout does not help if an internal harness deadline kills Terraria first.
+
+Seed `343434` proved why this matters: the old `6600`-second harness deadline killed THICC 10 and THICC 11 while Terraria was still actively generating, and the old `timeout-minutes: 120` job ceiling was also too low for those tiers.
+
+In short: **six-seed generation timeouts are 5+ hours, not ~2 hours.**
+
 ## Do not repeat these dead ends
 
 The successful run established several things that should be treated as settled unless the underlying Terraria runtime changes:
@@ -88,6 +102,7 @@ The successful run established several things that should be treated as settled 
 - Do not spend time retargeting Terraria's Windows XNA references to FNA or trying to fake strong-named XNA assembly binding. The official Linux package already provides the clean **x86_64 + FNA** route.
 - Do not load ExpandedWorlds late from inside the world-load callback. It must be patched in **before Terraria queues worldgen**.
 - Do not use file existence alone as success. A truncated, wrong-size, or vanilla-size world is a failed six-seed result.
+- Do not restore the old `6600`-second / `120`-minute timeout limits. Generation jobs and any internal watchdogs must allow **at least five hours**.
 
 ## Required validation gates
 
@@ -130,4 +145,4 @@ The current definition keeps that exact process and extends only the size count 
 
 ## Short version
 
-**Six seed problem = pick one seed, load ExpandedWorlds before Terraria queues worldgen, run all fourteen sizes on the official Linux x64/FNA server path, verify every dimension, render with pinned TEdit, make the picture.**
+**Six seed problem = pick one seed, load ExpandedWorlds before Terraria queues worldgen, give generation 5+ hour timeouts, run all fourteen sizes on the official Linux x64/FNA server path, verify every dimension, render with pinned TEdit, make the picture.**
