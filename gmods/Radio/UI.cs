@@ -25,6 +25,8 @@ internal static class RadioUi
     private static double _notificationEnd;
     private static Type _ingameOptionsType;
     private static MethodInfo _fontDraw;
+    private static MethodInfo _drawCursor;
+    private static MethodInfo _drawThickCursor;
     private static object _font;
     private static Type _vector2Type;
     private static Type _colorType;
@@ -155,6 +157,29 @@ internal static class RadioUi
         DrawSubcategories(spriteBatch, contentX, top + 120, contentWidth);
         DrawStationRows(spriteBatch, contentX, top + 154, contentWidth, height - 248);
         DrawNowPlayingStrip(spriteBatch, contentX, top + height - 80, contentWidth, 62);
+        DrawVanillaCursor();
+    }
+
+    private static void DrawVanillaCursor()
+    {
+        try
+        {
+            if (_drawThickCursor == null)
+            {
+                _drawThickCursor = GeneralRadio.MainType?.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                    .FirstOrDefault(method => method.Name == "DrawThickCursor" && method.GetParameters().Length == 1);
+            }
+            if (_drawCursor == null)
+            {
+                _drawCursor = GeneralRadio.MainType?.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                    .FirstOrDefault(method => method.Name == "DrawCursor" && method.GetParameters().Length == 2);
+            }
+            if (_drawThickCursor == null || _drawCursor == null) return;
+
+            var bonus = _drawThickCursor.Invoke(null, new object[] { false });
+            _drawCursor.Invoke(null, new[] { bonus, (object)false });
+        }
+        catch { }
     }
 
     private static void DrawSearch(object spriteBatch, int x, int y, int width)
