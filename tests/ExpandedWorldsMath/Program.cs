@@ -10,13 +10,17 @@ internal static class Program
         try
         {
             CheckDimensions();
+            CheckServerSelectors();
+            CheckMapRendererMath();
             CheckTierContinuations();
             CheckDungeonContinuations();
             CheckCapacityBounds();
+            RejectRetiredRuntimeIdentifiers();
             ParseRuntimeSources();
 
-            Console.WriteLine($"Expanded Worlds continuity audit passed ({_assertions} assertions).\n" +
-                              "Canonical tiers: XL 10600x3000, Huge 12600x3600, THICC 14800x4200.");
+            Console.WriteLine(
+                $"Expanded Worlds continuity audit passed ({_assertions} assertions).\n" +
+                "Canonical expanded ladder: THICC 10600x3000 through THICC 11 31600x9000.");
             return 0;
         }
         catch (Exception ex)
@@ -35,46 +39,127 @@ internal static class Program
         Equal(8400, ExpandedWorldMath.LargeWidth, "Large width");
         Equal(2400, ExpandedWorldMath.LargeHeight, "Large height");
 
-        Equal(10600, ExpandedWorldMath.XLWidth, "XL width");
-        Equal(3000, ExpandedWorldMath.XLHeight, "XL height");
-        Equal(12600, ExpandedWorldMath.HugeWidth, "Huge width");
-        Equal(3600, ExpandedWorldMath.HugeHeight, "Huge height");
-        Equal(14800, ExpandedWorldMath.ThiccWidth, "THICC width");
-        Equal(4200, ExpandedWorldMath.ThiccHeight, "THICC height");
-
-        int[] widths = { 4200, 6400, 8400, 10600, 12600, 14800 };
-        int[] heights = { 1200, 1800, 2400, 3000, 3600, 4200 };
-        int[] horizontalSections = { 21, 32, 42, 53, 63, 74 };
-        int[] verticalSections = { 8, 12, 16, 20, 24, 28 };
-
-        for (int i = 0; i < widths.Length; i++)
+        string[] labels =
         {
-            Equal(horizontalSections[i], ExpandedWorldMath.HorizontalSections(widths[i]), $"tier {i + 1} horizontal sections");
-            Equal(verticalSections[i], ExpandedWorldMath.VerticalSections(heights[i]), $"tier {i + 1} vertical sections");
+            "THICC", "THICC 2", "THICC 3", "THICC 4", "THICC 5", "THICC 6",
+            "THICC 7", "THICC 8", "THICC 9", "THICC 10", "THICC 11"
+        };
+        int[] widths = { 10600, 12600, 14800, 16800, 19000, 21000, 23200, 25200, 27400, 29400, 31600 };
+        int[] heights = { 3000, 3600, 4200, 4800, 5400, 6000, 6600, 7200, 7800, 8400, 9000 };
+        int[] horizontalSections = { 53, 63, 74, 84, 95, 105, 116, 126, 137, 147, 158 };
+        int[] verticalSections = { 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60 };
+
+        Equal(11, ExpandedWorldMath.ExpandedPresetCount, "expanded preset count");
+        Equal(14, ExpandedWorldMath.MaximumSupportedOverallTier, "maximum overall tier");
+        Equal(31600, ExpandedWorldMath.MaximumSupportedWidth, "maximum supported width");
+        Equal(9000, ExpandedWorldMath.MaximumSupportedHeight, "maximum supported height");
+
+        for (int i = 0; i < labels.Length; i++)
+        {
+            ExpandedWorldDefinition definition = ExpandedWorldMath.DefinitionAt(i);
+            int tier = i + 4;
+
+            Equal(labels[i], definition.Label, $"expanded label {i + 1}");
+            Equal(widths[i], definition.Width, $"expanded width {i + 1}");
+            Equal(heights[i], definition.Height, $"expanded height {i + 1}");
+            Equal(tier, definition.OverallTier, $"expanded overall tier {i + 1}");
+            Equal((ExpandedWorldPreset)(i + 1), definition.Preset, $"expanded enum {i + 1}");
+            Equal(horizontalSections[i], ExpandedWorldMath.HorizontalSections(definition.Width), $"expanded horizontal sections {i + 1}");
+            Equal(verticalSections[i], ExpandedWorldMath.VerticalSections(definition.Height), $"expanded vertical sections {i + 1}");
+            Equal(definition.Width, ExpandedWorldMath.CanonicalWidthForTier(tier), $"canonical width tier {tier}");
+            Equal(definition.Height, ExpandedWorldMath.CanonicalHeightForTier(tier), $"canonical height tier {tier}");
+            Equal(definition.Width, ExpandedWorldMath.WidthFor(definition.Preset), $"width lookup {definition.Label}");
+            Equal(definition.Height, ExpandedWorldMath.HeightFor(definition.Preset), $"height lookup {definition.Label}");
+            Equal(tier, ExpandedWorldMath.TierFor(definition.Preset), $"tier lookup {definition.Label}");
+            Equal(definition.Label, ExpandedWorldMath.LabelFor(definition.Preset), $"label lookup {definition.Label}");
+
+            True(
+                ExpandedWorldMath.TryGetPresetByDimensions(definition.Width, definition.Height, out ExpandedWorldPreset byDimensions),
+                $"dimension lookup {definition.Label}");
+            Equal(definition.Preset, byDimensions, $"dimension preset {definition.Label}");
+            True(ExpandedWorldMath.IsExpandedPresetDimensions(definition.Width, definition.Height), $"recognize {definition.Label}");
         }
 
-        for (int i = 1; i < heights.Length; i++)
-            Equal(600, heights[i] - heights[i - 1], $"tier {i + 1} height delta");
+        // Backward compatibility is purely dimensional: these three historical
+        // canvases now present under their new public THICC names.
+        True(ExpandedWorldMath.TryGetPresetByDimensions(10600, 3000, out ExpandedWorldPreset oldXl), "former XL dimensions");
+        Equal(ExpandedWorldPreset.Thicc, oldXl, "former XL relabels THICC");
+        True(ExpandedWorldMath.TryGetPresetByDimensions(12600, 3600, out ExpandedWorldPreset oldHuge), "former Huge dimensions");
+        Equal(ExpandedWorldPreset.Thicc2, oldHuge, "former Huge relabels THICC 2");
+        True(ExpandedWorldMath.TryGetPresetByDimensions(14800, 4200, out ExpandedWorldPreset oldThicc), "former THICC dimensions");
+        Equal(ExpandedWorldPreset.Thicc3, oldThicc, "former THICC relabels THICC 3");
 
-        int[] expectedWidthDeltas = { 2200, 2000, 2200, 2000, 2200 };
-        for (int i = 1; i < widths.Length; i++)
-            Equal(expectedWidthDeltas[i - 1], widths[i] - widths[i - 1], $"tier {i + 1} width delta");
+        False(ExpandedWorldMath.IsExpandedPresetDimensions(12600, 2400), "reject retired legacy XL dimensions");
+        False(ExpandedWorldMath.IsExpandedPresetDimensions(16800, 2400), "reject retired legacy Huge dimensions");
+        False(ExpandedWorldMath.IsExpandedPresetDimensions(16800, 4801), "reject near-miss THICC 4 dimensions");
 
-        True(ExpandedWorldMath.IsExpandedPresetDimensions(10600, 3000), "recognize XL");
-        True(ExpandedWorldMath.IsExpandedPresetDimensions(12600, 3600), "recognize Huge");
-        True(ExpandedWorldMath.IsExpandedPresetDimensions(14800, 4200), "recognize THICC");
-        False(ExpandedWorldMath.IsExpandedPresetDimensions(12600, 2400), "reject legacy XL");
-        False(ExpandedWorldMath.IsExpandedPresetDimensions(16800, 2400), "reject legacy Huge");
-        False(ExpandedWorldMath.IsExpandedPresetDimensions(16800, 4800), "reject legacy THICC");
+        Equal(33600, ExpandedWorldMath.CanonicalWidthForTier(15), "next canonical width");
+        Equal(9600, ExpandedWorldMath.CanonicalHeightForTier(15), "next canonical height");
+        True(
+            ExpandedWorldMath.CanonicalWidthForTier(15) > ExpandedWorldMath.SignedCoordinatePositiveMaximum,
+            "tier 15 crosses signed Int16 positive coordinate boundary");
+        True(
+            ExpandedWorldMath.MaximumSupportedWidth <= ExpandedWorldMath.SignedCoordinatePositiveMaximum,
+            "THICC 11 remains inside signed Int16 positive coordinate boundary");
 
-        Equal(4, ExpandedWorldMath.TierFor(ExpandedWorldPreset.XL), "XL tier");
-        Equal(5, ExpandedWorldMath.TierFor(ExpandedWorldPreset.Huge), "Huge tier");
-        Equal(6, ExpandedWorldMath.TierFor(ExpandedWorldPreset.Thicc), "THICC tier");
+        Equal(284400000L, ExpandedWorldMath.TileArea(31600, 9000), "THICC 11 tile area uses Int64");
+    }
+
+    private static void CheckServerSelectors()
+    {
+        for (int i = 0; i < ExpandedWorldMath.ExpandedPresetCount; i++)
+        {
+            ExpandedWorldDefinition definition = ExpandedWorldMath.DefinitionAt(i);
+            string compact = i == 0 ? "THICC" : "THICC" + (i + 1);
+
+            True(ExpandedWorldMath.TryParsePreset(compact, out ExpandedWorldPreset compactPreset), "parse " + compact);
+            Equal(definition.Preset, compactPreset, "compact selector " + compact);
+
+            True(ExpandedWorldMath.TryParsePreset(definition.Label, out ExpandedWorldPreset displayPreset), "parse display " + definition.Label);
+            Equal(definition.Preset, displayPreset, "display selector " + definition.Label);
+        }
+
+        False(ExpandedWorldMath.TryParsePreset("XL", out _), "reject retired XL selector");
+        False(ExpandedWorldMath.TryParsePreset("HUGE", out _), "reject retired Huge selector");
+        False(ExpandedWorldMath.TryParsePreset("THICC1", out _), "reject redundant THICC1 selector");
+        False(ExpandedWorldMath.TryParsePreset("THICC12", out _), "reject unsupported THICC12 selector");
+        False(ExpandedWorldMath.TryParsePreset("", out _), "reject empty selector");
+    }
+
+    private static void CheckMapRendererMath()
+    {
+        for (int i = 0; i < ExpandedWorldMath.ExpandedPresetCount; i++)
+        {
+            ExpandedWorldDefinition definition = ExpandedWorldMath.DefinitionAt(i);
+            int expectedColumns = (definition.Width + ExpandedWorldMapMath.TextureMaxWidth - 1) / ExpandedWorldMapMath.TextureMaxWidth;
+            int expectedRows = (definition.Height + ExpandedWorldMapMath.TextureMaxHeight - 1) / ExpandedWorldMapMath.TextureMaxHeight;
+
+            Equal(expectedColumns, ExpandedWorldMapMath.LogicalTargetColumns(definition.Width), $"logical map columns {definition.Label}");
+            Equal(expectedRows, ExpandedWorldMapMath.LogicalTargetRows(definition.Height), $"logical map rows {definition.Label}");
+            Equal(expectedColumns - 1, ExpandedWorldMapMath.LastRenderableTargetColumn(definition.Width), $"last map column {definition.Label}");
+            True(ExpandedWorldMapMath.BackingTargetColumns(definition.Width) >= expectedColumns, $"backing columns cover {definition.Label}");
+            True(ExpandedWorldMapMath.BackingTargetRows(definition.Height) >= expectedRows, $"backing rows cover {definition.Label}");
+        }
+
+        Equal(16, ExpandedWorldMapMath.LogicalTargetColumns(31600), "THICC 11 logical map columns");
+        Equal(5, ExpandedWorldMapMath.LogicalTargetRows(9000), "THICC 11 logical map rows");
+        Equal(17, ExpandedWorldMapMath.BackingTargetColumns(31600), "THICC 11 backing map columns");
+        Equal(6, ExpandedWorldMapMath.BackingTargetRows(9000), "THICC 11 backing map rows");
+        Equal(15, ExpandedWorldMapMath.LastRenderableTargetColumn(31600), "THICC 11 final renderable map column");
+        Equal(1600, ExpandedWorldMapMath.PhysicalFinalColumnWidth(31600), "THICC 11 final physical map column width");
+        Equal(1800, ExpandedWorldMapMath.PhysicalFinalRowHeight(9000), "THICC 11 final physical map row height");
+        True(ExpandedWorldMapMath.NeedsGuardColumn(31600), "THICC 11 needs map guard column");
+        True(ExpandedWorldMapMath.NeedsGuardRow(9000), "THICC 11 needs map guard row");
+
+        // Former THICC's 4,200 height ends in the retail-special 600-pixel tail,
+        // so the generalized math correctly needs no extra row there.
+        False(ExpandedWorldMapMath.NeedsGuardRow(4200), "4,200-height map uses retail 600 tail directly");
+        Equal(3, ExpandedWorldMapMath.BackingTargetRows(4200), "4,200-height backing map rows");
     }
 
     private static void CheckTierContinuations()
     {
-        for (int tier = 1; tier <= 6; tier++)
+        for (int tier = 1; tier <= ExpandedWorldMath.MaximumSupportedOverallTier; tier++)
         {
             Equal(tier + 1, ExpandedWorldTierMath.StatueMultiplier(tier), $"statue tier {tier}");
             Equal(tier, ExpandedWorldTierMath.SkyLakeBaseCount(tier), $"sky lake tier {tier}");
@@ -88,12 +173,12 @@ internal static class Program
             Equal(2 * tier + 2, spike.Maximum, $"Spike Cave maximum tier {tier}");
         }
 
-        Equal(60, ExpandedWorldTierMath.DirtiestBlockCount(4, celebrationMk10: true), "Celebration keeps downstream x5");
+        Equal(210, ExpandedWorldTierMath.DirtiestBlockCount(14, celebrationMk10: true), "THICC 11 Celebration keeps downstream x5");
     }
 
     private static void CheckDungeonContinuations()
     {
-        for (int tier = 1; tier <= 6; tier++)
+        for (int tier = 1; tier <= ExpandedWorldMath.MaximumSupportedOverallTier; tier++)
         {
             Equal(5 * tier, ExpandedWorldDungeonTierMath.BookshelfMinimum(tier), $"Dungeon bookshelf tier {tier}");
             Equal(5 * tier, ExpandedWorldDungeonTierMath.WaterCandleMinimum(tier), $"Dungeon water candle tier {tier}");
@@ -117,23 +202,63 @@ internal static class Program
 
     private static void CheckCapacityBounds()
     {
-        Equal(280, ExpandedWorldCapacityMath.FloatingIslandScratchCapacity(10600, 4), "XL floating-island scratch bound");
-        Equal(350, ExpandedWorldCapacityMath.FloatingIslandScratchCapacity(12600, 5), "Huge floating-island scratch bound");
-        Equal(390, ExpandedWorldCapacityMath.FloatingIslandScratchCapacity(14800, 6), "THICC floating-island scratch bound");
+        const int width = 31600;
+        const int tier = 14;
 
-        Equal(80, ExpandedWorldCapacityMath.CrimsonHeartScratchCapacity(10600), "XL Crimson-heart scratch bound");
-        Equal(96, ExpandedWorldCapacityMath.CrimsonHeartScratchCapacity(12600), "Huge Crimson-heart scratch bound");
-        Equal(112, ExpandedWorldCapacityMath.CrimsonHeartScratchCapacity(14800), "THICC Crimson-heart scratch bound");
+        Equal(890, ExpandedWorldCapacityMath.FloatingIslandScratchCapacity(width, tier), "THICC 11 floating-island scratch bound");
+        Equal(232, ExpandedWorldCapacityMath.CrimsonHeartScratchCapacity(width), "THICC 11 Crimson-heart scratch bound");
+        Equal(46, ExpandedWorldCapacityMath.MountainCaveScratchCapacity(width), "THICC 11 Mountain Cave scratch bound");
+        Equal(70, ExpandedWorldCapacityMath.SurfaceTunnelRecordUpperBound(width, remixWorld: true), "THICC 11 surface tunnel record bound");
+        Equal(71, ExpandedWorldCapacityMath.SurfaceTunnelSentinelCapacity(width), "THICC 11 surface tunnel sentinel");
+        Equal(74, ExpandedWorldCapacityMath.SurfaceOrePatchRecordUpperBound(width), "THICC 11 surface ore record bound");
+        Equal(75, ExpandedWorldCapacityMath.SurfaceOrePatchSentinelCapacity(width), "THICC 11 surface ore sentinel");
+
+        // Audited fixed stores that remain below retail capacity at the hard stop.
+        Equal(44, ExpandedWorldCapacityMath.LakeRecordUpperBound(width), "THICC 11 lake record bound");
+        True(ExpandedWorldCapacityMath.LakeRecordUpperBound(width) < 50, "lake capacity remains below 50");
+        Equal(46, ExpandedWorldCapacityMath.MushroomBiomeRecordUpperBound(width), "THICC 11 mushroom biome bound");
+        True(ExpandedWorldCapacityMath.MushroomBiomeRecordUpperBound(width) < 50, "mushroom capacity remains below 50");
+        Equal(16, ExpandedWorldCapacityMath.OasisRecordUpperBound(width), "THICC 11 oasis bound");
+        True(ExpandedWorldCapacityMath.OasisRecordUpperBound(width) < 20, "oasis capacity remains below 20");
+        Equal(83, ExpandedWorldCapacityMath.JungleShrineRecordUpperBound(width), "THICC 11 jungle shrine bound");
+        True(ExpandedWorldCapacityMath.JungleShrineRecordUpperBound(width) < 100, "jungle shrine capacity remains below 100");
+        Equal(82, ExpandedWorldCapacityMath.BeeLarvaRecordUpperBound(width), "THICC 11 bee larva bound");
+        True(ExpandedWorldCapacityMath.BeeLarvaRecordUpperBound(width) < 100, "bee larva capacity remains below 100");
     }
 
-    private static void ParseRuntimeSources()
+    private static void RejectRetiredRuntimeIdentifiers()
     {
         string repoRoot = Directory.GetCurrentDirectory();
         string modDirectory = Path.Combine(repoRoot, "gmods", "ExpandedWorlds");
         if (!Directory.Exists(modDirectory))
             throw new DirectoryNotFoundException("Run this audit from the gloader repository root: " + modDirectory);
 
+        string[] retired =
+        {
+            "ExpandedWorldPreset.XL",
+            "ExpandedWorldPreset.Huge",
+            "XLWidth",
+            "XLHeight",
+            "HugeWidth",
+            "HugeHeight"
+        };
+
+        foreach (string file in Directory.GetFiles(modDirectory, "*.cs", SearchOption.TopDirectoryOnly))
+        {
+            string text = File.ReadAllText(file);
+            foreach (string token in retired)
+            {
+                False(text.Contains(token, StringComparison.Ordinal), $"retired runtime identifier {token} in {Path.GetFileName(file)}");
+            }
+        }
+    }
+
+    private static void ParseRuntimeSources()
+    {
+        string repoRoot = Directory.GetCurrentDirectory();
+        string modDirectory = Path.Combine(repoRoot, "gmods", "ExpandedWorlds");
         string[] files = Directory.GetFiles(modDirectory, "*.cs", SearchOption.TopDirectoryOnly);
+
         foreach (string mode in new[] { "GLOADER_CLIENT", "GLOADER_SERVER" })
         {
             var options = new CSharpParseOptions(
