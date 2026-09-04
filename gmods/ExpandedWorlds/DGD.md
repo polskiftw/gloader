@@ -1,185 +1,201 @@
 # Expanded Worlds - DGD
 
-## The six size buttons
+## The buttons
 
 ```text
-Small   4200 x 1200
-Medium  6400 x 1800
-Large   8400 x 2400
-XL     10600 x 3000
-Huge   12600 x 3600
-THICC  14800 x 4200
+Small       4200 x 1200
+Medium      6400 x 1800
+Large       8400 x 2400
+THICC      10600 x 3000
+THICC 2    12600 x 3600
+THICC 3    14800 x 4200
+THICC 4    16800 x 4800
+THICC 5    19000 x 5400
+THICC 6    21000 x 6000
+THICC 7    23200 x 6600
+THICC 8    25200 x 7200
+THICC 9    27400 x 7800
+THICC 10   29400 x 8400
+THICC 11   31600 x 9000
 ```
 
-Those are the canonical sizes.
-
-## Why those numbers
-
-Terraria splits worlds into `200 x 150` tile network sections.
-
-Vanilla:
+`XL` and `Huge` are dead names. Old worlds are not rewritten: their stored dimensions simply map to the new names.
 
 ```text
-Small   21 x  8 sections
-Medium  32 x 12 sections
-Large   42 x 16 sections
+old XL     10600 x 3000 -> THICC
+old Huge   12600 x 3600 -> THICC 2
+old THICC  14800 x 4200 -> THICC 3
 ```
 
-Continue the same pattern:
+## Why those stupid-looking numbers
+
+Terraria splits the world into `200 x 150` tile network sections.
 
 ```text
-XL      53 x 20 sections
-Huge    63 x 24 sections
-THICC   74 x 28 sections
+Small    21 x  8
+Medium   32 x 12
+Large    42 x 16
+THICC    53 x 20
+THICC 2  63 x 24
+THICC 3  74 x 28
+THICC 4  84 x 32
+THICC 5  95 x 36
+THICC 6 105 x 40
+THICC 7 116 x 44
+THICC 8 126 x 48
+THICC 9 137 x 52
+THICC10 147 x 56
+THICC11 158 x 60
 ```
 
-Horizontal section jumps repeat `+11, +10`. Vertical always adds `+4`.
+Horizontal jumps repeat `+11, +10`. Vertical always adds `+4`. We keep Terraria's own slightly wobbly width/height cadence instead of inventing prettier dimensions and then writing a pile of fake geometry compensation.
 
-That is why the custom widths look slightly weird. We are preserving the same tiny width-vs-height wobble Terraria already has at Medium instead of picking prettier numbers and then patching around the consequences.
+## Why THICC 11 is the end
 
-## The rule
+The next correct tier is:
 
-**If Terraria already uses a physical formula, leave it the hell alone.**
+```text
+168 x 64 sections = 33600 x 9600 tiles
+```
+
+Terraria still has signed 16-bit coordinate paths whose positive ceiling is `32767`. `33600` crosses it. So **THICC 11 is the hard stop**. No THICC 12 unless the underlying coordinate contract is redesigned first.
+
+## The main rule
+
+**If Terraria already has a physical formula, leave it the hell alone.**
 
 Width formula? It sees the real width.
 
-Height formula? It sees the real height.
+Height formula? Real height.
 
-Area formula? It sees the real area.
+Area formula? Real area.
 
-`maxTilesX / 4200.0`? Leave the exact source math alone.
+Floating point? Keep it floating point.
 
-Integer `maxTilesX / 4200`? Also leave it alone. Do not "improve" it into floating point.
+Integer division? Keep the integer division.
 
-For categorical Small/Medium/Large lookups we have two allowed continuation classes:
+The mod is allowed to continue a Small/Medium/Large lookup only when the sequence is source-backed and defensible. Weird/ambiguous stuff stays vanilla Large.
 
-1. an obvious arithmetic sequence; or
-2. a documented high-confidence inference that is independently supported by Terraria's surrounding size math.
+## Terraria still thinks every THICC world is Large
 
-The second kind lives in `InferredTierContinuity.cs` so it can never get confused with the exact stuff.
+This is intentional.
 
-## Examples that DO continue
+`WorldGen.GetWorldSize()` must still return `2` for every THICC tier. We do **not** add fake Terraria size enums. The mod remembers the selected physical tier separately, applies the real dimensions at generation/allocation time, and lets Terraria keep using its normal Large category everywhere that does not have a defensible continuation.
 
-```text
-Sky lakes:       1,2,3 -> 4,5,6
-Statue mult:     2,3,4 -> 5,6,7
-Glow Tulips:     2,4,6 -> 8,10,12
-Boulder Pet:     2,4,6 -> 8,10,12
-Spike base:      3,5,7 -> 9,11,13
-Chillet Eggs:    6,9,12 -> 15,18,21
-Dirtiest Block:  3,6,9 -> 12,15,18
-```
+## Exact sequences
 
-Terraria still applies its own special-seed multipliers/random rolls after those base values.
-
-The clean 1.4.5 Dual Dungeon code has more obvious sequences and those continue too. See README.md for the table.
-
-## High-confidence promoted inferences
-
-Two formerly-ambiguous 1.4.5 Dual Dungeon tables are now promoted because they line up with the same vertical-section math used all over that generator.
-
-Vertical sections are:
+These extend by overall tier all the way through tier 14:
 
 ```text
-Small 8, Medium 12, Large 16, XL 20, Huge 24, THICC 28
+Sky lakes:       tier
+Statue mult:     tier + 1
+Glow Tulips:     2 * tier
+Boulder Pet:     2 * tier
+Spike base:      2 * tier + 1, then Terraria still does Next(2)
+Chillet Eggs:    3 * tier + 3
+Dirtiest Block:  3 * tier
 ```
 
-### Shadow Orb / Crimson Heart quota
+The obvious 1.4.5 Dual Dungeon sequences do the same thing. The formulas are in code/tests; README has the policy.
 
-Vanilla is `8,14,18`.
+## High-confidence weirdos
 
-Medium and Large are exactly `vertical sections + 2`; Small is the compact-world exception.
+Two Dual Dungeon tables are weird at Small but become obvious from Medium onward:
+
+- Orb/Heart quota = `vertical sections + 2` from Medium onward;
+- Spider specialized rooms = `vertical sections / 2` from Medium onward.
+
+Lihzahrd paintings are **not** a growth curve. Vanilla Large rolls `2 or 3`; expanded worlds turn that already-rolled result into `3 or 4`. Same single RNG call. Every THICC tier gets the same policy because there is no honest formula for more.
+
+## Fixed arrays that actually break
+
+At THICC 11 the source audit says these retail bookkeeping limits are genuinely too small:
 
 ```text
-8,14,18 -> 22,26,30
+Floating Island metadata: 300 -> need up to 890
+Crimson heartPos:          100 -> need up to 232
+Mountain Cave records:      30 -> need up to 46
+Surface Tunnel tracking:    49 usable -> need 70 (sentinel 71)
+Surface Ore tracking:       49 usable -> need 74 (sentinel 75)
 ```
 
-### Spider specialized rooms
+We only enlarge the bookkeeping. Terraria still decides how many things to generate, where they go, and which RNG calls happen.
 
-Vanilla is `2,6,8`.
-
-Medium and Large are exactly `vertical sections / 2`; Small is the compact-world exception.
+These are still safe at THICC 11 and therefore stay vanilla:
 
 ```text
-2,6,8 -> 10,12,14
+Lakes:          44 max / 50 slots
+Mushrooms:      46 max / 50
+Oases:          16 max / 20
+Jungle shrines: 83 max / 100
+Bee larvae:     82 max / 100
 ```
 
-These are still quotas. Terraria's existing room availability and placement logic decides how many can actually be realized.
+The global chest array stays at Terraria's `8000`. Do **not** casually resize it: that number is part of more than one chest runtime/serialization/network contract. The stress workflow records actual chest counts so we get evidence before ever touching it.
 
-## Lihzahrd painting compromise
+## Big memory stuff
 
-Vanilla:
+THICC 11 is:
 
 ```text
-Small   1
-Medium  2
-Large   2 or 3
+31600 * 9000 = 284,400,000 logical tiles
 ```
 
-There is no convincing tier formula, so we do not invent one. All three expanded sizes use:
+That is why this is an x64-only feature. The supported path is the .NET 10 `gloader.exe` with the private x64 Terraria runtime in `gdeps/x64-runtime/TerrariaRelease.dll`. Server is `gloader.exe --server`.
+
+No 32-bit heroics. No Linux runtime target.
+
+## Map renderer nonsense
+
+Terraria's map renderer is separately hard-coded for a `5 x 2` target grid. Normal chunks are `2000 x 1800`, except the **final allocated** chunk is special `400 x 600`.
+
+THICC 11 really needs:
 
 ```text
-XL      3 or 4
-Huge    3 or 4
-THICC   3 or 4
+logical map targets: 16 x 5
 ```
 
-The code keeps vanilla Large's exact `Next(2)` roll and just adds one to its already-randomized result. That means no extra RNG call and no fake growth curve.
+Its real right edge is `1600` tiles wide and its bottom row is a full `1800`, so neither edge may accidentally become the retail `400 x 600` special final target. The clean trick is to leave one unused guard column and row:
 
-## What still DOES NOT continue
+```text
+backing map targets: 17 x 6
+real final X target: index 15
+```
 
-If the vanilla terms are weird/random/ambiguous and we cannot independently cross-check a rule, we stop at Large instead of making shit up.
+That preserves the stupid retail behavior instead of rewriting MapRenderer from scratch.
 
-Tree/cave background regions also stop at Large's four styles because Terraria's `.wld` format and runtime only store three boundaries + four styles. Changing that would mean inventing a new file/network format. Nope.
+## Server names
 
-## What got deleted
+`GLOADER_EXPANDED_WORLD` accepts:
 
-The old sizes were super wide, so we had patches trying to decide whether a vanilla width-derived number was "really" horizontal, vertical, area, or isotropic.
+```text
+THICC
+THICC2
+THICC3
+THICC4
+THICC5
+THICC6
+THICC7
+THICC8
+THICC9
+THICC10
+THICC11
+```
 
-Those aspect-ratio repair layers are gone:
-
-- no custom Desert scaling layer;
-- no custom Jungle scaling layer;
-- no Hive geometry reinterpretation;
-- no generic feature-geometry reinterpretation;
-- no Don't Starve Wavy Cave area rewrite;
-- no other secret-seed width-proxy rewrite.
-
-With the canonical sizes, width and height grow together again like vanilla. Terraria gets to use its own math.
-
-## What still has to be patched
-
-Stuff that is not worldgen policy:
-
-- set the bigger physical dimensions before Terraria allocates the world;
-- enlarge startup-sized tile/map/section storage;
-- enlarge two fixed worldgen scratch arrays if Terraria can legitimately overflow them;
-- extend the client map renderer's fixed target grid;
-- label custom dimensions XL/Huge/THICC;
-- add the three buttons;
-- extend the exact discrete size tables described above;
-- apply the two documented high-confidence inferred quotas and the flat 3-or-4 Lihzahrd painting policy.
-
-## Secret seeds
-
-Terraria owns them. We do not have our own replacement list or our own fake secret-seed generator.
-
-If a secret seed changes a vanilla pass, that vanilla pass still runs. Expanded Worlds only supplies the larger canonical canvas and the small set of source-backed discrete/capacity continuations.
-
-## Client and server
-
-Same generation math now.
-
-The shared generation context, tier continuations, inferred promotions, and capacity guards compile for both client and server. The 64-bit headless generator should not be a different flavor of Expanded Worlds from clicking the size button in the client.
+Display-style spaces such as `THICC 11` are okay too. `XL`, `HUGE`, and `THICC12` are supposed to fail.
 
 ## OCD check
 
-CI locks:
+Fast CI locks the exact 11-tier table, dimensions-to-name lookup, section cadence, tier math through 14, capacity bounds, map grid, signed-coordinate hard stop, selector parsing, and client/server syntax.
+
+The separate manual Windows stress matrix runs **all 11 THICC tiers independently** with seed `1337420`, `fail-fast: false`, and records:
 
 ```text
-XL     10600 x 3000 = 53 x 20 sections
-Huge   12600 x 3600 = 63 x 24 sections
-THICC  14800 x 4200 = 74 x 28 sections
+generation time
+peak memory
+.wld size
+chest count
+save/reload dimension verification
 ```
 
-It also tests the exact discrete sequences, the promoted `22/26/30` and `10/12/14` rules, the `3/4` painting mapping, capacity bounds, rejects the three obsolete dimensions, and syntax-parses every Expanded Worlds `.cs` file once as client and once as server.
+If THICC 11 explodes a runner, we report where it explodes. We do not secretly delete the hard tiers from the matrix to make the check green.
