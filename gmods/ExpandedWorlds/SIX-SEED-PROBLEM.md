@@ -4,6 +4,16 @@ The **six seed problem** means:
 
 Use **one seed number** across **all six world sizes**, generate all six worlds, render them as PNGs, and produce **one final comparison image** showing all six results.
 
+## Critical loading requirement
+
+**Make sure ExpandedWorlds is fully loaded and Harmony-patched before Terraria queues or enters the world-load callback.**
+
+Do **not** initialize ExpandedWorlds from inside `WorldGen.serverLoadWorldCallBack` immediately before `WorldFile.LoadWorld`. That is too late and can deadlock while Harmony patches world/server code that is already active.
+
+For runner-based generation, bootstrap ExpandedWorlds **before** the callback is queued — in practice, initialize the mod immediately before the `serverLoadWorld` code creates/references the `serverLoadWorldCallBack` delegate. Only start world generation after ExpandedWorlds initialization and `Harmony.PatchAll(...)` have completed successfully.
+
+In short: **ExpandedWorlds first, world-load callback second, world generation third.**
+
 ## Default mode
 
 If Claire does **not** provide a seed:
@@ -34,4 +44,4 @@ If Claire provides a seed:
 
 ## Short version
 
-**Six seed problem = pick one seed, run all six sizes, make the picture.**
+**Six seed problem = pick one seed, load ExpandedWorlds before Terraria starts world loading, run all six sizes, make the picture.**
