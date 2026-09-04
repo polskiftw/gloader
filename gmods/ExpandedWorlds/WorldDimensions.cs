@@ -20,12 +20,28 @@ internal static class ExpandedWorldDimensions
         RequireLiteralInt(nameof(WorldGen.WorldSizeLargeX), ExpandedWorldMath.LargeWidth);
         RequireLiteralInt(nameof(WorldGen.WorldSizeLargeY), ExpandedWorldMath.LargeHeight);
 
-        ExpandedWorldMath.HorizontalSections(ExpandedWorldMath.XLWidth);
-        ExpandedWorldMath.HorizontalSections(ExpandedWorldMath.HugeWidth);
-        ExpandedWorldMath.HorizontalSections(ExpandedWorldMath.ThiccWidth);
-        ExpandedWorldMath.VerticalSections(ExpandedWorldMath.XLHeight);
-        ExpandedWorldMath.VerticalSections(ExpandedWorldMath.HugeHeight);
-        ExpandedWorldMath.VerticalSections(ExpandedWorldMath.ThiccHeight);
+        for (int i = 0; i < ExpandedWorldMath.ExpandedPresetCount; i++)
+        {
+            ExpandedWorldDefinition definition = ExpandedWorldMath.DefinitionAt(i);
+            if (definition.Width != ExpandedWorldMath.CanonicalWidthForTier(definition.OverallTier) ||
+                definition.Height != ExpandedWorldMath.CanonicalHeightForTier(definition.OverallTier))
+            {
+                throw new InvalidOperationException(
+                    "[Expanded Worlds] " + definition.Label +
+                    " no longer matches the canonical section cadence.");
+            }
+
+            ExpandedWorldMath.HorizontalSections(definition.Width);
+            ExpandedWorldMath.VerticalSections(definition.Height);
+        }
+
+        int rejectedNextWidth = ExpandedWorldMath.CanonicalWidthForTier(
+            ExpandedWorldMath.MaximumSupportedOverallTier + 1);
+        if (rejectedNextWidth <= ExpandedWorldMath.SignedCoordinatePositiveMaximum)
+        {
+            throw new InvalidOperationException(
+                "[Expanded Worlds] THICC ladder boundary audit no longer stops before Int16 overflow.");
+        }
     }
 
     private static void RequireLiteralInt(string fieldName, int expected)
