@@ -119,6 +119,87 @@ internal static class ExpandedWorldInferredTierPatchUtil
         return code;
     }
 
+    /// <summary>
+    /// Find one audited Small/Medium/Large assignment triplet where all three
+    /// constants are stored into the same local. This is stronger than looking
+    /// for a Large constant alone and mirrors the decompiled source contract
+    /// (for example Spider quota num4 = 2 / 6 / 8).
+    /// </summary>
+    internal static IEnumerable<CodeInstruction> InjectAfterUniqueTierLocalTriplet(
+        IEnumerable<CodeInstruction> instructions,
+        MethodBase original,
+        string featureName,
+        int expectedSmallValue,
+        int expectedMediumValue,
+        int expectedLargeValue,
+        MethodInfo adjustMethod,
+        int worldSizeCallOccurrence = 1,
+        int scanWindow = 160)
+    {
+        var code = instructions.ToList();
+        int start = FindNthWorldSizeCall(code, worldSizeCallOccurrence);
+        if (start < 0)
+        {
+            throw new InvalidOperationException(
+                "[Expanded Worlds] " + featureName + " no longer contains the audited WorldGen.GetWorldSize call.");
+        }
+
+        int end = Math.Min(code.Count - 1, start + scanWindow);
+        var assignments = new List<TierLocalAssignment>();
+
+        for (int i = start + 1; i < end; i++)
+        {
+            int tier = 0;
+            if (ExpandedWorldDungeonTierPatchUtil.IsIntConstant(code[i], expectedSmallValue))
+                tier = 1;
+            else if (ExpandedWorldDungeonTierPatchUtil.IsIntConstant(code[i], expectedMediumValue))
+                tier = 2;
+            else if (ExpandedWorldDungeonTierPatchUtil.IsIntConstant(code[i], expectedLargeValue))
+                tier = 3;
+            else
+                continue;
+
+            if (!ExpandedWorldDungeonTierPatchUtil.IsLocalStore(code[i + 1]))
+                continue;
+
+            assignments.Add(new TierLocalAssignment(
+                tier,
+                i + 1,
+                LocalStoreIdentity(code[i + 1])));
+        }
+
+        var candidates = assignments
+            .GroupBy(item => item.LocalIdentity)
+            .Select(group => new
+            {
+                LocalIdentity = group.Key,
+                Small = group.Where(item => item.Tier == 1).ToArray(),
+                Medium = group.Where(item => item.Tier == 2).ToArray(),
+                Large = group.Where(item => item.Tier == 3).ToArray()
+            })
+            .Where(group =>
+                group.Small.Length == 1 &&
+                group.Medium.Length == 1 &&
+                group.Large.Length == 1 &&
+                group.Small[0].StoreIndex < group.Medium[0].StoreIndex &&
+                group.Medium[0].StoreIndex < group.Large[0].StoreIndex)
+            .ToArray();
+
+        if (candidates.Length != 1)
+        {
+            throw new InvalidOperationException(
+                "[Expanded Worlds] " + featureName + " source shape changed in " +
+                (original?.DeclaringType?.FullName ?? "<unknown>") + "." +
+                (original?.Name ?? "<unknown>") + ": expected exactly one " +
+                expectedSmallValue + "/" + expectedMediumValue + "/" + expectedLargeValue +
+                " tier triplet stored to the same local, found " + candidates.Length +
+                ". Refusing to guess.");
+        }
+
+        InsertCallBeforeStore(code, candidates[0].Large[0].StoreIndex, adjustMethod);
+        return code;
+    }
+
     internal static IEnumerable<CodeInstruction> AdjustEveryStaticFieldStore(
         IEnumerable<CodeInstruction> instructions,
         MethodBase original,
@@ -170,6 +251,27 @@ internal static class ExpandedWorldInferredTierPatchUtil
         return -1;
     }
 
+    private static string LocalStoreIdentity(CodeInstruction instruction)
+    {
+        if (instruction.opcode == OpCodes.Stloc_0) return "0";
+        if (instruction.opcode == OpCodes.Stloc_1) return "1";
+        if (instruction.opcode == OpCodes.Stloc_2) return "2";
+        if (instruction.opcode == OpCodes.Stloc_3) return "3";
+
+        if (instruction.operand is LocalBuilder builder)
+            return builder.LocalIndex.ToString();
+        if (instruction.operand is LocalVariableInfo variable)
+            return variable.LocalIndex.ToString();
+        if (instruction.operand is byte byteIndex)
+            return byteIndex.ToString();
+        if (instruction.operand is sbyte signedByteIndex)
+            return signedByteIndex.ToString();
+        if (instruction.operand is int intIndex)
+            return intIndex.ToString();
+
+        return instruction.operand?.ToString() ?? "<unknown-local>";
+    }
+
     private static void InsertCallBeforeStore(List<CodeInstruction> code, int storeIndex, MethodInfo adjustMethod)
     {
         var call = new CodeInstruction(OpCodes.Call, adjustMethod);
@@ -178,6 +280,20 @@ internal static class ExpandedWorldInferredTierPatchUtil
         call.blocks.AddRange(code[storeIndex].blocks);
         code[storeIndex].blocks.Clear();
         code.Insert(storeIndex, call);
+    }
+
+    private sealed class TierLocalAssignment
+    {
+        internal TierLocalAssignment(int tier, int storeIndex, string localIdentity)
+        {
+            Tier = tier;
+            StoreIndex = storeIndex;
+            LocalIdentity = localIdentity;
+        }
+
+        internal int Tier { get; }
+        internal int StoreIndex { get; }
+        internal string LocalIdentity { get; }
     }
 }
 
@@ -238,10 +354,12 @@ internal static class ExpandedWorldInferredSpiderRoomQuotaPatch
     [HarmonyTranspiler]
     [HarmonyPriority(Priority.Last)]
     private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions, MethodBase original) =>
-        ExpandedWorldInferredTierPatchUtil.InjectAfterUniqueLargeAssignment(
+        ExpandedWorldInferredTierPatchUtil.InjectAfterUniqueTierLocalTriplet(
             instructions,
             original,
             "Dual Dungeon Spider specialized-room quota",
+            2,
+            6,
             8,
             Adjust);
 
