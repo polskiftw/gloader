@@ -226,16 +226,8 @@ internal static class ExpandedWorldDiscreteTierGenerationPatch
                 vanillaCount + ".");
         }
 
-        switch (ExpandedWorldGenerationContext.ActivePreset)
-        {
-            case ExpandedWorldPreset.XL:
-            case ExpandedWorldPreset.Huge:
-            case ExpandedWorldPreset.Thicc:
-                return ExpandedWorldTierMath.DirtiestBlockBaseCount(
-                    ExpandedWorldMath.TierFor(ExpandedWorldGenerationContext.ActivePreset));
-            default:
-                return vanillaCount;
-        }
+        return ExpandedWorldTierMath.DirtiestBlockBaseCount(
+            ExpandedWorldGenerationContext.ActiveTier);
     }
 
     private static bool Calls(CodeInstruction instruction, MethodInfo method)
