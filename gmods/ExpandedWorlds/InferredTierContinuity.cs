@@ -23,7 +23,7 @@ internal static class ExpandedWorldInferredTierMath
     ///
     /// Vertical network sections are 8/12/16. Medium and Large are exactly
     /// verticalSections + 2, while Small is the compact-world exception. The
-    /// canonical expanded tiers continue vertical sections as 20/24/28.
+    /// canonical expanded tiers continue vertical sections as 20/24/28/.../60.
     /// </summary>
     public static int EvilOrbHeartQuota(int oneBasedWorldTier)
     {
@@ -57,8 +57,8 @@ internal static class ExpandedWorldInferredTierMath
     /// User-selected conservative continuation for the Lihzahrd painting cap.
     /// Vanilla Large consumes one Next(2) roll and produces 2 or 3. Expanded
     /// worlds preserve that exact RNG roll and shift only its result to 3 or 4.
-    /// This is deliberately flat across XL/Huge/THICC rather than pretending a
-    /// tier formula is known.
+    /// This is deliberately flat across every THICC tier rather than pretending
+    /// a tier-growth formula is known.
     /// </summary>
     public static int ExpandedLihzahrdPaintingMaxFromVanillaLarge(int vanillaLargeRandomizedMax)
     {
