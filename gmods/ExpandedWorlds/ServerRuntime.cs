@@ -6,10 +6,10 @@ using HarmonyLib;
 using Terraria;
 
 /// <summary>
-/// Dedicated-server entry point for Expanded Worlds. Set
-/// GLOADER_EXPANDED_WORLD to XL, HUGE, or THICC and use Terraria's normal Large
-/// autocreate path. The same shared generation context, dimensions, tier
-/// continuations, and scratch-capacity guards used by the client are active here.
+/// Dedicated-server entry point for Expanded Worlds. Set GLOADER_EXPANDED_WORLD
+/// to THICC or THICC2 through THICC11 and use Terraria's normal Large autocreate
+/// path. The same shared generation context, dimensions, tier continuations, and
+/// scratch-capacity guards used by the client are active here.
 /// </summary>
 public static class Mod
 {
@@ -34,22 +34,13 @@ internal static class ExpandedWorldServerState
             return;
         }
 
-        switch (raw.Trim().ToUpperInvariant())
+        if (!ExpandedWorldMath.TryParsePreset(raw, out ExpandedWorldPreset parsed))
         {
-            case "XL":
-                Requested = ExpandedWorldPreset.XL;
-                break;
-            case "HUGE":
-                Requested = ExpandedWorldPreset.Huge;
-                break;
-            case "THICC":
-                Requested = ExpandedWorldPreset.Thicc;
-                break;
-            default:
-                throw new ArgumentException(
-                    "GLOADER_EXPANDED_WORLD must be XL, HUGE, or THICC; received '" + raw + "'.");
+            throw new ArgumentException(
+                "GLOADER_EXPANDED_WORLD must be THICC or THICC2 through THICC11; received '" + raw + "'.");
         }
 
+        Requested = parsed;
         Console.WriteLine(
             "[Expanded Worlds] Dedicated-server headless preset: " +
             ExpandedWorldMath.LabelFor(Requested) + " " +
