@@ -165,6 +165,10 @@ Fast continuity CI verifies:
 
 A separate manual Windows x64 stress workflow generates all **11** THICC tiers independently with seed `1337420`, saves, reloads, verifies exact dimensions, and records generation time, peak memory, `.wld` size, and chest count. The matrix uses `fail-fast: false`; one giant tier failing does not hide the others.
 
+The canonical acceptance run on **2026-09-04** completed successfully: **11 / 11 THICC tiers passed generation, save, reload, and exact-dimension verification**. THICC 11 itself generated in `3072.459 s` (about `51.21 min`), peaked at `11.82 GiB` working set / `12.04 GiB` private memory, produced a `156.1 MiB` `.wld`, used `3,855 / 8,000` chest slots, and reloaded at the exact `31,600 x 9,000` dimensions.
+
+See [`THICC-STRESS-RESULTS.md`](THICC-STRESS-RESULTS.md) for the complete per-tier acceptance table and run identity.
+
 ## What Expanded Worlds does not do
 
 It does **not** replace/reorder worldgen passes, reseed Terraria's RNG, force biome sides, post-process completed worlds, invent a custom terrain generator, invent a new `.wld` format, or make fake Terraria size enums.
