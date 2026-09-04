@@ -1,0 +1,102 @@
+name: x64 private toolchain bootstrap
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "tools/x64-runtime/Build-X64Runtime.ps1"
+      - ".github/workflows/x64-toolchain-bootstrap.yml"
+  pull_request:
+    paths:
+      - "tools/x64-runtime/Build-X64Runtime.ps1"
+      - ".github/workflows/x64-toolchain-bootstrap.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse builder
+        shell: pwsh
+        run: |
+          $builderPath = (Resolve-Path "tools/x64-runtime/Build-X64Runtime.ps1").Path
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            $builderPath,
+            [ref]$tokens,
+            [ref]$errors) | Out-Null
+          if ($errors.Count -ne 0) {
+            throw "x64 runtime builder has PowerShell parse errors:`n$($errors | Out-String)"
+          }
+
+      - name: Bootstrap without system Git or dotnet
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $toolchain = Join-Path $env:RUNNER_TEMP "gloader-private-toolchain"
+          Remove-Item $toolchain -Recurse -Force -ErrorAction SilentlyContinue
+          $env:GLOADER_TOOLCHAIN_ROOT = $toolchain
+
+          # Deliberately remove the GitHub runner's developer-tool paths. The
+          # bootstrap must succeed using only what it downloads for itself.
+          $env:PATH = @(
+            "$env:SystemRoot\System32",
+            "$env:SystemRoot",
+            "$env:SystemRoot\System32\WindowsPowerShell\v1.0"
+          ) -join ';'
+
+          if (Get-Command git -ErrorAction SilentlyContinue) {
+            throw "System git is still visible after PATH isolation."
+          }
+          if (Get-Command dotnet -ErrorAction SilentlyContinue) {
+            throw "System dotnet is still visible after PATH isolation."
+          }
+
+          $windowsPowerShell = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+          & $windowsPowerShell -NoLogo -NoProfile -ExecutionPolicy Bypass `
+            -File "tools/x64-runtime/Build-X64Runtime.ps1" `
+            -PrepareToolchainOnly
+          if ($LASTEXITCODE -ne 0) {
+            throw "Private toolchain bootstrap failed with exit code $LASTEXITCODE."
+          }
+
+          $dotnet = Join-Path $toolchain "dotnet-10.0.400\dotnet.exe"
+          $git = Join-Path $toolchain "mingit-2.55.0.5\cmd\git.exe"
+          if (-not (Test-Path $dotnet -PathType Leaf)) {
+            throw "Private .NET SDK was not cached at the expected path."
+          }
+          if (-not (Test-Path $git -PathType Leaf)) {
+            throw "Private MinGit was not cached at the expected path."
+          }
+
+          $dotnetVersion = (& $dotnet --version).Trim()
+          if ($dotnetVersion -ne '10.0.400') {
+            throw "Expected private .NET SDK 10.0.400, got '$dotnetVersion'."
+          }
+          $gitVersion = (& $git --version).Trim()
+          if ($gitVersion -ne 'git version 2.55.0.windows.5') {
+            throw "Expected private MinGit 2.55.0.windows.5, got '$gitVersion'."
+          }
+
+          # A second bootstrap must reuse the existing cache rather than need a
+          # machine-wide install or replace the validated toolchain.
+          $dotnetWrite = (Get-Item $dotnet).LastWriteTimeUtc
+          $gitWrite = (Get-Item $git).LastWriteTimeUtc
+          & $windowsPowerShell -NoLogo -NoProfile -ExecutionPolicy Bypass `
+            -File "tools/x64-runtime/Build-X64Runtime.ps1" `
+            -PrepareToolchainOnly
+          if ($LASTEXITCODE -ne 0) {
+            throw "Cached private toolchain bootstrap failed with exit code $LASTEXITCODE."
+          }
+          if ((Get-Item $dotnet).LastWriteTimeUtc -ne $dotnetWrite) {
+            throw "Cached .NET SDK was unexpectedly replaced on the second bootstrap."
+          }
+          if ((Get-Item $git).LastWriteTimeUtc -ne $gitWrite) {
+            throw "Cached MinGit was unexpectedly replaced on the second bootstrap."
+          }

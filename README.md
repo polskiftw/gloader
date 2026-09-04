@@ -150,7 +150,7 @@ vanilla decompile
 
 It does **not** apply Terraria Unified's later `patch unified` gameplay/QoL stage and it does **not** apply tModLoader's mod-loader patches. The result is the vanilla Terraria codebase with the modern .NET/FNA platform port, which gloader then hosts and patches itself.
 
-On first run, click **Build x64 Runtime** in the launcher. The builder uses the owned `Terraria.exe` beside gloader, retrieves the matching official 1.4.5.8 dedicated-server executable from `terraria.org` when the local install does not contain it, generates the patched source in a workspace under `%LOCALAPPDATA%`, builds Release, and installs the private result under:
+On first run, click **Build x64 Runtime** in the launcher. The builder uses the owned `Terraria.exe` beside gloader, downloads and caches its own pinned portable .NET 10 SDK and MinGit under `%LOCALAPPDATA%\gloader\toolchain`, retrieves the matching official 1.4.5.8 dedicated-server executable from `terraria.org` when the local install does not contain it, generates the patched source in a workspace under `%LOCALAPPDATA%`, builds Release, and installs the private result under:
 
 ```text
 gdeps/x64-runtime/
@@ -176,7 +176,7 @@ The same operation can be invoked manually if needed:
 powershell -ExecutionPolicy Bypass -File .\gdeps\tools\x64-runtime\Build-X64Runtime.ps1 -TerrariaDirectory .
 ```
 
-The one-time private runtime build currently requires Git, a .NET 10 SDK, and internet access for the pinned source/dependencies and official server fallback. See `tools/x64-runtime/README.md` for the builder details.
+The one-time private runtime build requires internet access, but it does **not** require Git or the .NET 10 SDK to be installed on the machine. gloader downloads exact portable copies of .NET SDK 10.0.400 and MinGit 2.55.0.windows.5 from their official upstream sources, verifies their published hashes, and reuses the cached copies on later builds. Nothing is installed system-wide and no persistent PATH changes are made. See `tools/x64-runtime/README.md` for the builder details.
 
 ## Host & Play server support
 
