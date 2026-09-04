@@ -198,4 +198,20 @@ chest count
 save/reload dimension verification
 ```
 
-If THICC 11 explodes a runner, we report where it explodes. We do not secretly delete the hard tiers from the matrix to make the check green.
+The canonical **2026-09-04 run #4 went 11 / 11 green**. Every THICC tier generated, saved, reloaded, and came back with the exact expected dimensions.
+
+The stupidest one, THICC 11, did this:
+
+```text
+31600 x 9000
+3072.459 seconds generation (~51.21 min)
+11.82 GiB peak working set
+12.04 GiB peak private memory
+156.1 MiB .wld
+3855 / 8000 chests
+reload verified: YES
+```
+
+So THICC 11 is no longer theoretical. The supported x64 path has actually eaten the full 284.4-million-tile canvas and survived. The next tier is still forbidden because `33600` crosses Terraria's signed-coordinate wall, not because we chickened out on the stress test.
+
+Full receipts live in `THICC-STRESS-RESULTS.md`.
