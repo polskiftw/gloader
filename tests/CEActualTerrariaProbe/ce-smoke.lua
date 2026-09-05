@@ -6,7 +6,8 @@ end
 local testdir = workspace .. [[\tests\CEActualTerrariaProbe]]
 local resultPath = testdir .. [[\ce-result.txt]]
 local markerPath = testdir .. [[\terraria-probe.txt]]
-local payloadPath = testdir .. [[\out\GLoaderCeTerrariaProbe.dll]]
+local probePayloadPath = testdir .. [[\out\GLoaderCeTerrariaProbe.dll]]
+local helperPath = testdir .. [[\out-helper\TerrariaCEHelper.dll]]
 
 local function writeResult(text)
   local f = assert(io.open(resultPath, 'w'))
@@ -54,27 +55,52 @@ timer.OnTimer = function(t)
       return
     end
 
-    local returnValue, injectError = injectDotNetDLL(
-      payloadPath,
+    local function inject(path, className, methodName, parameter)
+      local returnValue, injectError = injectDotNetDLL(path, className, methodName, parameter)
+      if returnValue == nil then
+        if injectError == -4 or injectError == -2 or injectError == -1 then
+          return nil, injectError
+        end
+        error('injectDotNetDLL failed with error ' .. tostring(injectError))
+      end
+      return returnValue, nil
+    end
+
+    local probeReturn, transient = inject(
+      probePayloadPath,
       'GLoaderCeTerrariaProbe.EntryPoint',
       'Initialize',
       markerPath)
-
-    if returnValue == nil then
-      -- -4 means CoreCLR was not visible yet; -2/-1 can also be transient while
-      -- the apphost is still entering managed startup. Keep polling briefly.
-      if injectError == -4 or injectError == -2 or injectError == -1 then
-        return
-      end
-      error('injectDotNetDLL failed with error ' .. tostring(injectError))
+    if probeReturn == nil and transient ~= nil then return end
+    if probeReturn ~= 23063 then
+      error('reflection probe returned ' .. tostring(probeReturn) .. ', expected 23063')
     end
 
-    if returnValue ~= 23063 then
-      error('managed payload returned ' .. tostring(returnValue) .. ', expected 23063')
-    end
+    local selfTest = assert(inject(helperPath, 'TerrariaCEHelper.EntryPoint', 'Run', 'selftest'))
+    if selfTest ~= 23063 then error('helper selftest returned ' .. tostring(selfTest)) end
+
+    local fishOn = assert(inject(helperPath, 'TerrariaCEHelper.EntryPoint', 'Run', 'fish-on'))
+    if fishOn ~= 23063 then error('fish-on returned ' .. tostring(fishOn)) end
+
+    local statusOn = assert(inject(helperPath, 'TerrariaCEHelper.EntryPoint', 'Run', 'fish-status'))
+    if statusOn ~= 23063 then error('fish-status after enable returned ' .. tostring(statusOn)) end
+
+    local fishOff = assert(inject(helperPath, 'TerrariaCEHelper.EntryPoint', 'Run', 'fish-off'))
+    if fishOff ~= 23063 then error('fish-off returned ' .. tostring(fishOff)) end
+
+    local statusOff, statusOffError = inject(helperPath, 'TerrariaCEHelper.EntryPoint', 'Run', 'fish-status')
+    if statusOff == nil and statusOffError ~= nil then return end
+    if statusOff ~= 0 then error('fish-status after disable returned ' .. tostring(statusOff) .. ', expected 0') end
 
     done = true
-    writeResult('SUCCESS RETURN=' .. tostring(returnValue) .. ' PID=' .. tostring(pid))
+    writeResult(
+      'SUCCESS PROBE=' .. tostring(probeReturn) ..
+      ' SELFTEST=' .. tostring(selfTest) ..
+      ' FISH_ON=' .. tostring(fishOn) ..
+      ' STATUS_ON=' .. tostring(statusOn) ..
+      ' FISH_OFF=' .. tostring(fishOff) ..
+      ' STATUS_OFF=' .. tostring(statusOff) ..
+      ' PID=' .. tostring(pid))
     t.Enabled = false
     closeCE()
   end)
