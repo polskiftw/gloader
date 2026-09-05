@@ -54,13 +54,24 @@ internal static class ExpandedWorldInferredTierMath
     }
 
     /// <summary>
-    /// User-selected conservative continuation for the Lihzahrd painting cap.
-    /// Vanilla Large consumes one Next(2) roll and produces 2 or 3. Expanded
-    /// worlds preserve that exact RNG roll and shift only its result to 3 or 4.
-    /// This is deliberately flat across every THICC tier rather than pretending
-    /// a tier-growth formula is known.
+    /// Continue Terraria's Lihzahrd painting cap from the physical world width.
+    ///
+    /// Vanilla uses Small/Medium/Large = 1 / 2 / (2 + Next(2)). Independently,
+    /// the legacy Temple room budget is Next(scale*10, scale*16), where
+    /// scale = maxTilesX/4200, and the Dual Dungeon Temple biome room also grows
+    /// directly with that same width scale. Across the three retail sizes the
+    /// painting cap is therefore about one painting per ten ordinary Temple
+    /// rooms (12.5 -> 1, 19 -> 2, 25.5 -> 2/3).
+    ///
+    /// Expanded worlds keep Large's existing one-bit Next(2) result and move
+    /// only the deterministic base. The base is floor(expected ordinary Temple
+    /// rooms / 10). This consumes no additional RNG and deliberately ignores
+    /// secret-seed Temple-room multipliers because vanilla's painting cap also
+    /// ignores those multipliers.
     /// </summary>
-    public static int ExpandedLihzahrdPaintingMaxFromVanillaLarge(int vanillaLargeRandomizedMax)
+    public static int ExpandedLihzahrdPaintingMaxFromVanillaLarge(
+        int vanillaLargeRandomizedMax,
+        int worldWidth)
     {
         if (vanillaLargeRandomizedMax != 2 && vanillaLargeRandomizedMax != 3)
         {
@@ -70,13 +81,31 @@ internal static class ExpandedWorldInferredTierMath
                 "Expected Terraria Large Lihzahrd painting max 2 or 3.");
         }
 
-        return vanillaLargeRandomizedMax + 1;
+        if (worldWidth < 8400)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(worldWidth),
+                worldWidth,
+                "Lihzahrd painting continuation requires Large-or-wider world width.");
+        }
+
+        int roomMinimum = checked((int)((long)worldWidth * 10L / 4200L));
+        int roomMaximumExclusive = checked((int)((long)worldWidth * 16L / 4200L));
+        int expectedRoomCountTimesTwo = checked(roomMinimum + roomMaximumExclusive - 1);
+        int inferredBase = Math.Max(2, expectedRoomCountTimesTwo / 20);
+        int vanillaRoll = vanillaLargeRandomizedMax - 2;
+
+        return checked(inferredBase + vanillaRoll);
     }
 }
 
 #if GLOADER
 internal static class ExpandedWorldInferredTierPatchUtil
 {
+    private static readonly MethodInfo UnifiedRandomNextIntMethod =
+        AccessTools.Method(typeof(Terraria.Utilities.UnifiedRandom), nameof(Terraria.Utilities.UnifiedRandom.Next), new[] { typeof(int) })
+        ?? throw new MissingMethodException(typeof(Terraria.Utilities.UnifiedRandom).FullName, "Next(Int32)");
+
     internal static IEnumerable<CodeInstruction> InjectAfterUniqueLargeAssignment(
         IEnumerable<CodeInstruction> instructions,
         MethodBase original,
@@ -232,6 +261,62 @@ internal static class ExpandedWorldInferredTierPatchUtil
         return code;
     }
 
+    /// <summary>
+    /// Locate the legacy templePart2 Large-only Next(2) painting roll by its
+    /// audited maxTilesX > 6400 gate, then adjust the roll without adding RNG.
+    /// </summary>
+    internal static IEnumerable<CodeInstruction> AdjustUniqueNextIntAfterConstant(
+        IEnumerable<CodeInstruction> instructions,
+        MethodBase original,
+        int anchorConstant,
+        int nextMaximum,
+        MethodInfo adjustMethod,
+        string featureName,
+        int scanWindow = 40)
+    {
+        var code = instructions.ToList();
+        var matches = new List<int>();
+
+        for (int i = 0; i < code.Count; i++)
+        {
+            if (!ExpandedWorldDungeonTierPatchUtil.IsIntConstant(code[i], anchorConstant))
+                continue;
+
+            int end = Math.Min(code.Count - 1, i + scanWindow);
+            for (int j = i + 1; j < end; j++)
+            {
+                if (!ExpandedWorldDungeonTierPatchUtil.IsIntConstant(code[j], nextMaximum))
+                    continue;
+                if (j + 1 > end || !Calls(code[j + 1], UnifiedRandomNextIntMethod))
+                    continue;
+
+                matches.Add(j + 1);
+            }
+        }
+
+        if (matches.Count != 1)
+        {
+            throw new InvalidOperationException(
+                "[Expanded Worlds] " + featureName + " source shape changed in " +
+                (original?.DeclaringType?.FullName ?? "<unknown>") + "." +
+                (original?.Name ?? "<unknown>") + ": expected exactly one Next(" + nextMaximum +
+                ") after the audited " + anchorConstant + " gate, found " + matches.Count +
+                ". Refusing to guess.");
+        }
+
+        int insertAt = matches[0] + 1;
+        var call = new CodeInstruction(OpCodes.Call, adjustMethod);
+        if (insertAt < code.Count)
+        {
+            call.labels.AddRange(code[insertAt].labels);
+            code[insertAt].labels.Clear();
+            call.blocks.AddRange(code[insertAt].blocks);
+            code[insertAt].blocks.Clear();
+        }
+        code.Insert(insertAt, call);
+        return code;
+    }
+
     private static int FindNthWorldSizeCall(List<CodeInstruction> code, int occurrence)
     {
         int seen = 0;
@@ -249,6 +334,12 @@ internal static class ExpandedWorldInferredTierPatchUtil
         }
 
         return -1;
+    }
+
+    private static bool Calls(CodeInstruction instruction, MethodInfo method)
+    {
+        return (instruction.opcode == OpCodes.Call || instruction.opcode == OpCodes.Callvirt) &&
+               Equals(instruction.operand, method);
     }
 
     private static string LocalStoreIdentity(CodeInstruction instruction)
@@ -379,9 +470,9 @@ internal static class ExpandedWorldInferredSpiderRoomQuotaPatch
 }
 
 /// <summary>
-/// Preserve Terraria Large's existing Next(2) roll for the Lihzahrd painting
-/// cap, then shift the already-randomized 2/3 result to 3/4 on every expanded
-/// tier. No additional RNG call is introduced.
+/// Preserve Terraria Large's existing Next(2) roll for the Dual Dungeon
+/// Lihzahrd painting cap, then continue its deterministic base from physical
+/// world width. No additional RNG call is introduced.
 /// </summary>
 [HarmonyPatch]
 internal static class ExpandedWorldLihzahrdPaintingCapPatch
@@ -405,14 +496,58 @@ internal static class ExpandedWorldLihzahrdPaintingCapPatch
             PaintingMaxField,
             Adjust,
             expectedStoreCount: 3,
-            featureName: "Lihzahrd painting cap");
+            featureName: "Dual Dungeon Lihzahrd painting cap");
 
     private static int AdjustPaintingMax(int vanillaValue)
     {
         if (!ExpandedWorldGenerationContext.IsActive)
             return vanillaValue;
 
-        return ExpandedWorldInferredTierMath.ExpandedLihzahrdPaintingMaxFromVanillaLarge(vanillaValue);
+        return ExpandedWorldInferredTierMath.ExpandedLihzahrdPaintingMaxFromVanillaLarge(
+            vanillaValue,
+            Terraria.Main.maxTilesX);
+    }
+}
+
+/// <summary>
+/// Apply the same Lihzahrd painting continuation to the active legacy Temple
+/// path in WorldGen.templePart2. Vanilla already consumes exactly one Next(2)
+/// roll there; the transpiler changes only that roll's contribution.
+/// </summary>
+[HarmonyPatch(typeof(Terraria.WorldGen), nameof(Terraria.WorldGen.templePart2))]
+internal static class ExpandedWorldLegacyTemplePaintingCapPatch
+{
+    private static readonly MethodInfo Adjust =
+        ExpandedWorldDungeonTierPatchUtil.RequireOwnMethod(typeof(ExpandedWorldLegacyTemplePaintingCapPatch), nameof(AdjustPaintingRoll));
+
+    [HarmonyTranspiler]
+    private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions, MethodBase original) =>
+        ExpandedWorldInferredTierPatchUtil.AdjustUniqueNextIntAfterConstant(
+            instructions,
+            original,
+            anchorConstant: 6400,
+            nextMaximum: 2,
+            adjustMethod: Adjust,
+            featureName: "legacy Temple Lihzahrd painting cap");
+
+    private static int AdjustPaintingRoll(int vanillaRoll)
+    {
+        if (!ExpandedWorldGenerationContext.IsActive)
+            return vanillaRoll;
+
+        if (vanillaRoll != 0 && vanillaRoll != 1)
+        {
+            throw new InvalidOperationException(
+                "[Expanded Worlds] Expected Terraria Large legacy Temple painting roll 0 or 1, got " + vanillaRoll + ".");
+        }
+
+        int adjustedMax = ExpandedWorldInferredTierMath.ExpandedLihzahrdPaintingMaxFromVanillaLarge(
+            2 + vanillaRoll,
+            Terraria.Main.maxTilesX);
+
+        // Vanilla's accumulator is already 2 at this point. Return only the
+        // amount that must be added to reach the inferred expanded maximum.
+        return adjustedMax - 2;
     }
 }
 #endif
