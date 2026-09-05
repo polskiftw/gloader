@@ -29,21 +29,62 @@ jobs:
       SUITE_LABEL: ${{ matrix.suite.label }}
       SUITE_SLUG: ${{ matrix.suite.slug }}
       OUTPUT_FILE: 54321-${{ matrix.suite.slug }}-fourteen-seed.png
+      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout gloader history
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Download this suite's fourteen worlds from successful generation run
-        uses: actions/download-artifact@v4
-        with:
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: ${{ env.SOURCE_RUN_ID }}
-          pattern: world-${{ matrix.suite.slug }}-*
-          path: worlds
-          merge-multiple: true
+      - name: Download exact fourteen worlds from successful generation run
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+
+          $artifacts = @()
+          $page = 1
+          do {
+            $url = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/runs/$env:SOURCE_RUN_ID/artifacts?per_page=100&page=$page"
+            $response = Invoke-RestMethod -Uri $url -Headers $headers
+            $batch = @($response.artifacts)
+            $artifacts += $batch
+            $page++
+          } while ($batch.Count -eq 100)
+
+          $worldSlugs = @('small','medium','large','thicc','thicc2','thicc3','thicc4','thicc5','thicc6','thicc7','thicc8','thicc9','thicc10','thicc11')
+          $worldDir = Join-Path $PWD 'worlds'
+          New-Item -ItemType Directory -Force $worldDir | Out-Null
+
+          foreach ($slug in $worldSlugs) {
+            $name = "world-$env:SUITE_SLUG-$slug"
+            $matches = @($artifacts | Where-Object { $_.name -eq $name -and -not $_.expired })
+            if ($matches.Count -ne 1) {
+              throw "Expected exactly one live artifact named '$name' in run $env:SOURCE_RUN_ID; found $($matches.Count)."
+            }
+
+            $artifact = $matches[0]
+            $zip = Join-Path $env:RUNNER_TEMP ("$name.zip")
+            $expanded = Join-Path $env:RUNNER_TEMP ("expanded-$name")
+            $downloadHeaders = @{
+              Authorization = "Bearer $env:GH_TOKEN"
+              Accept = 'application/octet-stream'
+              'X-GitHub-Api-Version' = '2022-11-28'
+            }
+            Invoke-WebRequest -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/artifacts/$($artifact.id)/zip" -Headers $downloadHeaders -OutFile $zip
+            Expand-Archive -LiteralPath $zip -DestinationPath $expanded -Force
+            $wlds = @(Get-ChildItem $expanded -Recurse -File -Filter '*.wld')
+            if ($wlds.Count -ne 1) { throw "Artifact '$name' contained $($wlds.Count) .wld files; expected exactly one." }
+            Copy-Item $wlds[0].FullName (Join-Path $worldDir "$slug.wld") -Force
+          }
+
+          $downloaded = @(Get-ChildItem $worldDir -File -Filter '*.wld')
+          if ($downloaded.Count -ne 14) { throw "Expected 14 downloaded worlds, found $($downloaded.Count)." }
+          Write-Host "Downloaded all 14 $env:SUITE_LABEL worlds from source run $env:SOURCE_RUN_ID."
 
       - name: Restore pinned TEdit renderer source
         shell: pwsh
