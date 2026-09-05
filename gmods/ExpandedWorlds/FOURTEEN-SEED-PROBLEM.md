@@ -1,6 +1,6 @@
-# Six Seed Problem
+# Fourteen Seed Problem
 
-The **six seed problem** means:
+The **fourteen seed problem** means:
 
 Use **one seed number** across **all fourteen world sizes**, generate all fourteen worlds, render them as PNGs, and produce **one final comparison image** showing all fourteen results.
 
@@ -33,9 +33,12 @@ If Claire provides a seed:
 3. Render all fourteen worlds to PNG.
 4. Combine the fourteen renders into one comparison image.
 
+If Claire also specifies Terraria special-seed or secret-seed options, apply the same selected options to **every one of the fourteen worlds**. Keep the supplied number as the base numeric seed; for Terraria 1.4.5 secret seeds, use Terraria's native copied-seed payload rather than substituting a different seed string.
+
 ## Rules
 
 - The same seed is used for every size.
+- The same requested special/secret-seed modifiers are used for every size.
 - Do not search for a better seed.
 - Do not try to make the layouts match.
 - Do not treat biome/layout differences between sizes as failures.
@@ -71,7 +74,7 @@ This is the known-good path from the successful seed `1337420` run. Prefer this 
 4. Build the current ExpandedWorlds dedicated-server bootstrap against that Linux/FNA server bundle.
 5. Inject the bootstrap call into `Terraria.WorldGen.serverLoadWorld()` immediately **before** the code takes/references `serverLoadWorldCallBack` (the `ldftn` site used by the proven patcher).
 6. Run one isolated GitHub Actions job per world size so each generator gets its own runner memory budget.
-7. Pass the seed literally through Terraria's server config. For expanded sizes, set `GLOADER_EXPANDED_WORLD` to `THICC`, `THICC2`, `THICC3`, `THICC4`, `THICC5`, `THICC6`, `THICC7`, `THICC8`, `THICC9`, `THICC10`, or `THICC11`; leave it unset for Small/Medium/Large.
+7. Pass the seed literally through Terraria's server config. When secret-seed options are requested, serialize the native copied-seed payload with the numeric seed and the requested secret flags. For expanded sizes, set `GLOADER_EXPANDED_WORLD` to `THICC`, `THICC2`, `THICC3`, `THICC4`, `THICC5`, `THICC6`, `THICC7`, `THICC8`, `THICC9`, `THICC10`, or `THICC11`; leave it unset for Small/Medium/Large.
 8. Require proof that ExpandedWorlds loaded early and `Environment.Is64BitProcess` is `True`.
 9. Require the expanded generation completion log for THICC through THICC 11 at the exact expected dimensions. Do not accept a run merely because a `.wld` file exists.
 10. Upload each fresh `.wld` separately.
@@ -83,7 +86,7 @@ This is the known-good path from the successful seed `1337420` run. Prefer this 
 
 The largest ExpandedWorlds tiers can legitimately take **multiple hours** to finish world generation.
 
-For every six-seed generation run:
+For every fourteen-seed generation run:
 
 - Set the GitHub Actions generation-job timeout to **at least five hours** (`timeout-minutes: 300` or higher).
 - Any separate shell/harness/watchdog deadline must also allow **at least five hours**. Prefer removing the extra watchdog entirely when the Actions job timeout already provides the hard stop.
@@ -91,24 +94,25 @@ For every six-seed generation run:
 
 Seed `343434` proved why this matters: the old `6600`-second harness deadline killed THICC 10 and THICC 11 while Terraria was still actively generating, and the old `timeout-minutes: 120` job ceiling was also too low for those tiers.
 
-In short: **six-seed generation timeouts are 5+ hours, not ~2 hours.**
+In short: **fourteen-seed generation timeouts are 5+ hours, not ~2 hours.**
 
 ## Do not repeat these dead ends
 
 The successful run established several things that should be treated as settled unless the underlying Terraria runtime changes:
 
-- **Do not use the ordinary Windows dedicated-server path for six-seed generation.** A normal Windows launch can still be 32-bit (`Is64BitProcess=False`).
+- **Do not use the ordinary Windows dedicated-server path for fourteen-seed generation.** A normal Windows launch can still be 32-bit (`Is64BitProcess=False`).
 - Clearing the Windows executable's 32-bit CLR preference is **not enough**. Microsoft XNA 4 then becomes the next 32-bit/runtime blocker.
 - Do not spend time retargeting Terraria's Windows XNA references to FNA or trying to fake strong-named XNA assembly binding. The official Linux package already provides the clean **x86_64 + FNA** route.
 - Do not load ExpandedWorlds late from inside the world-load callback. It must be patched in **before Terraria queues worldgen**.
-- Do not use file existence alone as success. A truncated, wrong-size, or vanilla-size world is a failed six-seed result.
+- Do not use file existence alone as success. A truncated, wrong-size, or vanilla-size world is a failed fourteen-seed result.
 - Do not restore the old `6600`-second / `120`-minute timeout limits. Generation jobs and any internal watchdogs must allow **at least five hours**.
 
 ## Required validation gates
 
-A six-seed job is accepted only when all of these are true:
+A fourteen-seed job is accepted only when all of these are true:
 
 - The exact requested/random seed was used for all fourteen worlds.
+- Any requested special/secret-seed modifiers were applied identically to all fourteen worlds.
 - All fourteen worlds were generated fresh.
 - ExpandedWorlds reports successful early load.
 - The generator process reports **64-bit**.
@@ -145,4 +149,4 @@ The current definition keeps that exact process and extends only the size count 
 
 ## Short version
 
-**Six seed problem = pick one seed, load ExpandedWorlds before Terraria queues worldgen, give generation 5+ hour timeouts, run all fourteen sizes on the official Linux x64/FNA server path, verify every dimension, render with pinned TEdit, make the picture.**
+**Fourteen seed problem = pick one seed, load ExpandedWorlds before Terraria queues worldgen, give generation 5+ hour timeouts, run all fourteen sizes on the official Linux x64/FNA server path with any requested special/secret-seed modifiers applied identically, verify every dimension, render with pinned TEdit, make the picture.**

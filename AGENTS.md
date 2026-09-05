@@ -17,11 +17,11 @@ Use the newest relevant state of the work, even when it is unmerged, unless Clai
 
 # The Second Commandment
 
-> **Thou shalt not overthink the six seed problem.**
+> **Thou shalt not overthink the fourteen seed problem.**
 
-Whenever Claire refers to the **six seed problem**, first read and follow:
+Whenever Claire refers to the **fourteen seed problem**, first read and follow:
 
-`gmods/ExpandedWorlds/SIX-SEED-PROBLEM.md`
+`gmods/ExpandedWorlds/FOURTEEN-SEED-PROBLEM.md`
 
 That document is the canonical definition of the task.
 
