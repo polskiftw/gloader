@@ -26,7 +26,7 @@ The Tools menu also exposes utilities such as the formatter, HookGen, simplifier
 
 ## Build in GitHub
 
-Run **tModLoader Dev Tools** from the Actions tab, or update the submodule/workflow on `main`.
+Run **tModLoader Dev Tools** from the Actions tab. Repository updates to the submodule or workflow should follow the normal branch-first process described in `AGENTS.md`: make the change on a temporary branch, validate it there, then merge it to `main` through a pull request.
 
 The workflow:
 
@@ -55,11 +55,18 @@ The upstream `setup.bat` can build and launch Setup.GUI locally if desired. The 
 
 ## Update the pinned tModLoader revision
 
+Start from current `main`, create a temporary working branch, then update the submodule:
+
 ```powershell
+git switch main
+git pull --ff-only
+git switch -c chore/update-tmodloader-dev
 git submodule update --init --recursive
 git -C tools/tmodloader-dev fetch origin 1.4.5
 git -C tools/tmodloader-dev checkout origin/1.4.5
 git add tools/tmodloader-dev
 git commit -m "Update tModLoader dev tools"
-git push
+git push -u origin chore/update-tmodloader-dev
 ```
+
+Then open a pull request from `chore/update-tmodloader-dev` into `main`, verify the relevant checks, and merge it when ready. GitHub can delete the merged head branch automatically.

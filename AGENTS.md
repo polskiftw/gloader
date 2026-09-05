@@ -48,3 +48,36 @@ Rules:
 - Prefer this existing private input over asking Claire to re-upload or externally host the same Terraria binary again.
 
 **Thus is the law: if the retail Terraria binary is needed, look for `gloader-private-input` first.**
+
+# The Fourth Commandment
+
+> **Thou shalt treat `main` as the destination, not the workspace.**
+
+Normal repository-changing work must begin on a temporary branch created from the current `main`, unless Claire explicitly names another starting branch or explicitly asks for a direct change to `main`.
+
+Use short-lived branches that describe the work, normally with prefixes such as:
+
+- `feat/` for new features;
+- `fix/` for bug fixes;
+- `docs/` for documentation-only changes;
+- `chore/` for maintenance and dependency/tooling updates;
+- `experiment/` for work that may be discarded.
+
+While work is in progress:
+
+- commit and push early to the working branch as needed;
+- run the relevant tests and GitHub Actions there;
+- keep unfinished, exploratory, or failing intermediate work off `main`.
+
+When the work is complete:
+
+1. open a pull request into `main`;
+2. verify the relevant checks pass;
+3. merge the pull request when it is ready, unless Claire explicitly asks to keep it unmerged;
+4. let GitHub automatically delete the merged head branch.
+
+Do not create permanent `develop`, `dev`, `staging`, `next`, or similar branches merely to hold ordinary ongoing work. Releases belong in tags/releases, not permanent release-history branches. Superseded experiments and finished debug branches should be deleted rather than preserved as archaeology.
+
+A temporary branch may contain the newest truth before it is merged, which is why the First Commandment still requires checking active branches and pull requests.
+
+**Thus is the law: work on branches, prove it there, then bring finished work to `main`.**
