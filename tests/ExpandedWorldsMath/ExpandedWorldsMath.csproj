@@ -18,5 +18,6 @@
     <Compile Include="../../gmods/ExpandedWorlds/DungeonTierContinuity.cs" Link="DungeonTierContinuity.cs" />
     <Compile Include="../../gmods/ExpandedWorlds/InferredTierContinuity.cs" Link="InferredTierContinuity.cs" />
     <Compile Include="../../gmods/ExpandedWorlds/GenerationCapacityMath.cs" Link="GenerationCapacityMath.cs" />
+    <Compile Include="../../gmods/ExpandedWorlds/MinecartTrackCapacityMath.cs" Link="MinecartTrackCapacityMath.cs" />
   </ItemGroup>
 </Project>
