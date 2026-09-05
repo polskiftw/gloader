@@ -102,6 +102,22 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'CE Terraria probe payload build failed.' }
           if (!(Test-Path (Join-Path $out 'GLoaderCeTerrariaProbe.dll'))) { throw 'Probe payload DLL is missing.' }
 
+      - name: Check out final Cheat Engine table helper
+        uses: actions/checkout@v4
+        with:
+          repository: polskiftw/cheatengine
+          ref: main
+          path: ce-table
+
+      - name: Build All Fish Are Crates helper
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:GITHUB_WORKSPACE 'tests/CEActualTerrariaProbe/out-helper'
+          dotnet build 'ce-table/Tables/Terraria/Helper/TerrariaCEHelper.csproj' -c Release -o $out
+          if ($LASTEXITCODE -ne 0) { throw 'TerrariaCEHelper build failed.' }
+          if (!(Test-Path (Join-Path $out 'TerrariaCEHelper.dll'))) { throw 'TerrariaCEHelper.dll is missing.' }
+          if (!(Test-Path (Join-Path $out '0Harmony.dll'))) { throw '0Harmony.dll is missing beside TerrariaCEHelper.dll.' }
+
       - name: Check out official Cheat Engine 7.5 source
         shell: pwsh
         run: |
@@ -137,14 +153,15 @@ jobs:
           if (!(Test-Path $ce)) { throw 'cheatengine-x86_64.exe was not produced.' }
           if (!(Test-Path '.\ce-upstream\Cheat Engine\bin\autorun\DotNetInject.lua')) { throw 'Official DotNetInject.lua is missing.' }
 
-      - name: Inject CE payload into actual gloader and inspect real Terraria
+      - name: Inject CE payload into actual gloader and exercise All Fish Are Crates
         shell: pwsh
         run: |
           $testDir = Join-Path $env:GITHUB_WORKSPACE 'tests/CEActualTerrariaProbe'
           $ceResult = Join-Path $testDir 'ce-result.txt'
           $probeResult = Join-Path $testDir 'terraria-probe.txt'
           $readyFile = Join-Path $testDir 'gloader-preentry-ready.txt'
-          Remove-Item $ceResult,$probeResult,$readyFile -Force -ErrorAction SilentlyContinue
+          $helperError = Join-Path $testDir 'helper-error.txt'
+          Remove-Item $ceResult,$probeResult,$readyFile,$helperError -Force -ErrorAction SilentlyContinue
 
           $ceDir = Join-Path $env:GITHUB_WORKSPACE 'ce-upstream\Cheat Engine\bin'
           $ceExe = Join-Path $ceDir 'cheatengine-x86_64.exe'
@@ -195,6 +212,13 @@ jobs:
               Get-Content $ceResult | Write-Host
             }
 
+            $tempHelperError = Join-Path $env:TEMP 'TerrariaCEHelper-error.txt'
+            if (Test-Path $tempHelperError) {
+              Copy-Item $tempHelperError $helperError -Force
+              Write-Host 'TerrariaCEHelper diagnostic:'
+              Get-Content $tempHelperError | Write-Host
+            }
+
             if (!(Test-Path $probeResult)) {
               Write-Host 'gloader logs after missing probe result:'
               Get-ChildItem (Join-Path $gameRoot 'gdeps/logs') -File -ErrorAction SilentlyContinue | ForEach-Object {
@@ -211,7 +235,9 @@ jobs:
 
             if (!(Test-Path $ceResult)) { throw 'Cheat Engine produced no injection result.' }
             $ceText = (Get-Content $ceResult -Raw).Trim()
-            if ($ceText -notmatch '^SUCCESS RETURN=23063 PID=(\d+)$') { throw "CE injection did not report success: $ceText" }
+            if ($ceText -notmatch '^SUCCESS PROBE=23063 SELFTEST=23063 FISH_ON=23063 STATUS_ON=23063 FISH_OFF=23063 STATUS_OFF=0 PID=(\d+)$') {
+              throw "CE fish-crates exercise did not report full success: $ceText"
+            }
             if ([int]$Matches[1] -ne $gameProc.Id) { throw "CE injected PID $($Matches[1]), expected actual gloader PID $($gameProc.Id)." }
 
             if ($probeText -notmatch '(?m)^Status=SUCCESS\s*$') { throw 'Managed reflection payload reported failure.' }
@@ -236,5 +262,6 @@ jobs:
             tests/CEActualTerrariaProbe/gloader-preentry-ready.txt
             tests/CEActualTerrariaProbe/ce-result.txt
             tests/CEActualTerrariaProbe/terraria-probe.txt
+            tests/CEActualTerrariaProbe/helper-error.txt
             dist/gloader/gdeps/logs/*.log
           if-no-files-found: warn
