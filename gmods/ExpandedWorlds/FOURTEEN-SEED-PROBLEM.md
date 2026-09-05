@@ -124,6 +124,8 @@ For fourteen-seed compose jobs:
 
 If world generation has already succeeded and the uploaded `.wld` artifacts are intact, a compose failure **does not justify regenerating the worlds**. Run a compose-only recovery job against the existing world artifacts while they are still within the artifact retention window.
 
+For cross-run recovery, do not assume a wildcard `actions/download-artifact` request saw the complete source-run artifact set. Large fourteen-seed batches can exceed one GitHub API artifact page: the `54321` four-secret-seed run had **113 artifacts**, and a recovery wildcard saw only the first **100**, silently omitting two Remix worlds. When the source run may have more than 100 artifacts, enumerate the run-artifacts API **page by page**, resolve each expected `world-<suite>-<size>` artifact by exact name/ID, download those exact artifacts, and assert that all fourteen `.wld` files are present before rendering.
+
 ## Timeout budget
 
 The largest ExpandedWorlds tiers can legitimately take **multiple hours** to finish world generation.
@@ -150,6 +152,7 @@ The successful run established several things that should be treated as settled 
 - Do not restore the old `6600`-second / `120`-minute timeout limits. Generation jobs and any internal watchdogs must allow **at least five hours**.
 - Do not treat a compose-only failure as a reason to regenerate already-valid world artifacts.
 - Do not launch the pinned `WinExe` compositor with `&` and immediately check for output; explicitly wait for the renderer process to exit.
+- Do not trust an unpaginated cross-run artifact wildcard when the source run has more than 100 artifacts; enumerate pages and require all fourteen expected world artifacts.
 
 ## Required validation gates
 
