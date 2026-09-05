@@ -7,6 +7,7 @@ on:
       - experiment/ce-terraria-coreclr-probe
     paths:
       - "tests/CEActualTerrariaProbe/**"
+      - "src/GLoader/GameBootstrap.cs"
       - ".github/workflows/experiment-ce-terraria-coreclr.yml"
 
 permissions:
@@ -142,7 +143,8 @@ jobs:
           $testDir = Join-Path $env:GITHUB_WORKSPACE 'tests/CEActualTerrariaProbe'
           $ceResult = Join-Path $testDir 'ce-result.txt'
           $probeResult = Join-Path $testDir 'terraria-probe.txt'
-          Remove-Item $ceResult,$probeResult -Force -ErrorAction SilentlyContinue
+          $readyFile = Join-Path $testDir 'gloader-preentry-ready.txt'
+          Remove-Item $ceResult,$probeResult,$readyFile -Force -ErrorAction SilentlyContinue
 
           $ceDir = Join-Path $env:GITHUB_WORKSPACE 'ce-upstream\Cheat Engine\bin'
           $ceExe = Join-Path $ceDir 'cheatengine-x86_64.exe'
@@ -156,15 +158,36 @@ jobs:
           $gameProc = $null
 
           try {
-            $ceProc = Start-Process -FilePath $ceExe -WorkingDirectory $ceDir -PassThru
-            Start-Sleep -Milliseconds 750
+            $env:GLOADER_CE_PROBE_READY_FILE = $readyFile
             $gameProc = Start-Process -FilePath $gloader -WorkingDirectory $gameRoot -ArgumentList @('--target', $target, '--no-mods') -PassThru
             Write-Host "Actual gloader PID: $($gameProc.Id)"
 
-            for ($i = 0; $i -lt 600 -and !(Test-Path $probeResult); $i++) {
-              Start-Sleep -Milliseconds 200
-              if ($gameProc.HasExited -and !(Test-Path $probeResult)) { break }
+            for ($i = 0; $i -lt 300 -and !(Test-Path $readyFile); $i++) {
+              Start-Sleep -Milliseconds 100
               $gameProc.Refresh()
+              if ($gameProc.HasExited) { break }
+            }
+
+            if (!(Test-Path $readyFile)) {
+              Write-Host 'gloader logs after missing pre-entry checkpoint:'
+              Get-ChildItem (Join-Path $gameRoot 'gdeps/logs') -File -ErrorAction SilentlyContinue | ForEach-Object {
+                Write-Host "--- $($_.Name) ---"
+                Get-Content $_.FullName -ErrorAction SilentlyContinue | Write-Host
+              }
+              $exit = if ($gameProc.HasExited) { "gloader exited with $($gameProc.ExitCode)" } else { 'gloader was still running' }
+              throw "gloader never reached the CE pre-entry checkpoint; $exit."
+            }
+
+            $readyPid = [int](Get-Content $readyFile -Raw).Trim()
+            if ($readyPid -ne $gameProc.Id) { throw "Pre-entry checkpoint PID $readyPid did not match gloader PID $($gameProc.Id)." }
+            Write-Host 'Real Terraria assembly is loaded and gloader is held before Terraria entry point.'
+
+            $ceProc = Start-Process -FilePath $ceExe -WorkingDirectory $ceDir -PassThru
+
+            for ($i = 0; $i -lt 600 -and (!(Test-Path $probeResult) -or !(Test-Path $ceResult)); $i++) {
+              Start-Sleep -Milliseconds 200
+              $gameProc.Refresh()
+              if ($gameProc.HasExited) { break }
             }
 
             if (Test-Path $ceResult) {
@@ -178,7 +201,7 @@ jobs:
                 Write-Host "--- $($_.Name) ---"
                 Get-Content $_.FullName -ErrorAction SilentlyContinue | Write-Host
               }
-              $exit = if ($gameProc.HasExited) { "gloader exited with $($gameProc.ExitCode)" } else { 'gloader was still running' }
+              $exit = if ($gameProc.HasExited) { "gloader exited with $($gameProc.ExitCode)" } else { 'gloader was still held at pre-entry checkpoint' }
               throw "Injected payload produced no Terraria reflection result; $exit."
             }
 
@@ -199,6 +222,7 @@ jobs:
             }
           }
           finally {
+            Remove-Item Env:GLOADER_CE_PROBE_READY_FILE -ErrorAction SilentlyContinue
             if ($ceProc -ne $null -and !$ceProc.HasExited) { Stop-Process -Id $ceProc.Id -Force -ErrorAction SilentlyContinue }
             if ($gameProc -ne $null -and !$gameProc.HasExited) { Stop-Process -Id $gameProc.Id -Force -ErrorAction SilentlyContinue }
           }
@@ -209,6 +233,7 @@ jobs:
         with:
           name: ce-real-gloader-terraria-probe
           path: |
+            tests/CEActualTerrariaProbe/gloader-preentry-ready.txt
             tests/CEActualTerrariaProbe/ce-result.txt
             tests/CEActualTerrariaProbe/terraria-probe.txt
             dist/gloader/gdeps/logs/*.log
