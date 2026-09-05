@@ -1,0 +1,218 @@
+name: Experiment CE into real gloader Terraria CoreCLR
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - experiment/ce-terraria-coreclr-probe
+    paths:
+      - "tests/CEActualTerrariaProbe/**"
+      - ".github/workflows/experiment-ce-terraria-coreclr.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Check out gloader experiment
+        uses: actions/checkout@v4
+
+      - name: Install .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Build normal gloader release layout
+        shell: pwsh
+        run: |
+          dotnet restore gloader.sln
+          if ($LASTEXITCODE -ne 0) { throw 'gloader restore failed.' }
+          ./build.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'gloader publish failed.' }
+          if (!(Test-Path 'dist/gloader/gloader.exe')) { throw 'Published gloader.exe is missing.' }
+
+      - name: Download private retail Terraria input
+        shell: pwsh
+        run: |
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+            'User-Agent' = 'gloader-ci'
+          }
+          $releases = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases?per_page=100"
+          $release = @($releases | Where-Object { $_.tag_name -eq 'gloader-private-input' -and $_.draft }) | Select-Object -First 1
+          if ($null -eq $release) { throw 'Draft release gloader-private-input was not found.' }
+          $asset = @($release.assets | Where-Object { $_.name -eq 'Terraria.zip' }) | Select-Object -First 1
+          if ($null -eq $asset) { throw 'Terraria.zip was not found on gloader-private-input.' }
+
+          $inputDir = Join-Path $env:RUNNER_TEMP 'gloader-private-input'
+          $zip = Join-Path $inputDir 'Terraria.zip'
+          $extract = Join-Path $inputDir 'terraria'
+          Remove-Item $inputDir -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $inputDir -Force | Out-Null
+
+          $downloadHeaders = $headers.Clone()
+          $downloadHeaders.Accept = 'application/octet-stream'
+          Invoke-WebRequest -Headers $downloadHeaders -Uri $asset.url -OutFile $zip
+          Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force
+
+          $terrariaExe = Get-ChildItem $extract -Filter Terraria.exe -File -Recurse | Select-Object -First 1
+          if ($null -eq $terrariaExe) { throw 'Terraria.zip did not contain Terraria.exe.' }
+          $root = $terrariaExe.Directory.FullName
+          "TERRARIA_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Retail Terraria root: $root"
+
+      - name: Stage normal Terraria install beside gloader
+        shell: pwsh
+        run: |
+          $gameRoot = (Resolve-Path 'dist/gloader').Path
+          Get-ChildItem $env:TERRARIA_ROOT -Force | ForEach-Object {
+            Copy-Item $_.FullName -Destination $gameRoot -Recurse -Force
+          }
+          if (!(Test-Path (Join-Path $gameRoot 'Terraria.exe'))) { throw 'Retail Terraria.exe was not staged beside gloader.' }
+          if (!(Test-Path (Join-Path $gameRoot 'Content'))) { throw 'Retail Terraria Content directory was not staged beside gloader.' }
+
+      - name: Build the real private x64 Terraria 1.4.5.8 runtime
+        shell: pwsh
+        run: |
+          $output = (Join-Path (Resolve-Path 'dist/gloader').Path 'gdeps/x64-runtime')
+          $workspace = Join-Path $env:RUNNER_TEMP 'terraria-unified-workspace'
+          $env:GLOADER_TOOLCHAIN_ROOT = Join-Path $env:RUNNER_TEMP 'gloader-toolchain'
+          ./tools/x64-runtime/Build-X64Runtime.ps1 `
+            -TerrariaDirectory $env:TERRARIA_ROOT `
+            -OutputDirectory $output `
+            -WorkspaceDirectory $workspace
+          if ($LASTEXITCODE -ne 0) { throw 'Private x64 Terraria runtime build failed.' }
+          $target = Join-Path $output 'TerrariaRelease.dll'
+          if (!(Test-Path $target)) { throw 'TerrariaRelease.dll was not produced.' }
+          "TERRARIA_X64_TARGET=$target" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build CE reflection payload
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:GITHUB_WORKSPACE 'tests/CEActualTerrariaProbe/out'
+          dotnet build 'tests/CEActualTerrariaProbe/GLoaderCeTerrariaProbe.csproj' -c Release -o $out
+          if ($LASTEXITCODE -ne 0) { throw 'CE Terraria probe payload build failed.' }
+          if (!(Test-Path (Join-Path $out 'GLoaderCeTerrariaProbe.dll'))) { throw 'Probe payload DLL is missing.' }
+
+      - name: Check out official Cheat Engine 7.5 source
+        shell: pwsh
+        run: |
+          git clone --depth 1 --branch 7.5 --recurse-submodules https://github.com/cheat-engine/cheat-engine.git ce-upstream
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to clone official Cheat Engine 7.5 source.' }
+          $commit = (git -C ce-upstream rev-parse HEAD).Trim()
+          Write-Host "Official Cheat Engine 7.5 commit: $commit"
+
+      - name: Install Lazarus toolchain for Cheat Engine
+        shell: pwsh
+        run: |
+          $base = 'https://downloads.sourceforge.net/project/lazarus/Lazarus%20Windows%2064%20bits/Lazarus%202.2.2'
+          curl.exe -L --fail --retry 5 --retry-delay 5 "$base/lazarus-2.2.2-fpc-3.2.2-win64.exe" -o lazarus-main.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Lazarus main installer download failed.' }
+          curl.exe -L --fail --retry 5 --retry-delay 5 "$base/lazarus-2.2.2-fpc-3.2.2-cross-i386-win32-win64.exe" -o lazarus-cross.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Lazarus cross installer download failed.' }
+          if ((Get-Item lazarus-main.exe).Length -lt 10MB) { throw 'Lazarus main installer looks invalid.' }
+          if ((Get-Item lazarus-cross.exe).Length -lt 5MB) { throw 'Lazarus cross installer looks invalid.' }
+
+          $args = @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/DIR=C:\Lazarus')
+          $p = Start-Process -FilePath "$PWD\lazarus-main.exe" -ArgumentList $args -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Lazarus main installer exited $($p.ExitCode)." }
+          $p = Start-Process -FilePath "$PWD\lazarus-cross.exe" -ArgumentList $args -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Lazarus cross installer exited $($p.ExitCode)." }
+          if (!(Test-Path 'C:\Lazarus\lazbuild.exe')) { throw 'lazbuild.exe was not installed.' }
+
+      - name: Build Cheat Engine 7.5 x64
+        shell: pwsh
+        run: |
+          & 'C:\Lazarus\lazbuild.exe' '--build-mode=Release 64-Bit' '.\ce-upstream\Cheat Engine\cheatengine.lpi'
+          if ($LASTEXITCODE -ne 0) { throw "Cheat Engine lazbuild failed with exit code $LASTEXITCODE." }
+          $ce = '.\ce-upstream\Cheat Engine\bin\cheatengine-x86_64.exe'
+          if (!(Test-Path $ce)) { throw 'cheatengine-x86_64.exe was not produced.' }
+          if (!(Test-Path '.\ce-upstream\Cheat Engine\bin\autorun\DotNetInject.lua')) { throw 'Official DotNetInject.lua is missing.' }
+
+      - name: Inject CE payload into actual gloader and inspect real Terraria
+        shell: pwsh
+        run: |
+          $testDir = Join-Path $env:GITHUB_WORKSPACE 'tests/CEActualTerrariaProbe'
+          $ceResult = Join-Path $testDir 'ce-result.txt'
+          $probeResult = Join-Path $testDir 'terraria-probe.txt'
+          Remove-Item $ceResult,$probeResult -Force -ErrorAction SilentlyContinue
+
+          $ceDir = Join-Path $env:GITHUB_WORKSPACE 'ce-upstream\Cheat Engine\bin'
+          $ceExe = Join-Path $ceDir 'cheatengine-x86_64.exe'
+          $autorun = Join-Path $ceDir 'autorun\zz_gloader_real_terraria_probe.lua'
+          Copy-Item (Join-Path $testDir 'ce-smoke.lua') $autorun -Force
+
+          $gameRoot = (Resolve-Path 'dist/gloader').Path
+          $gloader = Join-Path $gameRoot 'gloader.exe'
+          $target = [System.IO.Path]::GetFullPath($env:TERRARIA_X64_TARGET)
+          $ceProc = $null
+          $gameProc = $null
+
+          try {
+            # Start CE first so its fast polling loop is already alive when the
+            # real gloader apphost appears. No gloader code is modified for this test.
+            $ceProc = Start-Process -FilePath $ceExe -WorkingDirectory $ceDir -PassThru
+            Start-Sleep -Milliseconds 750
+            $gameProc = Start-Process -FilePath $gloader -WorkingDirectory $gameRoot -ArgumentList @('--target', $target, '--no-mods') -PassThru
+            Write-Host "Actual gloader PID: $($gameProc.Id)"
+
+            for ($i = 0; $i -lt 600 -and !(Test-Path $probeResult); $i++) {
+              Start-Sleep -Milliseconds 200
+              if ($gameProc.HasExited -and !(Test-Path $probeResult)) { break }
+              $gameProc.Refresh()
+            }
+
+            if (Test-Path $ceResult) {
+              Write-Host 'CE injection result:'
+              Get-Content $ceResult | Write-Host
+            }
+
+            if (!(Test-Path $probeResult)) {
+              Write-Host 'gloader logs after missing probe result:'
+              Get-ChildItem (Join-Path $gameRoot 'gdeps/logs') -File -ErrorAction SilentlyContinue | ForEach-Object {
+                Write-Host "--- $($_.Name) ---"
+                Get-Content $_.FullName -ErrorAction SilentlyContinue | Write-Host
+              }
+              $exit = if ($gameProc.HasExited) { "gloader exited with $($gameProc.ExitCode)" } else { 'gloader was still running' }
+              throw "Injected payload produced no Terraria reflection result; $exit."
+            }
+
+            $probeText = Get-Content $probeResult -Raw
+            Write-Host 'Terraria reflection probe:'
+            Write-Host $probeText
+
+            if (!(Test-Path $ceResult)) { throw 'Cheat Engine produced no injection result.' }
+            $ceText = (Get-Content $ceResult -Raw).Trim()
+            if ($ceText -notmatch '^SUCCESS RETURN=23063 PID=(\d+)$') { throw "CE injection did not report success: $ceText" }
+            if ([int]$Matches[1] -ne $gameProc.Id) { throw "CE injected PID $($Matches[1]), expected actual gloader PID $($gameProc.Id)." }
+
+            if ($probeText -notmatch '(?m)^Status=SUCCESS\s*$') { throw 'Managed reflection payload reported failure.' }
+            if ($probeText -notmatch '(?m)^ProcessId=(\d+)\s*$') { throw 'Probe did not report its process ID.' }
+            if ([int]$Matches[1] -ne $gameProc.Id) { throw "Managed payload ran in PID $($Matches[1]), expected gloader PID $($gameProc.Id)." }
+            foreach ($flag in @('DeathAuraReady','AllFishAreCratesReady','LuckyTreasureBagsReady','OverallReady')) {
+              if ($probeText -notmatch "(?m)^$flag=True\s*$") { throw "$flag was not proven by the real Terraria reflection probe." }
+            }
+          }
+          finally {
+            if ($ceProc -ne $null -and !$ceProc.HasExited) { Stop-Process -Id $ceProc.Id -Force -ErrorAction SilentlyContinue }
+            if ($gameProc -ne $null -and !$gameProc.HasExited) { Stop-Process -Id $gameProc.Id -Force -ErrorAction SilentlyContinue }
+          }
+
+      - name: Upload probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ce-real-gloader-terraria-probe
+          path: |
+            tests/CEActualTerrariaProbe/ce-result.txt
+            tests/CEActualTerrariaProbe/terraria-probe.txt
+            dist/gloader/gdeps/logs/*.log
+          if-no-files-found: warn
