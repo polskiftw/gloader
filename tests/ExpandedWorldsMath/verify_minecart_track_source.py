@@ -105,8 +105,14 @@ def main() -> int:
     require_literal(
         worldgen,
         """
-        worldGenRange = configuration.GetRange("LongTrackLength");
-        trackGenerator.Place(origin7, worldGenRange.ScaledMinimum, worldGenRange.ScaledMaximum);
+        WorldGenRange worldGenRange = passConfig.Get<WorldGenRange>("LongTrackLength");
+        """,
+        "WorldGen still reads LongTrackLength from the active pass configuration",
+    )
+    require_literal(
+        worldgen,
+        """
+        trackGenerator.Place(origin7, worldGenRange.ScaledMinimum, worldGenRange.ScaledMaximum)
         """,
         "WorldGen still sends scaled LongTrackLength bounds directly to TrackGenerator.Place",
     )
