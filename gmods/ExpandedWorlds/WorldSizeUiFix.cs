@@ -14,15 +14,25 @@ using Terraria.UI;
 /// <summary>
 /// Extends Terraria 1.4.5.8's New World size selector after BuildPage() has created
 /// the three vanilla controls. Terraria's original Small / Medium / Large row is
-/// left untouched. Expanded physical presets are rendered in two separate rows
-/// beneath it so the vanilla controls keep their native dimensions and the THICC
-/// controls have enough room to remain readable.
+/// left completely untouched. Expanded physical presets are rendered in their own
+/// rows beneath it, and the vanilla rows below the size selector are shifted down
+/// by the exact extra row height.
 /// </summary>
 [HarmonyPatch]
 internal static class ExpandedWorldBuildPageSizeRowFix
 {
+    private const int ExpandedButtonsPerRow = 6;
+    private const float VanillaRowStridePixels = 48f;
+    private const float ExpandedButtonGapPixels = 6f;
+
     private static readonly FieldInfo SizeButtonsField =
         AccessTools.Field(typeof(UIWorldCreation), "_sizeButtons");
+
+    private static readonly FieldInfo DifficultyButtonsField =
+        AccessTools.Field(typeof(UIWorldCreation), "_difficultyButtons");
+
+    private static readonly FieldInfo EvilButtonsField =
+        AccessTools.Field(typeof(UIWorldCreation), "_evilButtons");
 
     private static readonly FieldInfo DescriptionTextField =
         AccessTools.Field(typeof(UIWorldCreation), "_descriptionText");
@@ -37,6 +47,7 @@ internal static class ExpandedWorldBuildPageSizeRowFix
         AccessTools.Method(typeof(UIElement), "Remove", Type.EmptyTypes);
 
     private static UIWorldCreation _owner;
+    private static UIElement _layoutContainer;
     private static UITextPanel<string>[] _expandedButtons = new UITextPanel<string>[0];
 
     private static MethodBase TargetMethod()
@@ -71,6 +82,10 @@ internal static class ExpandedWorldBuildPageSizeRowFix
             throw new ArgumentNullException(nameof(owner));
         if (SizeButtonsField == null)
             throw new MissingFieldException(typeof(UIWorldCreation).FullName, "_sizeButtons");
+        if (DifficultyButtonsField == null)
+            throw new MissingFieldException(typeof(UIWorldCreation).FullName, "_difficultyButtons");
+        if (EvilButtonsField == null)
+            throw new MissingFieldException(typeof(UIWorldCreation).FullName, "_evilButtons");
         if (ParentProperty == null)
             throw new MissingMemberException(typeof(UIElement).FullName, "Parent");
 
@@ -82,35 +97,28 @@ internal static class ExpandedWorldBuildPageSizeRowFix
         if (first == null)
             throw new InvalidOperationException("Terraria's Small world-size button was not a UIElement.");
 
-        UIElement container = ParentProperty.GetValue(first, null) as UIElement;
+        UIElement container = ParentOf(first);
         if (container == null)
             throw new InvalidOperationException("Terraria's world-size row did not have a live parent container.");
 
         RemoveOwnButtons();
 
-        _owner = owner;
         int expandedCount = ExpandedWorldMath.ExpandedPresetCount;
+        int expandedRowCount = Math.Max(1, (expandedCount + ExpandedButtonsPerRow - 1) / ExpandedButtonsPerRow);
+
+        ApplyExpandedLayout(owner, container, first, expandedRowCount);
+
+        _owner = owner;
         _expandedButtons = new UITextPanel<string>[expandedCount];
-
-        const int firstRowCount = 6;
-        int secondRowCount = Math.Max(0, expandedCount - firstRowCount);
-
-        // Keep Terraria's native Small / Medium / Large row exactly as-is.
-        // The custom rows are positioned relative to the existing buttons so
-        // vanilla width, alignment, padding, hitboxes, and snap points remain untouched.
-        float buttonHeightPixels = first.Height.Pixels;
-        float buttonHeightPercent = first.Height.Precent;
-        float vanillaTopPixels = first.Top.Pixels;
-        float vanillaTopPercent = first.Top.Precent;
-        float rowGapPixels = 8f;
 
         for (int i = 0; i < expandedCount; i++)
         {
             ExpandedWorldDefinition definition = ExpandedWorldMath.DefinitionAt(i);
-            bool secondRow = i >= firstRowCount;
-            int rowIndex = secondRow ? i - firstRowCount : i;
-            int rowCount = secondRow ? secondRowCount : Math.Min(firstRowCount, expandedCount);
-            float topPixels = vanillaTopPixels + (buttonHeightPixels + rowGapPixels) * (secondRow ? 2f : 1f);
+            int row = i / ExpandedButtonsPerRow;
+            int rowIndex = i % ExpandedButtonsPerRow;
+            int rowStart = row * ExpandedButtonsPerRow;
+            int rowCount = Math.Min(ExpandedButtonsPerRow, expandedCount - rowStart);
+            float topPixels = first.Top.Pixels + VanillaRowStridePixels * (row + 1);
 
             UITextPanel<string> button = MakeButton(
                 owner,
@@ -119,9 +127,9 @@ internal static class ExpandedWorldBuildPageSizeRowFix
                 rowIndex,
                 rowCount,
                 topPixels,
-                vanillaTopPercent,
-                buttonHeightPixels,
-                buttonHeightPercent);
+                first.Top.Precent,
+                first.Height.Pixels,
+                first.Height.Precent);
 
             _expandedButtons[i] = button;
             container.Append(button);
@@ -130,7 +138,84 @@ internal static class ExpandedWorldBuildPageSizeRowFix
         Refresh(owner);
 
         Console.WriteLine(
-            "[Expanded Worlds] New World size controls installed below vanilla row: THICC-THICC 6 / THICC 7-THICC 11.");
+            "[Expanded Worlds] New World size controls installed beneath untouched vanilla Small/Medium/Large row (" +
+            expandedRowCount + " THICC row(s)).");
+    }
+
+    private static void ApplyExpandedLayout(
+        UIWorldCreation owner,
+        UIElement container,
+        UIElement firstSizeButton,
+        int expandedRowCount)
+    {
+        // Draw-time recovery can call Inject() again for the same live tree. Do
+        // not keep adding height or shifting the vanilla controls on repeat calls.
+        if (ReferenceEquals(container, _layoutContainer))
+            return;
+
+        Array difficultyButtons = DifficultyButtonsField.GetValue(owner) as Array;
+        Array evilButtons = EvilButtonsField.GetValue(owner) as Array;
+        if (difficultyButtons == null || difficultyButtons.Length == 0)
+            throw new InvalidOperationException("Terraria did not expose its world-difficulty row.");
+        if (evilButtons == null || evilButtons.Length == 0)
+            throw new InvalidOperationException("Terraria did not expose its world-evil row.");
+
+        UIHorizontalSeparator[] separators = container.Children
+            .OfType<UIHorizontalSeparator>()
+            .OrderBy(separator => separator.Top.Pixels)
+            .ToArray();
+        if (separators.Length < 4)
+            throw new InvalidOperationException("Terraria's New World option panel did not expose its four expected separators.");
+
+        UIElement infoHost = ParentOf(container);
+        UIElement panel = ParentOf(infoHost);
+        UIElement outer = ParentOf(panel);
+        if (infoHost == null || panel == null || outer == null)
+            throw new InvalidOperationException("Terraria's New World option panel hierarchy changed from the audited 1.4.5.8 layout.");
+
+        float sizeTop = firstSizeButton.Top.Pixels;
+        float addedHeight = VanillaRowStridePixels * expandedRowCount;
+        float difficultyTop = sizeTop + VanillaRowStridePixels * (1 + expandedRowCount);
+        float evilTop = difficultyTop + VanillaRowStridePixels;
+        float descriptionTop = evilTop + VanillaRowStridePixels;
+
+        // The size row itself is intentionally not touched. Only the rows that
+        // originally lived underneath it move down to make room for THICC rows.
+        SetRowTop(difficultyButtons, difficultyTop);
+        SetRowTop(evilButtons, evilTop);
+
+        // Separator 0 is the one immediately above the vanilla size row and
+        // therefore also remains exactly where Terraria put it. The other three
+        // follow the moved difficulty/evil/description boundaries.
+        separators[1].Top.Set(difficultyTop - 8f, 0f);
+        separators[2].Top.Set(evilTop - 8f, 0f);
+        separators[3].Top.Set(descriptionTop - 8f, 0f);
+
+        // The description panel is VAlign=1 in retail Terraria, so increasing
+        // these two audited ancestor heights naturally carries it downward. The
+        // Back/Create buttons are also bottom-aligned to the outer container.
+        panel.Height.Set(panel.Height.Pixels + addedHeight, panel.Height.Precent);
+        outer.Height.Set(outer.Height.Pixels + addedHeight, outer.Height.Precent);
+
+        _layoutContainer = container;
+    }
+
+    private static void SetRowTop(Array row, float topPixels)
+    {
+        for (int i = 0; i < row.Length; i++)
+        {
+            UIElement button = row.GetValue(i) as UIElement;
+            if (button != null)
+                button.Top.Set(topPixels, 0f);
+        }
+    }
+
+    private static UIElement ParentOf(UIElement element)
+    {
+        if (element == null || ParentProperty == null)
+            return null;
+
+        return ParentProperty.GetValue(element, null) as UIElement;
     }
 
     private static UITextPanel<string> MakeButton(
@@ -146,9 +231,11 @@ internal static class ExpandedWorldBuildPageSizeRowFix
     {
         var button = new UITextPanel<string>(definition.Label, 0.8f, false);
 
-        const float horizontalGapPixels = 8f;
+        // Give every row a fixed six-pixel gutter while still using the full
+        // width. The final five-button row therefore gets wider controls and is
+        // automatically centered by HAlign.
         float widthPercent = rowCount > 0 ? 1f / rowCount : 1f;
-        float widthPixels = -horizontalGapPixels * Math.Max(0, rowCount - 1) / Math.Max(1, rowCount);
+        float widthPixels = -ExpandedButtonGapPixels * Math.Max(0, rowCount - 1) / Math.Max(1, rowCount);
 
         button.Width.Set(widthPixels, widthPercent);
         button.Height.Set(heightPixels, heightPercent);
