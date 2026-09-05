@@ -91,7 +91,7 @@ Vertical network sections are `8, 12, 16` for Small/Medium/Large. Medium and Lar
 
 `quota = verticalSections + 2 = 4 * tier + 6`
 
-That gives THICC `22` through THICC 11 `66`. The source uses the same quota for Shadow Orb rooms and Crimson Heart rooms. Placement, room availability, and RNG remain Terraria-owned.
+That gives THICC `22` through THICC 11 `62`. The source uses the same quota for Shadow Orb rooms and Crimson Heart rooms. Placement, room availability, and RNG remain Terraria-owned.
 
 ### Spider specialized rooms
 

@@ -74,7 +74,7 @@ Two Dual Dungeon values have enough surrounding evidence to continue:
 - Shadow Orb / Crimson Heart quota: Small is a compact exception; Medium+ follows `verticalSections + 2`.
 - Spider specialized-room quota: Small is a compact exception; Medium+ follows `verticalSections / 2`.
 
-Lihzahrd painting count remains intentionally flat for every expanded tier: vanilla Large's randomized `2 or 3` result becomes `3 or 4` with no additional RNG call. There is not enough evidence for a tier-growth formula.
+Lihzahrd paintings use a separate geometry-backed continuation. Vanilla Large's existing randomized `2 or 3` result and its single `Next(2)` call are preserved; Expanded Worlds changes only the deterministic base, derived from Terraria's own width-scaled Temple room geometry. The resulting caps progress from `3-4` on THICC to `9-10` on THICC 11, with no additional RNG call. The exact per-tier values and derivation are documented in `VANILLA-CONTINUITY-AUDIT.md`.
 
 ## Fixed-capacity audit through THICC 11
 

@@ -105,7 +105,24 @@ Two Dual Dungeon tables are weird at Small but become obvious from Medium onward
 - Orb/Heart quota = `vertical sections + 2` from Medium onward;
 - Spider specialized rooms = `vertical sections / 2` from Medium onward.
 
-Lihzahrd paintings are **not** a growth curve. Vanilla Large rolls `2 or 3`; expanded worlds turn that already-rolled result into `3 or 4`. Same single RNG call. Every THICC tier gets the same policy because there is no honest formula for more.
+Lihzahrd paintings **do** grow on expanded worlds, but only from source-backed Temple geometry. Vanilla Large still rolls `2 or 3` with one `Next(2)`. Expanded Worlds keeps that exact roll and changes only the deterministic base using Terraria's own width-scaled Temple room budget. The caps are:
+
+```text
+Large     2-3
+THICC     3-4
+THICC 2   3-4
+THICC 3   4-5
+THICC 4   5-6
+THICC 5   5-6
+THICC 6   6-7
+THICC 7   7-8
+THICC 8   7-8
+THICC 9   8-9
+THICC 10  9-10
+THICC 11  9-10
+```
+
+No extra RNG call. Full derivation is in `VANILLA-CONTINUITY-AUDIT.md`.
 
 ## Fixed arrays that actually break
 
