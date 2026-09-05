@@ -60,6 +60,7 @@ Use short-lived branches that describe the work, normally with prefixes such as:
 - `feat/` for new features;
 - `fix/` for bug fixes;
 - `docs/` for documentation-only changes;
+- `chore/` for maintenance and dependency/tooling updates;
 - `experiment/` for work that may be discarded.
 
 While work is in progress:
