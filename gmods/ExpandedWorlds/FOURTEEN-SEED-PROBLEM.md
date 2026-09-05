@@ -64,6 +64,33 @@ Generate exactly these fourteen sizes:
 13. **THICC 10** — 29400 x 8400
 14. **THICC 11** — 31600 x 9000
 
+## Queue ordering for multi-run batches
+
+When launching multiple fourteen-seed families at once — for example several secret seeds, several numeric seeds, or both — queue the generation jobs **by world size across the entire batch**, smallest first.
+
+Preferred order:
+
+1. all Small jobs
+2. all Medium jobs
+3. all Large jobs
+4. all THICC jobs
+5. all THICC 2 jobs
+6. all THICC 3 jobs
+7. all THICC 4 jobs
+8. all THICC 5 jobs
+9. all THICC 6 jobs
+10. all THICC 7 jobs
+11. all THICC 8 jobs
+12. all THICC 9 jobs
+13. all THICC 10 jobs
+14. all THICC 11 jobs
+
+Within each size tier, the seed or secret-seed variants may be in any stable order. For a four-secret-seed batch, for example, queue all four Small jobs before any Medium job, then all four Medium jobs before any Large job, and so on.
+
+For GitHub Actions, prefer an explicit `matrix.include` list in that size-first order when queue order matters. Do not rely on the expansion order of a multi-axis Cartesian matrix to produce the desired size-first sequence.
+
+This does not make an individual world generate faster. It improves throughput when runner concurrency is lower than the total job count: short Small/Medium jobs finish first and free runner slots sooner, basic workflow/seed-encoding failures surface earlier, and the queue reaches the long THICC tiers with less avoidable blocking.
+
 ## Proven runner workflow
 
 This is the known-good path from the successful seed `1337420` run. Prefer this path instead of rediscovering the Windows/XNA dead ends.
