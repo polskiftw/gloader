@@ -1,0 +1,377 @@
+name: Fourteen Seed 454545 - Dual Dungeons
+
+on:
+  push:
+    branches:
+      - run/fourteen-seed-454545-dual-dungeons
+    paths:
+      - .github/workflows/fourteen-seed-454545-dual-dungeons.yml
+
+permissions:
+  contents: write
+
+jobs:
+  prepare-x64-runtime:
+    runs-on: windows-latest
+    timeout-minutes: 180
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RETAIL_RELEASE_NAME: gloader-private-input
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Locate private retail input
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $releases = @(gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json)
+          $release = @($releases | Where-Object { $_.draft -and ($_.name -eq $env:RETAIL_RELEASE_NAME -or $_.tag_name -eq $env:RETAIL_RELEASE_NAME) }) | Select-Object -First 1
+          if ($null -eq $release) { throw "Draft release '$env:RETAIL_RELEASE_NAME' was not found." }
+          $assets = @($release.assets | Where-Object { $_.name -in @('Terraria.exe', 'Terraria.zip') })
+          if ($assets.Count -ne 1) { throw "Expected exactly one Terraria.exe/Terraria.zip private asset; found $($assets.Count)." }
+          "TERRARIA_ASSET_ID=$($assets[0].id)" >> $env:GITHUB_ENV
+          "TERRARIA_ASSET_NAME=$($assets[0].name)" >> $env:GITHUB_ENV
+          if (-not [string]::IsNullOrWhiteSpace([string]$assets[0].digest)) { "TERRARIA_ASSET_DIGEST=$($assets[0].digest)" >> $env:GITHUB_ENV }
+
+      - name: Build gloader package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./build.ps1
+          $stage = (Resolve-Path 'dist/gloader').Path
+          if (-not (Test-Path (Join-Path $stage 'gloader.exe'))) { throw 'gloader.exe was not produced.' }
+          "GLOADER_STAGE=$stage" >> $env:GITHUB_ENV
+
+      - name: Stage matching retail Terraria.exe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $download = Join-Path $env:RUNNER_TEMP $env:TERRARIA_ASSET_NAME
+          $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/octet-stream'; 'X-GitHub-Api-Version' = '2022-11-28' }
+          Invoke-WebRequest -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/assets/$env:TERRARIA_ASSET_ID" -Headers $headers -OutFile $download
+          if (-not [string]::IsNullOrWhiteSpace($env:TERRARIA_ASSET_DIGEST) -and $env:TERRARIA_ASSET_DIGEST.StartsWith('sha256:', [System.StringComparison]::OrdinalIgnoreCase)) {
+            $expected = $env:TERRARIA_ASSET_DIGEST.Substring(7)
+            $actual = (Get-FileHash -LiteralPath $download -Algorithm SHA256).Hash
+            if ($actual -ne $expected) { throw "Private Terraria asset digest mismatch." }
+          }
+          $bytes = [IO.File]::ReadAllBytes($download)
+          $target = Join-Path $env:GLOADER_STAGE 'Terraria.exe'
+          if ($bytes.Length -ge 2 -and $bytes[0] -eq 0x50 -and $bytes[1] -eq 0x4B) {
+            $expanded = Join-Path $env:RUNNER_TEMP 'terraria-private-input'
+            Expand-Archive -LiteralPath $download -DestinationPath $expanded -Force
+            $matches = @(Get-ChildItem $expanded -Recurse -File -Filter Terraria.exe)
+            if ($matches.Count -ne 1) { throw "Expected exactly one Terraria.exe in private archive; found $($matches.Count)." }
+            Copy-Item $matches[0].FullName $target -Force
+          } else {
+            Move-Item $download $target -Force
+          }
+
+      - name: Build private x64 Terraria runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./tools/x64-runtime/Build-X64Runtime.ps1 `
+            -TerrariaDirectory $env:GLOADER_STAGE `
+            -OutputDirectory (Join-Path $env:GLOADER_STAGE 'gdeps/x64-runtime') `
+            -WorkspaceDirectory (Join-Path $env:RUNNER_TEMP 'fourteen-seed-x64-workspace')
+          $runtime = Join-Path $env:GLOADER_STAGE 'gdeps/x64-runtime/TerrariaRelease.dll'
+          if (-not (Test-Path $runtime -PathType Leaf)) { throw 'Private x64 TerrariaRelease.dll was not produced.' }
+          Remove-Item (Join-Path $env:GLOADER_STAGE 'Terraria.exe') -Force -ErrorAction SilentlyContinue
+
+      - name: Upload x64 runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: fourteen-seed-runtime
+          path: dist/gloader/
+          if-no-files-found: error
+          retention-days: 1
+
+  generate:
+    needs: prepare-x64-runtime
+    name: Generate ${{ matrix.preset }}
+    runs-on: windows-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { preset: Small, slug: small, selector: '', copied_size: 1, autocreate: 1, width: 4200, height: 1200, port: 8011 }
+          - { preset: Medium, slug: medium, selector: '', copied_size: 2, autocreate: 2, width: 6400, height: 1800, port: 8012 }
+          - { preset: Large, slug: large, selector: '', copied_size: 3, autocreate: 3, width: 8400, height: 2400, port: 8013 }
+          - { preset: THICC, slug: thicc, selector: THICC, copied_size: 3, autocreate: 3, width: 10600, height: 3000, port: 8014 }
+          - { preset: 'THICC 2', slug: thicc2, selector: THICC2, copied_size: 3, autocreate: 3, width: 12600, height: 3600, port: 8015 }
+          - { preset: 'THICC 3', slug: thicc3, selector: THICC3, copied_size: 3, autocreate: 3, width: 14800, height: 4200, port: 8016 }
+          - { preset: 'THICC 4', slug: thicc4, selector: THICC4, copied_size: 3, autocreate: 3, width: 16800, height: 4800, port: 8017 }
+          - { preset: 'THICC 5', slug: thicc5, selector: THICC5, copied_size: 3, autocreate: 3, width: 19000, height: 5400, port: 8018 }
+          - { preset: 'THICC 6', slug: thicc6, selector: THICC6, copied_size: 3, autocreate: 3, width: 21000, height: 6000, port: 8019 }
+          - { preset: 'THICC 7', slug: thicc7, selector: THICC7, copied_size: 3, autocreate: 3, width: 23200, height: 6600, port: 8020 }
+          - { preset: 'THICC 8', slug: thicc8, selector: THICC8, copied_size: 3, autocreate: 3, width: 25200, height: 7200, port: 8021 }
+          - { preset: 'THICC 9', slug: thicc9, selector: THICC9, copied_size: 3, autocreate: 3, width: 27400, height: 7800, port: 8022 }
+          - { preset: 'THICC 10', slug: thicc10, selector: THICC10, copied_size: 3, autocreate: 3, width: 29400, height: 8400, port: 8023 }
+          - { preset: 'THICC 11', slug: thicc11, selector: THICC11, copied_size: 3, autocreate: 3, width: 31600, height: 9000, port: 8024 }
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: fourteen-seed-runtime
+          path: runtime
+
+      - name: Stage Expanded Worlds only
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = (Resolve-Path 'runtime').Path
+          $mods = Join-Path $env:RUNNER_TEMP 'fourteen-seed-gmods'
+          New-Item -ItemType Directory -Force $mods | Out-Null
+          Copy-Item (Join-Path $stage 'gmods/ExpandedWorlds') (Join-Path $mods 'ExpandedWorlds') -Recurse -Force
+          "GLOADER_STAGE=$stage" >> $env:GITHUB_ENV
+          "MODS_DIR=$mods" >> $env:GITHUB_ENV
+
+      - name: Generate Dual Dungeons world
+        shell: pwsh
+        env:
+          PRESET: ${{ matrix.preset }}
+          SLUG: ${{ matrix.slug }}
+          SELECTOR: ${{ matrix.selector }}
+          COPIED_SIZE: ${{ matrix.copied_size }}
+          AUTOCREATE: ${{ matrix.autocreate }}
+          EXPECTED_WIDTH: ${{ matrix.width }}
+          EXPECTED_HEIGHT: ${{ matrix.height }}
+          PORT: ${{ matrix.port }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $seed = '454545'
+          $secret = 'Double daring dangers'
+          # World Maker's exact native copied-seed encoding. FNV-1a of
+          # "Double daring dangers|454545" selects Corruption (evil=1).
+          $copiedSeed = "$($env:COPIED_SIZE).1.1.0.$secret|$seed"
+          $outDir = Join-Path $PWD 'world-output'
+          New-Item -ItemType Directory -Force $outDir | Out-Null
+          $world = Join-Path $outDir ("$($env:SLUG).wld")
+          $config = Join-Path $env:RUNNER_TEMP ("fourteen-seed-$($env:SLUG).txt")
+          @"
+          world=$world
+          autocreate=$($env:AUTOCREATE)
+          worldname=FourteenSeed454545-$($env:SLUG)
+          seed=$copiedSeed
+          difficulty=0
+          maxplayers=1
+          port=$($env:PORT)
+          upnp=0
+          secure=1
+          worldrollbackstokeep=0
+          "@ | Set-Content -LiteralPath $config -Encoding ASCII
+
+          if ([string]::IsNullOrWhiteSpace($env:SELECTOR)) {
+            Remove-Item Env:GLOADER_EXPANDED_WORLD -ErrorAction SilentlyContinue
+          } else {
+            $env:GLOADER_EXPANDED_WORLD = $env:SELECTOR
+          }
+
+          function Test-Port([int]$p) {
+            $client = New-Object Net.Sockets.TcpClient
+            try { $task = $client.ConnectAsync('127.0.0.1', $p); return ($task.Wait(350) -and $client.Connected) }
+            catch { return $false }
+            finally { $client.Dispose() }
+          }
+
+          $stdout = Join-Path $outDir 'generation.stdout.txt'
+          $stderr = Join-Path $outDir 'generation.stderr.txt'
+          $argLine = '--server --mods "' + $env:MODS_DIR + '" -- -config "' + $config + '"'
+          $p = Start-Process -FilePath (Join-Path $env:GLOADER_STAGE 'gloader.exe') -ArgumentList $argLine -WorkingDirectory $env:GLOADER_STAGE -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          $deadline = (Get-Date).AddMinutes(345)
+          $ready = $false
+          try {
+            while ((Get-Date) -lt $deadline) {
+              if ($p.HasExited) { break }
+              if (Test-Port ([int]$env:PORT)) { $ready = $true; break }
+              Start-Sleep -Seconds 1
+            }
+          } finally {
+            if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+            try { $p.WaitForExit(10000) | Out-Null } catch {}
+          }
+          if (-not $ready) {
+            if (Test-Path $stdout) { Get-Content -Raw $stdout | Write-Host }
+            if (Test-Path $stderr) { Get-Content -Raw $stderr | Write-Host }
+            throw "$($env:PRESET) never reached server-ready state."
+          }
+          if (-not (Test-Path $world -PathType Leaf) -or (Get-Item $world).Length -le 0) { throw "$($env:PRESET) did not produce a valid .wld file." }
+          $text = Get-Content -Raw $stdout
+          if (-not [string]::IsNullOrWhiteSpace($env:SELECTOR)) {
+            $token = "dimensions=$($env:EXPECTED_WIDTH)x$($env:EXPECTED_HEIGHT)"
+            if (-not $text.Contains($token)) { throw "Expanded Worlds did not report expected $token." }
+          }
+          @{
+            preset = $env:PRESET
+            seed = $seed
+            secretSeed = $secret
+            copiedSeed = $copiedSeed
+            expectedWidth = [int]$env:EXPECTED_WIDTH
+            expectedHeight = [int]$env:EXPECTED_HEIGHT
+            is64BitRequired = $true
+          } | ConvertTo-Json | Set-Content (Join-Path $outDir 'request.json') -Encoding UTF8
+
+      - name: Upload world
+        uses: actions/upload-artifact@v4
+        with:
+          name: world-${{ matrix.slug }}
+          path: world-output/${{ matrix.slug }}.wld
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload generation diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostics-${{ matrix.slug }}
+          path: |
+            world-output/generation.stdout.txt
+            world-output/generation.stderr.txt
+            world-output/request.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  compose:
+    needs: generate
+    runs-on: windows-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout gloader history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all fourteen worlds
+        uses: actions/download-artifact@v4
+        with:
+          pattern: world-*
+          path: worlds
+          merge-multiple: true
+
+      - name: Restore pinned TEdit renderer source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git checkout 01b5009e968e9fbdef94256a54affce3d8f2ac3b -- tools/world-family-renderer
+          $dir = 'tools/world-family-renderer'
+          Remove-Item "$dir/GenerationEngine.cs","$dir/MainForm.cs","$dir/RuntimeLocator.cs","$dir/WorldFamilyJob.cs" -Force
+
+          @'
+          namespace WorldFamilyRenderer;
+
+          internal sealed record WorldPreset(int Number, string Name, string Slug, int Width, int Height)
+          {
+              public static IReadOnlyList<WorldPreset> All { get; } = new[]
+              {
+                  new WorldPreset(1, "Small", "small", 4200, 1200),
+                  new WorldPreset(2, "Medium", "medium", 6400, 1800),
+                  new WorldPreset(3, "Large", "large", 8400, 2400),
+                  new WorldPreset(4, "THICC", "thicc", 10600, 3000),
+                  new WorldPreset(5, "THICC 2", "thicc2", 12600, 3600),
+                  new WorldPreset(6, "THICC 3", "thicc3", 14800, 4200),
+                  new WorldPreset(7, "THICC 4", "thicc4", 16800, 4800),
+                  new WorldPreset(8, "THICC 5", "thicc5", 19000, 5400),
+                  new WorldPreset(9, "THICC 6", "thicc6", 21000, 6000),
+                  new WorldPreset(10, "THICC 7", "thicc7", 23200, 6600),
+                  new WorldPreset(11, "THICC 8", "thicc8", 25200, 7200),
+                  new WorldPreset(12, "THICC 9", "thicc9", 27400, 7800),
+                  new WorldPreset(13, "THICC 10", "thicc10", 29400, 8400),
+                  new WorldPreset(14, "THICC 11", "thicc11", 31600, 9000)
+              };
+          }
+
+          internal sealed record RenderedWorld(WorldPreset Preset, string PngPath, int PixelWidth, int PixelHeight);
+          '@ | Set-Content "$dir/Models.cs" -Encoding UTF8
+
+          @'
+          using ReactiveUI.Builder;
+          using TEdit.Terraria;
+
+          namespace WorldFamilyRenderer;
+
+          internal static class Program
+          {
+              [STAThread]
+              private static int Main(string[] args)
+              {
+                  try
+                  {
+                      if (args.Length != 2) throw new ArgumentException("Usage: WorldFamilyRenderer <world-dir> <output-dir>");
+                      _ = RxAppBuilder.CreateReactiveUIBuilder().WithCoreServices().BuildApp();
+                      WorldConfiguration.Initialize();
+                      string worldDir = Path.GetFullPath(args[0]);
+                      string outputDir = Path.GetFullPath(args[1]);
+                      Directory.CreateDirectory(outputDir);
+                      var rendered = new List<RenderedWorld>();
+                      var progress = new Progress<string>(Console.WriteLine);
+
+                      foreach (WorldPreset preset in WorldPreset.All)
+                      {
+                          string worldPath = Path.Combine(worldDir, preset.Slug + ".wld");
+                          if (!File.Exists(worldPath)) throw new FileNotFoundException("Missing generated world", worldPath);
+                          var loaded = World.LoadWorld(worldPath, headersOnly: true);
+                          if (loaded.Error != null || loaded.World == null) throw new InvalidDataException("TEdit could not validate " + preset.Name, loaded.Error);
+                          if (loaded.World.TilesWide != preset.Width || loaded.World.TilesHigh != preset.Height)
+                              throw new InvalidDataException($"{preset.Name}: expected {preset.Width}x{preset.Height}, got {loaded.World.TilesWide}x{loaded.World.TilesHigh}");
+
+                          string png = Path.Combine(outputDir, $"{preset.Number:00}-{preset.Slug}.png");
+                          rendered.Add(TEditPaletteRenderer.RenderAsync(worldPath, preset, 3840, png, progress, CancellationToken.None).GetAwaiter().GetResult());
+                      }
+
+                      ComparisonComposer.Compose(rendered, Path.Combine(outputDir, "454545-dual-dungeons-fourteen-seed.png"), CancellationToken.None);
+                      Console.WriteLine("Fourteen Seed render complete.");
+                      return 0;
+                  }
+                  catch (Exception ex)
+                  {
+                      Console.Error.WriteLine(ex);
+                      return 1;
+                  }
+              }
+          }
+          '@ | Set-Content "$dir/Program.cs" -Encoding UTF8
+
+          $composer = Get-Content "$dir/ComparisonComposer.cs" -Raw
+          $composer = $composer.Replace('rendered.Count != 6', 'rendered.Count != 14').Replace('Exactly six rendered worlds are required.', 'Exactly fourteen rendered worlds are required.').Replace('Vanilla + XL + Huge + THICC', 'Seed 454545 + Dual Dungeons + Small through THICC 11')
+          Set-Content "$dir/ComparisonComposer.cs" $composer -Encoding UTF8
+
+          $project = Get-Content "$dir/WorldFamilyRenderer.csproj" -Raw
+          $project = $project.Replace('<OutputType>WinExe</OutputType>', '<OutputType>Exe</OutputType>')
+          Set-Content "$dir/WorldFamilyRenderer.csproj" $project -Encoding UTF8
+
+      - name: Checkout pinned TEdit
+        uses: actions/checkout@v4
+        with:
+          repository: TEdit/Terraria-Map-Editor
+          ref: cca62adbe37f8cbbd447061650f91a357836f5d0
+          path: _deps/TEdit
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Build and run pinned TEdit compositor
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $project = 'tools/world-family-renderer/WorldFamilyRenderer.csproj'
+          $tedit = Join-Path $env:GITHUB_WORKSPACE '_deps/TEdit'
+          dotnet restore $project -p:TEditRoot="$tedit"
+          dotnet publish $project -c Release -r win-x64 --self-contained true --no-restore -p:PublishSingleFile=true -p:TEditRoot="$tedit"
+          $exe = 'tools/world-family-renderer/bin/Release/net10.0-windows/win-x64/publish/WorldFamilyRenderer.exe'
+          & $exe (Resolve-Path 'worlds').Path (Join-Path $PWD 'rendered')
+          if ($LASTEXITCODE -ne 0) { throw "Renderer failed with exit code $LASTEXITCODE" }
+          if (-not (Test-Path 'rendered/454545-dual-dungeons-fourteen-seed.png')) { throw 'Final comparison PNG was not produced.' }
+
+      - name: Upload Fourteen Seed result
+        uses: actions/upload-artifact@v4
+        with:
+          name: fourteen-seed-454545-dual-dungeons
+          path: rendered/*.png
+          if-no-files-found: error
+          retention-days: 30
