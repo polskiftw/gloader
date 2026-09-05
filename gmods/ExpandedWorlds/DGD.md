@@ -109,7 +109,7 @@ Lihzahrd paintings are **not** a growth curve. Vanilla Large rolls `2 or 3`; exp
 
 ## Fixed arrays that actually break
 
-At THICC 11 the source audit says these retail bookkeeping limits are genuinely too small:
+At THICC 11 the source audit says these retail bookkeeping/scratch limits are genuinely too small:
 
 ```text
 Floating Island metadata: 300 -> need up to 890
@@ -117,9 +117,12 @@ Crimson heartPos:          100 -> need up to 232
 Mountain Cave records:      30 -> need up to 46
 Surface Tunnel tracking:    49 usable -> need 70 (sentinel 71)
 Surface Ore tracking:       49 usable -> need 74 (sentinel 75)
+Minecart track history:    4096 -> need 7623 (7523 max track + same 100-slot reserve)
 ```
 
-We only enlarge the bookkeeping. Terraria still decides how many things to generate, where they go, and which RNG calls happen.
+We only enlarge the bookkeeping/scratch space. Terraria still decides how many things to generate, where they go, how long tracks are allowed to be, and which RNG calls happen.
+
+Minecart history is the especially dumb one: Terraria explicitly scales long-track length with world width, but its private path scratch array was sized with huge unused headroom for vanilla Large instead of dynamically. THICC 4 is the first tier where `max track + 100 reserve` crosses 4096. The fix only grows that temporary generation array. It does not touch existing `.wld` files or existing tracks.
 
 These are still safe at THICC 11 and therefore stay vanilla:
 
@@ -186,7 +189,7 @@ Display-style spaces such as `THICC 11` are okay too. `XL`, `HUGE`, and `THICC12
 
 ## OCD check
 
-Fast CI locks the exact 11-tier table, dimensions-to-name lookup, section cadence, tier math through 14, capacity bounds, map grid, signed-coordinate hard stop, selector parsing, and client/server syntax.
+Fast CI locks the exact 11-tier table, dimensions-to-name lookup, section cadence, tier math through 14, capacity bounds including minecart track history, map grid, signed-coordinate hard stop, selector parsing, and client/server syntax. When the private retail input is available it also checks the exact TrackGenerator/WorldGenRange source shape behind the minecart fix.
 
 The separate manual Windows stress matrix runs **all 11 THICC tiers independently** with seed `1337420`, `fail-fast: false`, and records:
 

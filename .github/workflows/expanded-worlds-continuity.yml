@@ -149,3 +149,4 @@ jobs:
         run: |
           python tests/ExpandedWorldsMath/verify_source.py "$env:RUNNER_TEMP\terraria-source\source"
           python tests/ExpandedWorldsMath/verify_promoted_inferences.py "$env:RUNNER_TEMP\terraria-source\source"
+          python tests/ExpandedWorldsMath/verify_minecart_track_source.py "$env:RUNNER_TEMP\terraria-source\source"

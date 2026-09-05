@@ -78,7 +78,7 @@ Lihzahrd painting count remains intentionally flat for every expanded tier: vani
 
 ## Fixed-capacity audit through THICC 11
 
-The 1.4.5.8 source audit found five bookkeeping stores that can be exceeded at the hard-stop dimensions. Those are expanded without changing placement counts or RNG:
+The 1.4.5.8 source audit found six bookkeeping/scratch stores that can be exceeded at the hard-stop dimensions. Those are expanded without changing placement counts or RNG:
 
 | Store | Retail capacity/guard | THICC 11 source-derived requirement |
 | --- | ---: | ---: |
@@ -87,6 +87,9 @@ The 1.4.5.8 source audit found five bookkeeping stores that can be exceeded at t
 | Mountain Cave `mCaveX/mCaveY` | `30` | `46` worst-case Remix attempts |
 | Surface Tunnel tracking | effective `49` records from sentinel `50` | `70` records, sentinel `71` |
 | Surface Ore tracking | effective `49` records from sentinel `50` | `74` records, sentinel `75` |
+| Minecart `TrackGenerator` path history | `4,096`, with final `100` entries reserved | `7,623` = `7,523` scaled long-track maximum + the same `100`-entry reserve |
+
+Minecart history is generation-only scratch storage and is not written to `.wld` files. THICC 4 is the first tier where Terraria's own WorldWidth-scaled maximum plus its existing 100-entry reserve exceeds `4,096`; existing worlds are therefore untouched, while newly generated THICC 4+ worlds can realize the longer tracks Terraria requested instead of clipping against retail scratch headroom.
 
 Audited fixed stores that still remain below retail capacity at THICC 11 are left untouched:
 
@@ -156,7 +159,7 @@ Fast continuity CI verifies:
 - the exact 11-entry size table and dimension lookup;
 - section cadence through overall tier 14;
 - the tier math and promoted inferences through tier 14;
-- capacity upper bounds and safe retail capacities;
+- capacity upper bounds and safe retail capacities, including minecart path-history headroom;
 - map logical/backing target math, including THICC 11 `16x5` / `17x6`;
 - the signed-coordinate hard stop;
 - server selector parsing and retired-name rejection;

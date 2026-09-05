@@ -141,12 +141,16 @@ Glow Tulips use equivalent explicit physical-width categorization rather than `G
 
 ## Capacity-only exceptions
 
-Two fixed current-source scratch arrays can be exceeded by otherwise valid canonical expanded generation:
+Six fixed current-source bookkeeping/scratch stores or guards can be exceeded by otherwise valid canonical expanded generation:
 
 - Floating Island metadata arrays: enlarged only as necessary for Terraria's own worst-case generated record count.
 - `WorldGen.heartPos`: enlarged only as necessary for Terraria's own Crimson record count.
+- Mountain Cave `mCaveX/mCaveY`: enlarged only as necessary for Terraria's own Remix-scaled attempt count.
+- Surface Tunnel tracking: backing storage and its sentinel grow only enough for Terraria's own width formula.
+- Surface Ore tracking: backing storage and its sentinel grow only enough for Terraria's own width formula.
+- Minecart `TrackGenerator._history`: its constructor allocation grows only when the explicit WorldWidth-scaled `LongTrackLength` maximum plus Terraria's existing 100-entry tail reserve exceeds the retail 4,096 entries. THICC 11 therefore needs 7,623 entries for a 7,523 maximum requested long track plus the unchanged reserve.
 
-No content count or RNG decision is made by the capacity code.
+No content count or RNG decision is made by the capacity code. Minecart history is generation-only scratch data, not part of the `.wld` format; existing worlds and existing tracks are unaffected.
 
 ## Non-worldgen support
 
