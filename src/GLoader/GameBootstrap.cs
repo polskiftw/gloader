@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using System.Runtime.Loader;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace GLoader
@@ -50,6 +51,8 @@ namespace GLoader
 
         public static int InvokeEntryPoint(Assembly gameAssembly, string[] gameArguments)
         {
+            HoldForCeProbeIfRequested();
+
             var entryPoint = gameAssembly.EntryPoint;
             if (entryPoint == null)
                 throw new MissingMethodException("Terraria assembly has no managed entry point.");
@@ -91,6 +94,28 @@ namespace GLoader
                 ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
                 throw;
             }
+        }
+
+        private static void HoldForCeProbeIfRequested()
+        {
+            var readyFile = Environment.GetEnvironmentVariable("GLOADER_CE_PROBE_READY_FILE");
+            if (string.IsNullOrWhiteSpace(readyFile))
+                return;
+
+            readyFile = Path.GetFullPath(readyFile);
+            var directory = Path.GetDirectoryName(readyFile);
+            if (!string.IsNullOrWhiteSpace(directory))
+                Directory.CreateDirectory(directory);
+
+            File.WriteAllText(readyFile, Environment.ProcessId.ToString());
+            Log.Info("CE probe checkpoint reached after Terraria assembly load and before Terraria entry point.");
+
+            var deadline = DateTime.UtcNow.AddMinutes(2);
+            while (DateTime.UtcNow < deadline)
+                Thread.Sleep(100);
+
+            throw new TimeoutException(
+                "CE probe checkpoint timed out. This hold is only enabled when GLOADER_CE_PROBE_READY_FILE is explicitly set.");
         }
 
         private static void ConfigurePrivateFnaTitleLocation(string targetPath)
