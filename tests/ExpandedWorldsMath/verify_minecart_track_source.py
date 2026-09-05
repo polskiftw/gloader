@@ -85,14 +85,20 @@ def main() -> int:
         "LongTrackLength remains 400..1000 scaled by WorldWidth",
     )
 
-    require(
+    require_literal(
         worldgen_range,
-        r"Main\.maxTilesX\s*/\s*4200\.0",
+        """
+        case ScalingMode.WorldWidth:
+            num = (double)Main.maxTilesX / 4200.0;
+            break;
+        """,
         "WorldWidth scale remains maxTilesX / 4200.0",
     )
-    require(
+    require_literal(
         worldgen_range,
-        r"\(int\)\s*\(\s*[^;]*GetScale\(\)\s*\*\s*value\s*\)",
+        """
+        return (int)(num * (double)value);
+        """,
         "scaled range values still truncate the positive double product to int",
     )
 
