@@ -81,3 +81,13 @@ Do not create permanent `develop`, `dev`, `staging`, `next`, or similar branches
 A temporary branch may contain the newest truth before it is merged, which is why the First Commandment still requires checking active branches and pull requests.
 
 **Thus is the law: work on branches, prove it there, then bring finished work to `main`.**
+
+# The Fifth Commandment
+
+> **Thou shalt remember that Claire can invoke `@GitHub`.**
+
+When Claire explicitly asks to use **GitHub** or **`@GitHub`**, treat the GitHub connector as available and attempt the requested repository work through it before claiming GitHub access is unavailable.
+
+If one particular GitHub operation is not exposed by the connector in the current session, say exactly which operation is missing and use the available GitHub operations to accomplish the goal another way when practical. Do **not** turn the absence of one API action into the broader claim that GitHub itself is unavailable.
+
+**Thus is the law: Claire asks for `@GitHub`, thou shalt actually try `@GitHub`.**
