@@ -84,10 +84,12 @@ A temporary branch may contain the newest truth before it is merged, which is wh
 
 # The Fifth Commandment
 
-> **Thou shalt remember that Claire can invoke `@GitHub`.**
+> **Thou shalt remember that GitHub is part of Claire's toolbox.**
 
-When Claire explicitly asks to use **GitHub** or **`@GitHub`**, treat the GitHub connector as available and attempt the requested repository work through it before claiming GitHub access is unavailable.
+For Claire's requests about this repository, treat the connected GitHub tooling as available whenever the task naturally requires repository access — inspecting code or docs, checking branches or pull requests, editing files, running or checking Actions, releases, or other repository work. Claire does **not** need to explicitly say **GitHub** or **`@GitHub`** every time.
+
+When Claire does explicitly invoke **GitHub** or **`@GitHub`**, that is an especially direct instruction to attempt the requested repository work through the connector before claiming GitHub access is unavailable.
 
 If one particular GitHub operation is not exposed by the connector in the current session, say exactly which operation is missing and use the available GitHub operations to accomplish the goal another way when practical. Do **not** turn the absence of one API action into the broader claim that GitHub itself is unavailable.
 
-**Thus is the law: Claire asks for `@GitHub`, thou shalt actually try `@GitHub`.**
+**Thus is the law: if Claire asks for repository work, use GitHub without making her remind thee that GitHub exists.**
