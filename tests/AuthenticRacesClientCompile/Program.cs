@@ -17,6 +17,10 @@ internal static class Program
         RacePlayerState.ResetAll();
         RaceAppearanceState.ResetAll();
         RaceRendererRegistry.Initialize();
+        RaceTextureLoader.Initialize(AppDomain.CurrentDomain.BaseDirectory);
+
+        if (string.IsNullOrWhiteSpace(RaceTextureLoader.AssetRoot))
+            return Fail(1, "AuthenticRaces client fixture could not discover the staged race asset root.");
 
         try
         {
@@ -24,14 +28,13 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            return Fail(1, "AuthenticRaces client Harmony targets did not resolve: " + ex);
+            return Fail(2, "AuthenticRaces client Harmony targets did not resolve: " + ex);
         }
 
         var playerTexture = new Texture2D();
         var hairTexture = new Texture2D();
         var hairAltTexture = new Texture2D();
         var unrelatedTexture = new Texture2D();
-        var replacementTexture = new Texture2D();
 
         const int skinVariant = 0;
         const int playerTextureSlot = 3;
@@ -41,7 +44,7 @@ internal static class Program
         TextureAssets.PlayerHair[hair] = new Asset<Texture2D>(hairTexture);
         TextureAssets.PlayerHairAlt[hair] = new Asset<Texture2D>(hairAltTexture);
 
-        var player = new Player { hair = hair };
+        var player = new Player { hair = hair, Male = true };
         var drawInfo = new PlayerDrawSet {
             drawPlayer = player,
             skinVar = skinVariant,
@@ -60,7 +63,7 @@ internal static class Program
             playerSource.Kind != VanillaPlayerDrawKind.PlayerTexture ||
             playerSource.Slot != playerTextureSlot)
         {
-            return Fail(2, "Vanilla player texture record was not classified by skin slot.");
+            return Fail(3, "Vanilla player texture record was not classified by skin slot.");
         }
 
         if (!VanillaPlayerDrawClassifier.TryClassify(
@@ -70,7 +73,7 @@ internal static class Program
             hairSource.Kind != VanillaPlayerDrawKind.Hair ||
             hairSource.Slot != hair)
         {
-            return Fail(3, "Vanilla primary hair record was not classified.");
+            return Fail(4, "Vanilla primary hair record was not classified.");
         }
 
         if (!VanillaPlayerDrawClassifier.TryClassify(
@@ -80,7 +83,7 @@ internal static class Program
             hairAltSource.Kind != VanillaPlayerDrawKind.HairAlt ||
             hairAltSource.Slot != hair)
         {
-            return Fail(4, "Vanilla alternate hair record was not classified.");
+            return Fail(5, "Vanilla alternate hair record was not classified.");
         }
 
         if (VanillaPlayerDrawClassifier.TryClassify(
@@ -88,38 +91,79 @@ internal static class Program
                 drawInfo.DrawDataCache[3],
                 out _))
         {
-            return Fail(5, "Unrelated draw data must remain outside the race-owned classifier.");
+            return Fail(6, "Unrelated draw data must remain outside the race-owned classifier.");
         }
 
-        var renderer = new ProbeRenderer(replacementTexture);
-        RaceRendererRegistry.Register("MrPlagueRaces/Human", renderer, replace: true);
+        // The probe race exists only in this executable. Production still registers Human only,
+        // so old Skeleton sidecars continue to fall back safely until Skeleton gameplay is ported.
+        var skeletonProbe = RaceRegistry.Register(new SkeletonProbeRace());
+        RacePlayerState.SetRace(player, skeletonProbe);
+
+        var realSheetRenderer = new PlayerTextureSheetRenderer(
+            raceAssetName: "Skeleton",
+            playerTextureSlot: playerTextureSlot,
+            sheetPath: "ColorSkin/Body");
+        var recordingRenderer = new RecordingRenderer(realSheetRenderer);
+        RaceRendererRegistry.Register(skeletonProbe.UpstreamFullName, recordingRenderer);
 
         PlayerDrawLayers.DrawPlayer_RenderAllLayers(ref drawInfo);
 
-        if (renderer.InvocationCount != 1)
-            return Fail(6, "Pre-render race pipeline did not run exactly once.");
-        if (!ReferenceEquals(drawInfo.DrawDataCache[0].texture, replacementTexture))
-            return Fail(7, "Race renderer did not rewrite the finished vanilla draw record in place.");
+        if (recordingRenderer.InvocationCount != 1)
+            return Fail(7, "Pre-render race pipeline did not run exactly once.");
+        if (recordingRenderer.RaceIdentity != "MrPlagueRaces/Skeleton")
+            return Fail(8, "Selected upstream-compatible Skeleton identity did not reach the renderer.");
+        if (!recordingRenderer.Appearance.Equals(RaceAppearanceData.Default))
+            return Fail(9, "Per-player appearance state did not reach the renderer.");
+
+        var skeletonBody = drawInfo.DrawDataCache[0].texture;
+        if (ReferenceEquals(skeletonBody, playerTexture))
+            return Fail(10, "Real Skeleton body sheet did not replace vanilla player texture slot 3.");
+        if (!skeletonBody.WasLoadedFromPngStream || skeletonBody.SourceByteLength <= 8)
+            return Fail(11, "Skeleton body replacement was not created from the staged upstream PNG bytes.");
         if (!ReferenceEquals(drawInfo.DrawDataCache[3].texture, unrelatedTexture))
-            return Fail(8, "Race renderer seam disturbed an unrelated draw record.");
-        if (renderer.RaceIdentity != "MrPlagueRaces/Human")
-            return Fail(9, "Selected upstream-compatible race identity did not reach the renderer.");
-        if (!renderer.Appearance.Equals(RaceAppearanceData.Default))
-            return Fail(10, "Per-player appearance state did not reach the renderer.");
+            return Fail(12, "Real sheet substitution disturbed an unrelated draw record.");
 
-        // Re-initializing the renderer registry restores Human's intentional no-op renderer.
-        RaceRendererRegistry.Initialize();
-        var original = drawInfo.DrawDataCache[0];
-        original.texture = playerTexture;
-        drawInfo.DrawDataCache[0] = original;
+        // Reset the record and render again. The loader should return the exact same Texture2D,
+        // proving repeated frames do not reopen/recreate the PNG.
+        var reset = drawInfo.DrawDataCache[0];
+        reset.texture = playerTexture;
+        drawInfo.DrawDataCache[0] = reset;
         PlayerDrawLayers.DrawPlayer_RenderAllLayers(ref drawInfo);
 
-        if (renderer.InvocationCount != 1)
-            return Fail(11, "Human pass-through reset did not replace the probe renderer.");
-        if (!ReferenceEquals(drawInfo.DrawDataCache[0].texture, playerTexture))
-            return Fail(12, "Human pass-through renderer must leave vanilla draw data untouched.");
+        if (recordingRenderer.InvocationCount != 2)
+            return Fail(13, "Second render did not pass through the race renderer.");
+        if (!ReferenceEquals(drawInfo.DrawDataCache[0].texture, skeletonBody))
+            return Fail(14, "Race texture cache did not reuse the previously loaded Skeleton Texture2D.");
 
-        Console.WriteLine("PASS: AuthenticRaces client render hook, classifier, registry, and in-place rewrite seam are deterministic.");
+        // The fixture intentionally stages only the male file. Female lookup must therefore
+        // follow MrPlague's original fallback rule and reuse the male sheet.
+        player.Male = false;
+        reset = drawInfo.DrawDataCache[0];
+        reset.texture = playerTexture;
+        drawInfo.DrawDataCache[0] = reset;
+        PlayerDrawLayers.DrawPlayer_RenderAllLayers(ref drawInfo);
+
+        if (recordingRenderer.InvocationCount != 3)
+            return Fail(15, "Female fallback render did not pass through the race renderer.");
+        if (!ReferenceEquals(drawInfo.DrawDataCache[0].texture, skeletonBody))
+            return Fail(16, "Missing female race sheet did not fall back to the male upstream sheet.");
+
+        // Production initialization still means Human = vanilla pixels.
+        RacePlayerState.RestoreDefaultRace(player);
+        RaceRendererRegistry.Initialize();
+        player.Male = true;
+        reset = drawInfo.DrawDataCache[0];
+        reset.texture = playerTexture;
+        drawInfo.DrawDataCache[0] = reset;
+        PlayerDrawLayers.DrawPlayer_RenderAllLayers(ref drawInfo);
+
+        if (recordingRenderer.InvocationCount != 3)
+            return Fail(17, "Human pass-through reset did not detach the Skeleton probe renderer.");
+        if (!ReferenceEquals(drawInfo.DrawDataCache[0].texture, playerTexture))
+            return Fail(18, "Human pass-through renderer must leave vanilla draw data untouched.");
+
+        Console.WriteLine(
+            "PASS: AuthenticRaces loaded the real upstream Skeleton Body.png, rewrote vanilla slot 3 in place, reused the cached texture, preserved female fallback, and kept Human pass-through deterministic.");
         return 0;
     }
 
@@ -129,13 +173,18 @@ internal static class Program
         return code;
     }
 
-    private sealed class ProbeRenderer : RaceRenderer
+    private sealed class SkeletonProbeRace : Race
     {
-        private readonly Texture2D _replacement;
+        public override string Name => "Skeleton";
+    }
 
-        public ProbeRenderer(Texture2D replacement)
+    private sealed class RecordingRenderer : RaceRenderer
+    {
+        private readonly RaceRenderer _inner;
+
+        public RecordingRenderer(RaceRenderer inner)
         {
-            _replacement = replacement;
+            _inner = inner;
         }
 
         public int InvocationCount { get; private set; }
@@ -150,10 +199,7 @@ internal static class Program
             InvocationCount++;
             RaceIdentity = race.UpstreamFullName;
             Appearance = appearance;
-
-            var item = drawInfo.DrawDataCache[0];
-            item.texture = _replacement;
-            drawInfo.DrawDataCache[0] = item;
+            _inner.Rewrite(ref drawInfo, race, appearance);
         }
     }
 }
