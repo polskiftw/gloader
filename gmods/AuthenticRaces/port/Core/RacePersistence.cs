@@ -14,7 +14,8 @@ namespace AuthenticRaces.Core
     internal static class RacePersistence
     {
         private const string Extension = ".arplr";
-        private const byte SchemaVersion = 1;
+        private const byte CurrentSchemaVersion = 2;
+        private const byte RaceOnlySchemaVersion = 1;
         private const int MaxSidecarBytes = 64 * 1024;
         private static readonly byte[] Magic = Encoding.ASCII.GetBytes("ARPLR");
 
@@ -27,7 +28,10 @@ namespace AuthenticRaces.Core
             {
                 string path = GetSidecarPath(playerFile.Path);
                 bool cloud = playerFile.IsCloudSave;
-                byte[] data = Encode(RacePlayerState.GetRace(playerFile.Player).UpstreamFullName);
+                var saveData = new RaceSaveData(
+                    RacePlayerState.GetPersistedRaceName(playerFile.Player),
+                    RaceAppearanceState.Get(playerFile.Player));
+                byte[] data = EncodePayload(saveData);
 
                 if (FileUtilities.Exists(path, cloud))
                     FileUtilities.Copy(path, path + ".bak", cloud);
@@ -48,6 +52,7 @@ namespace AuthenticRaces.Core
                 return;
 
             RacePlayerState.RestoreDefaultRace(playerFile.Player);
+            RaceAppearanceState.RestoreDefault(playerFile.Player);
 
             if (string.IsNullOrWhiteSpace(playerPath))
                 return;
@@ -57,15 +62,15 @@ namespace AuthenticRaces.Core
                 string path = GetSidecarPath(playerPath);
                 string backupPath = path + ".bak";
 
-                if (TryLoadPath(path, cloudSave, out var raceName, out var primaryError))
+                if (TryLoadPath(path, cloudSave, out var saveData, out var primaryError))
                 {
-                    RestoreRace(playerFile, raceName);
+                    RestoreData(playerFile, saveData);
                     return;
                 }
 
-                if (TryLoadPath(backupPath, cloudSave, out raceName, out var backupError))
+                if (TryLoadPath(backupPath, cloudSave, out saveData, out var backupError))
                 {
-                    RestoreRace(playerFile, raceName);
+                    RestoreData(playerFile, saveData);
                     if (!string.IsNullOrWhiteSpace(primaryError))
                         Console.WriteLine("[Authentic Races] Primary race sidecar was unreadable; loaded its backup instead. " + primaryError);
                     return;
@@ -132,17 +137,25 @@ namespace AuthenticRaces.Core
             }
         }
 
+        // Compatibility helper retained for the small regression fixture and any early port code.
+        // New writes use schema 2 with default custom appearance values.
         internal static byte[] Encode(string raceName)
         {
-            if (string.IsNullOrWhiteSpace(raceName))
-                throw new ArgumentException("Race name cannot be empty.", nameof(raceName));
+            return EncodePayload(new RaceSaveData(raceName, RaceAppearanceData.Default));
+        }
+
+        internal static byte[] EncodePayload(RaceSaveData saveData)
+        {
+            if (string.IsNullOrWhiteSpace(saveData.RaceName))
+                throw new ArgumentException("Race name cannot be empty.", nameof(saveData));
 
             using (var stream = new MemoryStream())
             using (var writer = new BinaryWriter(stream, Encoding.UTF8))
             {
                 writer.Write(Magic);
-                writer.Write(SchemaVersion);
-                writer.Write(raceName);
+                writer.Write(CurrentSchemaVersion);
+                writer.Write(saveData.RaceName);
+                WriteAppearance(writer, saveData.Appearance);
                 writer.Flush();
                 return stream.ToArray();
             }
@@ -150,7 +163,19 @@ namespace AuthenticRaces.Core
 
         internal static bool TryDecode(byte[] data, out string raceName, out string error)
         {
+            if (TryDecodePayload(data, out var saveData, out error))
+            {
+                raceName = saveData.RaceName;
+                return true;
+            }
+
             raceName = null;
+            return false;
+        }
+
+        internal static bool TryDecodePayload(byte[] data, out RaceSaveData saveData, out string error)
+        {
+            saveData = default;
             error = null;
 
             if (data == null || data.Length == 0)
@@ -185,34 +210,41 @@ namespace AuthenticRaces.Core
                     }
 
                     byte version = reader.ReadByte();
-                    if (version != SchemaVersion)
+                    if (version != RaceOnlySchemaVersion && version != CurrentSchemaVersion)
                     {
                         error = "Unsupported sidecar schema version " + version + ".";
                         return false;
                     }
 
-                    raceName = reader.ReadString();
+                    string raceName = reader.ReadString();
                     if (string.IsNullOrWhiteSpace(raceName))
                     {
                         error = "Saved race name is empty.";
-                        raceName = null;
                         return false;
                     }
 
+                    RaceAppearanceData appearance = RaceAppearanceData.Default;
+                    if (version >= CurrentSchemaVersion)
+                    {
+                        if (!TryReadAppearance(reader, out appearance, out error))
+                            return false;
+                    }
+
+                    saveData = new RaceSaveData(raceName, appearance);
                     return true;
                 }
             }
             catch (Exception ex)
             {
                 error = ex.GetType().Name + ": " + ex.Message;
-                raceName = null;
+                saveData = default;
                 return false;
             }
         }
 
-        private static bool TryLoadPath(string path, bool cloudSave, out string raceName, out string error)
+        private static bool TryLoadPath(string path, bool cloudSave, out RaceSaveData saveData, out string error)
         {
-            raceName = null;
+            saveData = default;
             error = null;
 
             if (!FileUtilities.Exists(path, cloudSave))
@@ -220,7 +252,7 @@ namespace AuthenticRaces.Core
 
             try
             {
-                return TryDecode(FileUtilities.ReadAllBytes(path, cloudSave), out raceName, out error);
+                return TryDecodePayload(FileUtilities.ReadAllBytes(path, cloudSave), out saveData, out error);
             }
             catch (Exception ex)
             {
@@ -229,14 +261,73 @@ namespace AuthenticRaces.Core
             }
         }
 
-        private static void RestoreRace(PlayerFileData playerFile, string raceName)
+        private static void RestoreData(PlayerFileData playerFile, RaceSaveData saveData)
         {
-            if (RacePlayerState.TryRestoreRace(playerFile.Player, raceName))
+            RaceAppearanceState.Set(playerFile.Player, saveData.Appearance);
+
+            if (RacePlayerState.TryRestoreRace(playerFile.Player, saveData.RaceName))
                 return;
 
             Console.WriteLine(
-                "[Authentic Races] Saved race '" + raceName + "' is not available in this port yet; using " +
-                RaceRegistry.DefaultRace.Name + ".");
+                "[Authentic Races] Saved race '" + saveData.RaceName + "' is not available in this port yet; using " +
+                RaceRegistry.DefaultRace.Name + " temporarily while preserving the saved identity.");
+        }
+
+        private static void WriteAppearance(BinaryWriter writer, RaceAppearanceData appearance)
+        {
+            WriteRgb(writer, appearance.DetailColor);
+            WriteRgb(writer, appearance.AuxiliaryDetailColor1);
+            WriteRgb(writer, appearance.AuxiliaryDetailColor2);
+            WriteRgb(writer, appearance.AuxiliaryDetailColor3);
+            writer.Write(appearance.AuxiliaryHairstyle1);
+            writer.Write(appearance.AuxiliaryHairstyle2);
+            writer.Write(appearance.AuxiliaryHairstyle3);
+        }
+
+        private static bool TryReadAppearance(BinaryReader reader, out RaceAppearanceData appearance, out string error)
+        {
+            appearance = RaceAppearanceData.Default;
+            error = null;
+
+            try
+            {
+                appearance.DetailColor = ReadRgb(reader);
+                appearance.AuxiliaryDetailColor1 = ReadRgb(reader);
+                appearance.AuxiliaryDetailColor2 = ReadRgb(reader);
+                appearance.AuxiliaryDetailColor3 = ReadRgb(reader);
+                appearance.AuxiliaryHairstyle1 = reader.ReadInt32();
+                appearance.AuxiliaryHairstyle2 = reader.ReadInt32();
+                appearance.AuxiliaryHairstyle3 = reader.ReadInt32();
+
+                if (appearance.AuxiliaryHairstyle1 < 0 ||
+                    appearance.AuxiliaryHairstyle2 < 0 ||
+                    appearance.AuxiliaryHairstyle3 < 0)
+                {
+                    error = "Saved auxiliary hairstyle ID is negative.";
+                    appearance = RaceAppearanceData.Default;
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = "Appearance data is truncated or invalid: " + ex.GetType().Name + ": " + ex.Message;
+                appearance = RaceAppearanceData.Default;
+                return false;
+            }
+        }
+
+        private static void WriteRgb(BinaryWriter writer, Rgb24 color)
+        {
+            writer.Write(color.R);
+            writer.Write(color.G);
+            writer.Write(color.B);
+        }
+
+        private static Rgb24 ReadRgb(BinaryReader reader)
+        {
+            return new Rgb24(reader.ReadByte(), reader.ReadByte(), reader.ReadByte());
         }
 
         private static string GetSidecarPath(string playerPath)
