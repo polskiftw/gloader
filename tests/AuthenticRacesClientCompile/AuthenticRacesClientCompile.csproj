@@ -13,6 +13,9 @@
     <Compile Include="../../gmods/AuthenticRaces/port/**/*.cs" LinkBase="AuthenticRaces" />
     <Compile Include="TerrariaStubs.cs" />
     <Compile Include="Program.cs" />
+    <Content Include="../../gmods/AuthenticRaces/source/Assets/Textures/Players/Races/Skeleton/Male/ColorSkin/Body.png"
+             Link="source/Assets/Textures/Players/Races/Skeleton/Male/ColorSkin/Body.png"
+             CopyToOutputDirectory="PreserveNewest" />
     <PackageReference Include="Lib.Harmony" Version="2.4.2" />
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net48" Version="1.0.3" PrivateAssets="All" />
   </ItemGroup>
