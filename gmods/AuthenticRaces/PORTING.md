@@ -34,6 +34,8 @@ Current `port/` equivalents:
 - `Rendering/RaceRenderPipeline.cs` — selected-race and appearance-state bridge into rendering.
 - `Rendering/RaceRenderHooks.cs` — direct pre-render Harmony seam into vanilla player drawing.
 - `Rendering/VanillaPlayerDrawClassifier.cs` — identifies finished vanilla skin/hair draw records without mutating global texture tables.
+- `Rendering/RaceTextureLoader.cs` — direct bundled PNG loader and texture cache, independent of `ModContent`.
+- `Rendering/PlayerTextureSheetRenderer.cs` — smallest reusable renderer: one vanilla player texture slot -> one race sheet.
 - `Races/HumanRace.cs` — intentionally boring proof race and default race.
 
 ## Verified lifecycle hooks
@@ -116,16 +118,48 @@ This also matches the upstream data model: `RaceSheet` contains texture plus she
 
 Human registers a deliberate pass-through renderer, so this checkpoint changes no normal player pixels.
 
-`tests/AuthenticRacesClientCompile` is a separate `GLOADER_CLIENT` executable fixture. The normal solution build now verifies that the client Harmony target resolves, vanilla player/primary-hair/alternate-hair records classify correctly, an unrelated draw record stays untouched, a probe renderer can rewrite one finished draw record through the real Harmony prefix, and resetting the registry restores Human's pass-through behavior.
+`tests/AuthenticRacesClientCompile` is a separate `GLOADER_CLIENT` executable fixture. The normal solution build verifies that the client Harmony target resolves, vanilla player/primary-hair/alternate-hair records classify correctly, an unrelated draw record stays untouched, and resetting the registry restores Human's pass-through behavior.
 
 ### Deliberate scope boundary
 
-This first render seam covers the normal full-player path. Vanilla's dedicated head-only/UI renderer uses a separate head draw path; do not fake coverage for character-list/head-preview rendering. Add that as a small companion seam when the first actual race sheet needs head-only previews.
+The normal full-player seam does not cover vanilla's dedicated head-only/UI renderer. Character-list/head-preview rendering uses a separate head draw path and will get a small companion seam when actual race heads are brought across.
+
+## First real race-sheet checkpoint
+
+The renderer now consumes a real upstream MrPlague PNG without `ModContent`.
+
+`RaceTextureLoader` discovers either layout:
+
+```text
+AuthenticRaces/source/Assets/Textures/Players/Races/...   # current staging layout
+AuthenticRaces/Assets/Textures/Players/Races/...          # future flattened layout
+```
+
+Discovery runs during `Mod.Load()` while gloader's mod-directory context is available, but PNG decoding is lazy. A `Texture2D` is created only when a matching draw record is actually encountered, then cached and reused across later frames. The loader also preserves upstream `Race.GetRaceSheet` behavior: when a female-specific file is absent, the male sheet is used.
+
+`PlayerTextureSheetRenderer` is the first concrete renderer. It targets one vanilla `TextureAssets.Players[skinVariant, slot]` identity, obtains one race PNG, and swaps only `DrawData.texture`. Position, source frame, colour, shader, rotation, origin, scale, sprite effects and ordering are left exactly as vanilla already calculated them.
+
+The regression fixture uses the existing upstream:
+
+```text
+source/Assets/Textures/Players/Races/Skeleton/Male/ColorSkin/Body.png
+```
+
+against vanilla player texture **slot 3**, which Terraria 1.4.5.8 uses for body skin. The executable verifies:
+
+- the actual PNG bytes reach `Texture2D.FromStream`;
+- slot 3 changes to the Skeleton sheet;
+- an unrelated draw record remains untouched;
+- a second frame reuses the same cached `Texture2D`;
+- missing female art falls back to the male sheet;
+- restoring the production renderer registry returns Human to vanilla pass-through.
+
+Skeleton is **not** registered as a production race by this checkpoint. The fixture registers a temporary Skeleton probe race only inside the test executable. This matters because existing `MrPlagueRaces/Skeleton` sidecars must continue falling back to Human until Skeleton's gameplay is actually ported; a pretty-but-mechanically-incomplete Skeleton would be a false port.
 
 ## Next seam
 
-**One real race-sheet substitution is next.**
+**Expand the sheet vocabulary without expanding playable-race scope.**
 
-Do not port every asset table yet. First add the smallest client asset loader that can resolve one bundled race texture without `ModContent`, then use a deliberately simple substitution to prove one classified vanilla player record can be replaced by race art in-game while armour and unrelated layers remain vanilla.
+The next renderer work should map Terraria's vanilla player texture slots to MrPlague's base sheet categories/channels and prove a complete static body can be assembled from race art: head/eyes, torso, legs, arms and hands, while armour still wins wherever vanilla hides skin.
 
-Once that proof is stable, expand the sheet vocabulary (16 colour channels, hairstyle tracks, glow masks, clothing) and then begin moving individual non-Human races across.
+Keep that proof test-only against a non-Human race until its gameplay contract is ready. Once the base visual vocabulary is stable, add hairstyle tracks, auxiliary tracks, clothing/censor sheets and glow masks in small verified increments rather than copying the upstream mega-arrays wholesale.
