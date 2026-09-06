@@ -7,44 +7,40 @@ using System.Linq;
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.Threading;
 
 internal static class RadioMetadata
 {
+    // Rainwave's anonymous info endpoint describes the schedule, which can advance
+    // before a listener's buffered MP3 reaches the transition. This delay is used
+    // only when stream-embedded metadata is unavailable.
+    internal const double RainwaveScheduleFallbackDelaySeconds = 10.0;
+
     internal static bool TryReadTrack(Station station, out TrackInfo track)
     {
         track = null;
-        if (station == null || station.MetadataMode == MetadataMode.None) return false;
+        if (station == null) return false;
 
-        TrackInfo candidate = null;
-        var success = false;
-        if (station.MetadataMode == MetadataMode.Rainwave)
-            success = TryRainwave(station.MetadataUrl, out candidate);
-        else if (station.MetadataMode == MetadataMode.LautFm)
-            success = TryLautFm(station.MetadataUrl, out candidate);
-        else if (station.MetadataMode == MetadataMode.WebPage && !string.IsNullOrWhiteSpace(station.MetadataUrl))
-            success = TryWebPage(station, out candidate);
-        else
+        // Prefer metadata travelling with the audio stream. In particular, this keeps
+        // Rainwave's title change tied to the stream rather than its ahead-of-playback schedule.
+        if (TryReadIcyFromStation(station, out track))
         {
-            foreach (var variant in StreamRanking.Rank(station.Streams))
-            {
-                try
-                {
-                    var url = RadioNet.ResolveStreamVariant(station, variant);
-                    var title = ReadIcyStreamTitle(url, 6000, 4);
-                    if (!IsTrackLike(title, station)) continue;
-                    candidate = TrackInfo.FromDisplay(title);
-                    success = true;
-                    break;
-                }
-                catch { }
-            }
+            track.PlaybackDelaySeconds = 0;
+            return true;
         }
 
-        if (!success || candidate == null || !IsTrackLike(candidate.Display, station)) return false;
-        MetadataProbe.Observe(station, candidate);
-        track = candidate;
-        return true;
+        if (station.MetadataMode == MetadataMode.Rainwave && !string.IsNullOrWhiteSpace(station.MetadataUrl))
+        {
+            try
+            {
+                if (TryParseRainwaveNowPlayingJson(RadioNet.DownloadText(station.MetadataUrl, 6000), out track) &&
+                    track != null && IsTrackLike(track.Display, station))
+                    return true;
+            }
+            catch { }
+        }
+
+        track = null;
+        return false;
     }
 
     internal static bool TryParseRainwaveNowPlayingJson(string json, out TrackInfo track)
@@ -55,48 +51,51 @@ internal static class RadioMetadata
             var root = MiniJson.Parse(json) as Dictionary<string, object>;
             var current = JsonValue.ChildObject(root, "sched_current");
             if (current == null) return false;
+
             Dictionary<string, object> song = null;
             var songs = JsonValue.ChildArray(current, "songs");
             if (songs != null && songs.Count > 0) song = songs[0] as Dictionary<string, object>;
             if (song == null) song = JsonValue.ChildObject(current, "song_data");
             if (song == null) return false;
+
             var title = JsonValue.String(song, "title").Trim();
             if (title.Length == 0) return false;
+
             var artistNames = new List<string>();
             foreach (var artistItem in JsonValue.ChildArray(song, "artists") ?? new List<object>())
             {
                 var artist = artistItem as Dictionary<string, object>;
-                var name = artist == null ? Convert.ToString(artistItem, CultureInfo.InvariantCulture) : JsonValue.String(artist, "name");
-                if (!string.IsNullOrWhiteSpace(name) && !artistNames.Contains(name, StringComparer.OrdinalIgnoreCase)) artistNames.Add(name.Trim());
+                var name = artist == null
+                    ? Convert.ToString(artistItem, CultureInfo.InvariantCulture)
+                    : JsonValue.String(artist, "name");
+                if (!string.IsNullOrWhiteSpace(name) && !artistNames.Contains(name, StringComparer.OrdinalIgnoreCase))
+                    artistNames.Add(name.Trim());
             }
-            track = new TrackInfo { Artist = string.Join(", ", artistNames), Title = title, Raw = (artistNames.Count == 0 ? title : string.Join(", ", artistNames) + " - " + title), ReceivedUtc = DateTime.UtcNow };
-            return true;
-        }
-        catch { return false; }
-    }
 
-    internal static bool TryParseLautFmCurrentSong(string json, out TrackInfo track)
-    {
-        track = null;
-        try
-        {
-            var root = MiniJson.Parse(json) as Dictionary<string, object>;
-            if (root == null) return false;
-            var title = JsonValue.String(root, "title").Trim();
-            var artist = JsonValue.ChildObject(root, "artist");
-            var artistName = JsonValue.String(artist, "name").Trim();
-            if (title.Length == 0) return false;
-            track = new TrackInfo { Artist = artistName, Title = title, Raw = artistName.Length == 0 ? title : artistName + " - " + title, ReceivedUtc = DateTime.UtcNow };
+            var artistText = string.Join(", ", artistNames);
+            track = new TrackInfo
+            {
+                Artist = artistText,
+                Title = title,
+                Raw = artistText.Length == 0 ? title : artistText + " - " + title,
+                ReceivedUtc = DateTime.UtcNow,
+                PlaybackDelaySeconds = RainwaveScheduleFallbackDelaySeconds
+            };
             return true;
         }
-        catch { return false; }
+        catch
+        {
+            track = null;
+            return false;
+        }
     }
 
     internal static string ExtractIcyStreamTitle(string metadata)
     {
         if (string.IsNullOrEmpty(metadata)) return null;
         var match = Regex.Match(metadata, @"(?:^|;)\s*StreamTitle\s*=\s*'(?<title>.*?)'\s*;", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
-        if (!match.Success) match = Regex.Match(metadata, @"StreamTitle\s*=\s*""(?<title>.*?)""", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
+        if (!match.Success)
+            match = Regex.Match(metadata, @"StreamTitle\s*=\s*""(?<title>.*?)""", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
         return match.Success ? WebUtility.HtmlDecode(match.Groups["title"].Value).Trim() : null;
     }
 
@@ -104,9 +103,10 @@ internal static class RadioMetadata
     {
         var value = (title ?? string.Empty).Trim();
         if (value.Length < 2 || value.Length > 240) return false;
-        var lower = value.ToLowerInvariant();
         if (station != null && string.Equals(value, station.Name, StringComparison.OrdinalIgnoreCase)) return false;
-        if (lower.Contains("you are listening") || lower.Contains("you're listening") || lower.Contains("station id") || lower.Contains("advertisement")) return false;
+        var lower = value.ToLowerInvariant();
+        if (lower.Contains("you are listening") || lower.Contains("you're listening") ||
+            lower.Contains("station id") || lower.Contains("advertisement")) return false;
         return true;
     }
 
@@ -118,6 +118,7 @@ internal static class RadioMetadata
             int interval;
             if (!int.TryParse(response.GetResponseHeader("icy-metaint"), NumberStyles.Integer, CultureInfo.InvariantCulture, out interval) || interval <= 0)
                 throw new InvalidDataException("Stream did not provide icy-metaint.");
+
             using (var stream = response.GetResponseStream())
             {
                 for (var attempt = 0; attempt < metadataBlocks; attempt++)
@@ -136,38 +137,22 @@ internal static class RadioMetadata
         throw new InvalidDataException("No ICY title was received.");
     }
 
-    private static bool TryRainwave(string url, out TrackInfo track)
-    {
-        try { return TryParseRainwaveNowPlayingJson(RadioNet.DownloadText(url, 6000), out track); }
-        catch { track = null; return false; }
-    }
-
-    private static bool TryLautFm(string url, out TrackInfo track)
-    {
-        try { return TryParseLautFmCurrentSong(RadioNet.DownloadText(url, 6000), out track); }
-        catch { track = null; return false; }
-    }
-
-    private static bool TryWebPage(Station station, out TrackInfo track)
+    private static bool TryReadIcyFromStation(Station station, out TrackInfo track)
     {
         track = null;
-        try
+        foreach (var variant in StreamRanking.Rank(station.Streams))
         {
-            var html = RadioNet.DownloadText(station.MetadataUrl, 7000);
-            var patterns = new[]
+            try
             {
-                @"Now\s*Playing[\s\S]{0,500}?<[^>]+>(?<title>[^<>]{3,200})</",
-                @"Playing\s*now\s*:[\s\S]{0,300}?(?<title>[A-Za-z0-9][^<\r\n]{2,200})"
-            };
-            foreach (var pattern in patterns)
-            {
-                var match = Regex.Match(html, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-                if (!match.Success) continue;
-                var title = WebUtility.HtmlDecode(Regex.Replace(match.Groups["title"].Value, "<.*?>", string.Empty)).Trim();
-                if (IsTrackLike(title, station)) { track = TrackInfo.FromDisplay(title); return true; }
+                var streamUrl = RadioNet.ResolveStreamVariant(station, variant);
+                var title = ReadIcyStreamTitle(streamUrl, 6000, 4);
+                if (!IsTrackLike(title, station)) continue;
+                track = TrackInfo.FromDisplay(title);
+                track.PlaybackDelaySeconds = 0;
+                return true;
             }
+            catch { }
         }
-        catch { }
         return false;
     }
 
@@ -190,61 +175,6 @@ internal static class RadioMetadata
             if (read <= 0) throw new EndOfStreamException();
             offset += read;
             count -= read;
-        }
-    }
-}
-
-internal static class MetadataProbe
-{
-    private static readonly object Sync = new object();
-    private static readonly Dictionary<string, string> FirstTitles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-    private static readonly HashSet<string> Verified = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-    internal static bool Observe(Station station, TrackInfo track)
-    {
-        if (station == null || track == null || !RadioMetadata.IsTrackLike(track.Display, station)) return false;
-        var id = string.IsNullOrWhiteSpace(station.Id) ? station.Name : station.Id;
-        if (string.IsNullOrWhiteSpace(id)) return false;
-        lock (Sync)
-        {
-            if (Verified.Contains(id))
-            {
-                station.MetadataVerified = true;
-                return true;
-            }
-            string first;
-            if (!FirstTitles.TryGetValue(id, out first))
-            {
-                FirstTitles[id] = track.Display;
-                station.MetadataVerified = false;
-                return false;
-            }
-            if (!string.Equals(first, track.Display, StringComparison.Ordinal))
-            {
-                Verified.Add(id);
-                station.MetadataVerified = true;
-                return true;
-            }
-            station.MetadataVerified = false;
-            return false;
-        }
-    }
-
-    internal static bool HasUsableTrackMetadata(Station station, out string firstTitle)
-    {
-        firstTitle = null;
-        TrackInfo track;
-        if (!RadioMetadata.TryReadTrack(station, out track) || track == null || string.IsNullOrWhiteSpace(track.Display)) return false;
-        firstTitle = track.Display;
-        return RadioMetadata.IsTrackLike(firstTitle, station);
-    }
-
-    internal static void ResetForTests()
-    {
-        lock (Sync)
-        {
-            FirstTitles.Clear();
-            Verified.Clear();
         }
     }
 }
