@@ -24,7 +24,7 @@ namespace AuthenticRaces.Core
             if (player == null)
                 throw new ArgumentNullException(nameof(player));
 
-            var state = States.GetOrCreateValue(player);
+            var state = GetState(player);
             if (!RaceRegistry.TryGet(state.RaceId, out var race))
             {
                 race = RaceRegistry.DefaultRace;
@@ -59,7 +59,7 @@ namespace AuthenticRaces.Core
             if (race == null)
                 throw new ArgumentNullException(nameof(race));
 
-            var state = States.GetOrCreateValue(player);
+            var state = GetState(player);
             var previous = GetRace(player);
             if (previous.Id == race.Id)
                 return;
@@ -67,6 +67,11 @@ namespace AuthenticRaces.Core
             previous.PreRaceChange(player);
             state.RaceId = race.Id;
             race.PostRaceChange(player);
+        }
+
+        private static State GetState(Player player)
+        {
+            return States.GetValue(player, _ => new State());
         }
 
         private sealed class State
