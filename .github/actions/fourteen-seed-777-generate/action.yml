@@ -1,0 +1,210 @@
+name: Fourteen Seed 777 generation worker
+description: Generate and validate one seed-777 world for the all-special-and-secret batch.
+
+inputs:
+  runtime-artifact-id:
+    required: true
+    description: Artifact ID for the prepared x64 gloader runtime.
+  suite-label:
+    required: true
+  suite-slug:
+    required: true
+  special-config:
+    required: false
+    default: ''
+  secret-text:
+    required: false
+    default: ''
+  preset:
+    required: true
+  world-slug:
+    required: true
+  selector:
+    required: false
+    default: ''
+  copied-size:
+    required: true
+  autocreate:
+    required: true
+  expected-width:
+    required: true
+  expected-height:
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Download prepared x64 runtime
+      uses: actions/download-artifact@v4
+      with:
+        artifact-ids: ${{ inputs.runtime-artifact-id }}
+        path: runtime
+
+    - name: Stage Expanded Worlds only
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $stage = (Resolve-Path 'runtime').Path
+        $mods = Join-Path $env:RUNNER_TEMP 'fourteen-seed-gmods'
+        New-Item -ItemType Directory -Force $mods | Out-Null
+        Copy-Item (Join-Path $stage 'gmods/ExpandedWorlds') (Join-Path $mods 'ExpandedWorlds') -Recurse -Force
+        "GLOADER_STAGE=$stage" >> $env:GITHUB_ENV
+        "MODS_DIR=$mods" >> $env:GITHUB_ENV
+
+    - name: Generate and validate world
+      shell: pwsh
+      env:
+        SUITE_LABEL: ${{ inputs.suite-label }}
+        SUITE_SLUG: ${{ inputs.suite-slug }}
+        SPECIAL_CONFIG: ${{ inputs.special-config }}
+        SECRET_TEXT: ${{ inputs.secret-text }}
+        PRESET: ${{ inputs.preset }}
+        WORLD_SLUG: ${{ inputs.world-slug }}
+        SELECTOR: ${{ inputs.selector }}
+        COPIED_SIZE: ${{ inputs.copied-size }}
+        AUTOCREATE: ${{ inputs.autocreate }}
+        EXPECTED_WIDTH: ${{ inputs.expected-width }}
+        EXPECTED_HEIGHT: ${{ inputs.expected-height }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $seed = '777'
+        $specialConfig = [string]$env:SPECIAL_CONFIG
+        $secretText = [string]$env:SECRET_TEXT
+
+        $hasSpecial = -not [string]::IsNullOrWhiteSpace($specialConfig)
+        $hasSecret = -not [string]::IsNullOrWhiteSpace($secretText)
+        if ($hasSpecial -eq $hasSecret) {
+          throw "$($env:SUITE_LABEL) must specify exactly one Special Seed flag or one Secret Seed phrase."
+        }
+
+        if ($hasSecret) {
+          # Terraria 1.4.5 native copied-seed payload. Keep 777 as the numeric base seed.
+          $seedValue = "$($env:COPIED_SIZE).1.1.0.$secretText|$seed"
+        } else {
+          # Special Seeds use Terraria's dedicated-server seed_x config flags and keep seed=777.
+          $seedValue = $seed
+        }
+
+        $outDir = Join-Path $PWD 'world-output'
+        New-Item -ItemType Directory -Force $outDir | Out-Null
+        $world = Join-Path $outDir ("$($env:WORLD_SLUG).wld")
+        $config = Join-Path $env:RUNNER_TEMP ("fourteen-seed-777-$($env:SUITE_SLUG)-$($env:WORLD_SLUG).txt")
+
+        @{
+          preset = $env:PRESET
+          worldSlug = $env:WORLD_SLUG
+          seed = $seed
+          suite = $env:SUITE_LABEL
+          suiteSlug = $env:SUITE_SLUG
+          specialConfig = $specialConfig
+          secretText = $secretText
+          effectiveSeedValue = $seedValue
+          expectedWidth = [int]$env:EXPECTED_WIDTH
+          expectedHeight = [int]$env:EXPECTED_HEIGHT
+          is64BitRequired = $true
+        } | ConvertTo-Json | Set-Content (Join-Path $outDir 'request.json') -Encoding UTF8
+
+        $lines = @(
+          "world=$world"
+          "autocreate=$($env:AUTOCREATE)"
+          "worldname=F14-777-$($env:WORLD_SLUG)"
+          "seed=$seedValue"
+          'difficulty=0'
+          'maxplayers=1'
+          'port=7777'
+          'upnp=0'
+          'secure=1'
+          'worldrollbackstokeep=0'
+        )
+        if ($hasSpecial) {
+          $lines += "seed_$specialConfig=1"
+        }
+        $lines | Set-Content -LiteralPath $config -Encoding ASCII
+
+        if ([string]::IsNullOrWhiteSpace($env:SELECTOR)) {
+          Remove-Item Env:GLOADER_EXPANDED_WORLD -ErrorAction SilentlyContinue
+        } else {
+          $env:GLOADER_EXPANDED_WORLD = $env:SELECTOR
+        }
+
+        function Test-Port([int]$p) {
+          $client = New-Object Net.Sockets.TcpClient
+          try {
+            $task = $client.ConnectAsync('127.0.0.1', $p)
+            return ($task.Wait(350) -and $client.Connected)
+          } catch {
+            return $false
+          } finally {
+            $client.Dispose()
+          }
+        }
+
+        $stdout = Join-Path $outDir 'generation.stdout.txt'
+        $stderr = Join-Path $outDir 'generation.stderr.txt'
+        $argLine = '--server --mods "' + $env:MODS_DIR + '" -- -config "' + $config + '"'
+        $p = Start-Process -FilePath (Join-Path $env:GLOADER_STAGE 'gloader.exe') -ArgumentList $argLine -WorkingDirectory $env:GLOADER_STAGE -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+        $deadline = (Get-Date).AddMinutes(345)
+        $ready = $false
+        try {
+          while ((Get-Date) -lt $deadline) {
+            if ($p.HasExited) { break }
+            if (Test-Port 7777) { $ready = $true; break }
+            Start-Sleep -Seconds 1
+          }
+        } finally {
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+          try { $p.WaitForExit(10000) | Out-Null } catch {}
+        }
+
+        if (-not $ready) {
+          if (Test-Path $stdout) { Get-Content -Raw $stdout | Write-Host }
+          if (Test-Path $stderr) { Get-Content -Raw $stderr | Write-Host }
+          throw "$($env:SUITE_LABEL) / $($env:PRESET) never reached server-ready state."
+        }
+        if (-not (Test-Path $world -PathType Leaf) -or (Get-Item $world).Length -le 0) {
+          throw "$($env:SUITE_LABEL) / $($env:PRESET) did not produce a valid .wld file."
+        }
+
+        $text = Get-Content -Raw $stdout
+        if ($text -notmatch '(?im)\bProcess\b.*\bx64\b') {
+          throw "$($env:SUITE_LABEL) / $($env:PRESET) did not prove an x64 generator process."
+        }
+        if (-not $text.Contains('[Expanded Worlds] Dedicated-server headless preset')) {
+          throw "$($env:SUITE_LABEL) / $($env:PRESET) did not prove early Expanded Worlds server initialization."
+        }
+        if ($hasSecret -and -not $text.Contains("$secretText|$seed")) {
+          throw "$($env:SUITE_LABEL) / $($env:PRESET) did not echo the requested Secret Seed payload."
+        }
+        if ($hasSpecial) {
+          $expectedFlag = "seed_$specialConfig=1"
+          $configText = Get-Content -Raw $config
+          if (-not $configText.Contains($expectedFlag)) {
+            throw "$($env:SUITE_LABEL) / $($env:PRESET) lost requested Special Seed flag $expectedFlag."
+          }
+        }
+        if (-not [string]::IsNullOrWhiteSpace($env:SELECTOR)) {
+          $completion = "[Expanded Worlds] Dedicated-server generation completed at $($env:EXPECTED_WIDTH)x$($env:EXPECTED_HEIGHT)."
+          if (-not $text.Contains($completion)) {
+            throw "$($env:SUITE_LABEL) / $($env:PRESET) did not report expected completion dimensions $($env:EXPECTED_WIDTH)x$($env:EXPECTED_HEIGHT)."
+          }
+        }
+
+    - name: Upload world
+      uses: actions/upload-artifact@v4
+      with:
+        name: world-${{ inputs.suite-slug }}-${{ inputs.world-slug }}
+        path: world-output/${{ inputs.world-slug }}.wld
+        if-no-files-found: error
+        retention-days: 7
+
+    - name: Upload failure diagnostics
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: diagnostics-${{ inputs.suite-slug }}-${{ inputs.world-slug }}
+        path: |
+          world-output/generation.stdout.txt
+          world-output/generation.stderr.txt
+          world-output/request.json
+        if-no-files-found: warn
+        retention-days: 7
