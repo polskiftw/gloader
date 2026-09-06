@@ -1,15 +1,36 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using Terraria.IO;
 
 namespace Terraria
 {
     public class Player
     {
+        public void ResetEffects() { }
+        public void Update(int whoAmI) { }
+
+        public static void SavePlayer(PlayerFileData playerFile, bool skipMapSave = false) { }
+
+        public static PlayerFileData LoadPlayer(string playerPath, bool cloudSave)
+        {
+            return new PlayerFileData {
+                Player = new Player(),
+                Path = playerPath,
+                IsCloudSave = cloudSave
+            };
+        }
     }
 
     public class Main
     {
+        public static readonly List<PlayerFileData> PlayerList = new List<PlayerFileData>();
+
+        public static void ErasePlayer(int index)
+        {
+            if (index >= 0 && index < PlayerList.Count)
+                PlayerList.RemoveAt(index);
+        }
     }
 }
 
