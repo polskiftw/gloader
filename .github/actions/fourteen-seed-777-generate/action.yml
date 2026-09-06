@@ -44,10 +44,19 @@ runs:
       shell: pwsh
       run: |
         $ErrorActionPreference = 'Stop'
-        $stage = (Resolve-Path 'runtime').Path
+        $downloadRoot = (Resolve-Path 'runtime').Path
+        $gloaderMatches = @(Get-ChildItem $downloadRoot -Recurse -File -Filter 'gloader.exe')
+        if ($gloaderMatches.Count -ne 1) {
+          throw "Expected exactly one gloader.exe below '$downloadRoot'; found $($gloaderMatches.Count)."
+        }
+        $stage = $gloaderMatches[0].Directory.FullName
+        $expandedWorlds = Join-Path $stage 'gmods/ExpandedWorlds'
+        if (-not (Test-Path $expandedWorlds -PathType Container)) {
+          throw "Prepared runtime is missing gmods/ExpandedWorlds below '$stage'."
+        }
         $mods = Join-Path $env:RUNNER_TEMP 'fourteen-seed-gmods'
         New-Item -ItemType Directory -Force $mods | Out-Null
-        Copy-Item (Join-Path $stage 'gmods/ExpandedWorlds') (Join-Path $mods 'ExpandedWorlds') -Recurse -Force
+        Copy-Item $expandedWorlds (Join-Path $mods 'ExpandedWorlds') -Recurse -Force
         "GLOADER_STAGE=$stage" >> $env:GITHUB_ENV
         "MODS_DIR=$mods" >> $env:GITHUB_ENV
 
