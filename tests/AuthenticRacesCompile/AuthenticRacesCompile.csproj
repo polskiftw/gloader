@@ -16,4 +16,8 @@
     <PackageReference Include="Lib.Harmony" Version="2.4.2" />
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net48" Version="1.0.3" PrivateAssets="All" />
   </ItemGroup>
+
+  <Target Name="RunAuthenticRacesRegression" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
+    <Exec Command="&quot;$(TargetPath)&quot;" />
+  </Target>
 </Project>
