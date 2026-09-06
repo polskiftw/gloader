@@ -48,7 +48,6 @@ gmods/
   Radio/
     [Radio source files]
     README.md
-    stations.json
   DVDLogo/
     Main.cs
     DVDLogo.ini
@@ -254,20 +253,20 @@ OUT state lasts across quest swaps for that connection. Disconnecting clears it,
 
 ### Radio
 
-`gmods/Radio/` is the general-purpose client-side internet-radio mod. Its station browser lives in Terraria's pause/options UI; there are no radio items, tiles, NPCs, accessories, furniture objects, or other in-world mechanics.
+`gmods/Radio/` is the general-purpose client-side internet-radio mod. Its browser lives in Terraria's pause/options UI; there are no radio items, tiles, NPCs, accessories, furniture objects, or other in-world mechanics.
 
-Radio includes:
+Radio deliberately has exactly two content sources:
 
-- a categorized, multi-tagged, decade-aware browser with subcategories, Favorites, Recent, and ranked search;
-- complete refreshable catalogs for supported public providers plus small stable built-in networks;
-- compatible highest-quality free stream selection with ranked fallbacks and reconnect/backoff behavior;
-- ICY and provider/API now-playing metadata;
-- a persistent now-playing strip and optional song-change popup;
-- live discovery through laut.fm and Radio Browser;
-- persistent live-directory favorites/recents and custom stations in `gmods/Radio/stations.json`;
-- migration of the old VGMRadio Rainwave/GTT selection and now-playing preference.
+- **RadioMonster.fm** — 10 built-in public channels using the provider's official streams, preferring 320 kbps MP3 with official lower-bitrate fallbacks;
+- **Rainwave** — all 6 official stations using Rainwave's tune-in playlists.
 
-See `gmods/Radio/README.md` for the provider list, quality policy, exclusions, metadata rules, custom-station schema, live-directory behavior, and CI details.
+The UI is intentionally small: RadioMonster.fm, Rainwave, and Favorites, plus playback, volume, station favorites, a persistent now-playing strip, and optional song-change popups. There is no Radio Browser, live-directory discovery, provider scraping, custom-station file, taxonomy/search layer, or third-party station augmentation.
+
+Metadata follows the audio path where possible. RadioMonster uses ICY metadata embedded in its stream. Rainwave prefers usable ICY metadata from the actual MP3 stream; if stream metadata is unavailable, Radio falls back to Rainwave's anonymous schedule API and delays a changed schedule title by 10 seconds so metadata does not jump ahead of buffered playback.
+
+Existing saved favorites/recents from removed providers are pruned automatically while normal playback, volume, favorites, and popup settings are preserved. The old VGMRadio Rainwave selection and now-playing preference can still migrate on first run.
+
+See `gmods/Radio/README.md` for the exact station list, stream-quality policy, metadata behavior, persistence rules, and live-smoke coverage.
 
 **VGMRadio is retired and is no longer shipped as a separate mod.** If an older install still has `gmods/VGMRadio/`, the new Radio mod can read its `VGMRadio.ini` on first migration. While Radio is installed, gloader deliberately ignores that leftover legacy source folder so an overlay upgrade cannot start two radio clients. The old folder can be deleted after migration.
 
