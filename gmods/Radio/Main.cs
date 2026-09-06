@@ -20,7 +20,7 @@ public static class Mod
 
 internal static partial class GeneralRadio
 {
-    internal const string Version = "1.0.0";
+    internal const string Version = "2.0.0";
     internal const string ModDirectoryDataKey = "GLoader.ModDirectory";
     internal const double HealthySeconds = 8.0;
     internal const double NotificationSeconds = 6.0;
@@ -53,12 +53,11 @@ internal static partial class GeneralRadio
         Directory.CreateDirectory(ModDirectory);
 
         State = RadioPersistence.LoadState(ModDirectory);
-        RadioCatalog.Initialize(ModDirectory);
-        RadioCatalog.AddDirectoryResults(State.SavedStations.Values);
-        RadioProviderAugmentation.ApplyStaticFallbacks();
-        RadioProviderAugmentation.BeginBackgroundDiscovery();
+        RadioCatalog.Initialize();
+        RadioPersistence.PruneToCatalog(State, RadioCatalog.Snapshot());
         SelectedStation = RadioCatalog.Find(State.SelectedStationId) ?? RadioCatalog.Find("rainwave:5") ?? FirstStation();
         if (SelectedStation != null) State.SelectedStationId = SelectedStation.Id;
+        RadioPersistence.SaveState(ModDirectory, State);
 
         MainType = AccessTools.TypeByName("Terraria.Main");
         var harmony = new Harmony("gloader.radio.runtime");
@@ -78,19 +77,18 @@ internal static partial class GeneralRadio
             SelectedStation = station;
             State.SelectedStationId = station.Id;
             State.Playing = true;
-            RadioPersistence.RememberLiveStation(State, station);
             RadioPersistence.TouchRecent(State, station.Id);
             CurrentTrack = null;
             Health = RadioHealth.Buffering;
             StatusDetail = "Connecting";
             ActiveStreamLabel = string.Empty;
+            ConsecutiveMetadataFailures = 0;
             Interlocked.Increment(ref AudioGeneration);
             Interlocked.Increment(ref MetadataGeneration);
             ResetOutputRequested = true;
             ClearAudioBuffers();
             RadioPersistence.SaveState(ModDirectory, State);
         }
-        RadioDirectories.CountRadioBrowserClick(station);
         StartWorkersForSelection();
     }
 
@@ -103,6 +101,7 @@ internal static partial class GeneralRadio
             {
                 Health = RadioHealth.Buffering;
                 StatusDetail = "Connecting";
+                ConsecutiveMetadataFailures = 0;
                 Interlocked.Increment(ref AudioGeneration);
                 Interlocked.Increment(ref MetadataGeneration);
             }
@@ -134,10 +133,7 @@ internal static partial class GeneralRadio
         if (station == null) return;
         lock (StateLock)
         {
-            if (State.Favorites.Add(station.Id))
-                RadioPersistence.RememberLiveStation(State, station);
-            else
-                State.Favorites.Remove(station.Id);
+            if (!State.Favorites.Add(station.Id)) State.Favorites.Remove(station.Id);
             RadioPersistence.SaveState(ModDirectory, State);
         }
     }
@@ -200,10 +196,36 @@ internal static partial class GeneralRadio
     {
         new Thread(() =>
         {
+            TrackInfo pendingTrack = null;
+            DateTime pendingSinceUtc = DateTime.MinValue;
+
             while (generation == Volatile.Read(ref MetadataGeneration) && State.Playing && ReferenceEquals(station, SelectedStation))
             {
                 TrackInfo track;
-                if (RadioMetadata.TryReadTrack(station, out track)) SetTrack(track);
+                if (RadioMetadata.TryReadTrack(station, out track))
+                {
+                    var currentDisplay = CurrentTrack == null ? string.Empty : CurrentTrack.Display;
+                    if (track.PlaybackDelaySeconds <= 0 || string.Equals(currentDisplay, track.Display, StringComparison.Ordinal))
+                    {
+                        pendingTrack = null;
+                        SetTrack(track);
+                    }
+                    else
+                    {
+                        if (pendingTrack == null || !string.Equals(pendingTrack.Display, track.Display, StringComparison.Ordinal))
+                        {
+                            pendingTrack = track;
+                            pendingSinceUtc = DateTime.UtcNow;
+                        }
+
+                        if (pendingTrack != null && DateTime.UtcNow - pendingSinceUtc >= TimeSpan.FromSeconds(pendingTrack.PlaybackDelaySeconds))
+                        {
+                            pendingTrack.PlaybackDelaySeconds = 0;
+                            SetTrack(pendingTrack);
+                            pendingTrack = null;
+                        }
+                    }
+                }
                 else
                 {
                     lock (StateLock)
@@ -212,7 +234,8 @@ internal static partial class GeneralRadio
                         if (ConsecutiveMetadataFailures >= 3 && AudioIsHealthy()) Health = RadioHealth.MetadataUnavailable;
                     }
                 }
-                for (var i = 0; i < 25 && generation == Volatile.Read(ref MetadataGeneration); i++) Thread.Sleep(100);
+
+                for (var i = 0; i < 10 && generation == Volatile.Read(ref MetadataGeneration); i++) Thread.Sleep(100);
             }
         }) { IsBackground = true, Name = "gloader Radio metadata" }.Start();
     }
