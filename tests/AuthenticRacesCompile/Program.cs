@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Text;
 using AuthenticRaces.Core;
 using HarmonyLib;
 using Terraria;
@@ -12,6 +13,7 @@ internal static class Program
     {
         RaceRegistry.Initialize();
         RacePlayerState.ResetAll();
+        RaceAppearanceState.ResetAll();
 
         try
         {
@@ -35,30 +37,56 @@ internal static class Program
         if (!RacePlayerState.TryRestoreRace(player, "MrPlagueRaces/Human"))
             return Fail(5, "Persisted upstream race identities must restore without a live race switch.");
 
+        var unresolvedPlayer = new Player();
+        if (RacePlayerState.TryRestoreRace(unresolvedPlayer, "MrPlagueRaces/Tabaxi"))
+            return Fail(6, "An unported race must not claim to have resolved successfully.");
+        if (RacePlayerState.GetRace(unresolvedPlayer).Name != "Human" ||
+            RacePlayerState.GetPersistedRaceName(unresolvedPlayer) != "MrPlagueRaces/Tabaxi")
+            return Fail(7, "Unported race identities must survive while Human is used as the temporary fallback.");
+
         const string savedRace = "MrPlagueRaces/Human";
-        byte[] encoded = RacePersistence.Encode(savedRace);
-        if (!RacePersistence.TryDecode(encoded, out var decoded, out var decodeError) || decoded != savedRace)
-            return Fail(6, "Race sidecar codec failed round-trip: " + decodeError);
+        var appearance = RaceAppearanceData.Default;
+        appearance.DetailColor = new Rgb24(12, 34, 56);
+        appearance.AuxiliaryDetailColor1 = new Rgb24(78, 90, 123);
+        appearance.AuxiliaryDetailColor2 = new Rgb24(45, 67, 89);
+        appearance.AuxiliaryDetailColor3 = new Rgb24(210, 111, 9);
+        appearance.AuxiliaryHairstyle1 = 7;
+        appearance.AuxiliaryHairstyle2 = 42;
+        appearance.AuxiliaryHairstyle3 = 164;
+        RaceAppearanceState.Set(player, appearance);
+
+        byte[] encoded = RacePersistence.EncodePayload(new RaceSaveData(savedRace, appearance));
+        if (!RacePersistence.TryDecodePayload(encoded, out var decodedPayload, out var decodeError) ||
+            decodedPayload.RaceName != savedRace || !decodedPayload.Appearance.Equals(appearance))
+            return Fail(8, "Race/appearance sidecar codec failed round-trip: " + decodeError);
+
+        if (!RacePersistence.TryDecode(encoded, out var decodedRaceOnly, out decodeError) || decodedRaceOnly != savedRace)
+            return Fail(9, "Race-only compatibility decoder failed on schema 2: " + decodeError);
+
+        byte[] legacy = EncodeLegacyRaceOnly(savedRace);
+        if (!RacePersistence.TryDecodePayload(legacy, out var legacyPayload, out var legacyError) ||
+            legacyPayload.RaceName != savedRace || !legacyPayload.Appearance.Equals(RaceAppearanceData.Default))
+            return Fail(10, "Schema 1 race-only sidecars must migrate to default appearance: " + legacyError);
 
         var corrupted = (byte[])encoded.Clone();
         corrupted[0] ^= 0x7F;
         if (RacePersistence.TryDecode(corrupted, out _, out _))
-            return Fail(7, "Corrupted sidecar magic must be rejected.");
+            return Fail(11, "Corrupted sidecar magic must be rejected.");
 
         var unsupported = (byte[])encoded.Clone();
         unsupported[5] = 99;
         if (RacePersistence.TryDecode(unsupported, out _, out _))
-            return Fail(8, "Unknown sidecar schema versions must be rejected.");
+            return Fail(12, "Unknown sidecar schema versions must be rejected.");
 
-        int storageResult = ExerciseStorage(player);
+        int storageResult = ExerciseStorage(player, appearance);
         if (storageResult != 0)
             return storageResult;
 
-        Console.WriteLine("PASS: AuthenticRaces Harmony targets, identity, .arplr codec, backups, cloud moves, and erase behavior are deterministic.");
+        Console.WriteLine("PASS: AuthenticRaces Harmony targets, identity preservation, schema migration, custom appearance, backups, cloud moves, and erase behavior are deterministic.");
         return 0;
     }
 
-    private static int ExerciseStorage(Player player)
+    private static int ExerciseStorage(Player player, RaceAppearanceData expectedAppearance)
     {
         string root = Path.Combine(Path.GetTempPath(), "authentic-races-" + Guid.NewGuid().ToString("N"));
         string localPlayerPath = Path.Combine(root, "Alice.plr");
@@ -79,12 +107,12 @@ internal static class Program
 
             RacePersistence.Save(localFile);
             if (!File.Exists(localSidecarPath))
-                return Fail(9, "Local race sidecar was not written.");
+                return Fail(13, "Local race sidecar was not written.");
 
             // Saving again must preserve the previous valid sidecar as a backup.
             RacePersistence.Save(localFile);
             if (!File.Exists(localSidecarPath + ".bak"))
-                return Fail(10, "Race sidecar backup was not created on replacement save.");
+                return Fail(14, "Race sidecar backup was not created on replacement save.");
 
             var localReloadedPlayer = new Player();
             RacePersistence.Load(new PlayerFileData {
@@ -93,13 +121,15 @@ internal static class Program
                 IsCloudSave = false
             }, localPlayerPath, false);
             if (RacePlayerState.GetRace(localReloadedPlayer).Name != "Human")
-                return Fail(11, "Local sidecar did not restore the saved race.");
+                return Fail(15, "Local sidecar did not restore the saved race.");
+            if (!RaceAppearanceState.Get(localReloadedPlayer).Equals(expectedAppearance))
+                return Fail(16, "Local sidecar did not restore custom appearance state.");
 
             RacePersistence.MoveToCloud(localPlayerPath, cloudPlayerPath);
             if (File.Exists(localSidecarPath) || File.Exists(localSidecarPath + ".bak"))
-                return Fail(12, "Moving to cloud must remove local race sidecars.");
+                return Fail(17, "Moving to cloud must remove local race sidecars.");
             if (!FileUtilities.Exists(cloudSidecarPath, true) || !FileUtilities.Exists(cloudSidecarPath + ".bak", true))
-                return Fail(13, "Moving to cloud must move both race sidecar and backup.");
+                return Fail(18, "Moving to cloud must move both race sidecar and backup.");
 
             var cloudReloadedPlayer = new Player();
             RacePersistence.Load(new PlayerFileData {
@@ -108,17 +138,19 @@ internal static class Program
                 IsCloudSave = true
             }, cloudPlayerPath, true);
             if (RacePlayerState.GetRace(cloudReloadedPlayer).Name != "Human")
-                return Fail(14, "Cloud sidecar did not restore the saved race.");
+                return Fail(19, "Cloud sidecar did not restore the saved race.");
+            if (!RaceAppearanceState.Get(cloudReloadedPlayer).Equals(expectedAppearance))
+                return Fail(20, "Cloud sidecar did not restore custom appearance state.");
 
             RacePersistence.MoveToLocal(cloudPlayerPath, localPlayerPath);
             if (!File.Exists(localSidecarPath) || !File.Exists(localSidecarPath + ".bak"))
-                return Fail(15, "Moving to local storage must restore race sidecar and backup.");
+                return Fail(21, "Moving to local storage must restore race sidecar and backup.");
             if (FileUtilities.Exists(cloudSidecarPath, true) || FileUtilities.Exists(cloudSidecarPath + ".bak", true))
-                return Fail(16, "Moving to local storage must remove cloud race sidecars.");
+                return Fail(22, "Moving to local storage must remove cloud race sidecars.");
 
             RacePersistence.Erase(localPlayerPath, false);
             if (File.Exists(localSidecarPath) || File.Exists(localSidecarPath + ".bak"))
-                return Fail(17, "Erasing a player must erase race sidecar and backup.");
+                return Fail(23, "Erasing a player must erase race sidecar and backup.");
 
             return 0;
         }
@@ -132,6 +164,19 @@ internal static class Program
             catch
             {
             }
+        }
+    }
+
+    private static byte[] EncodeLegacyRaceOnly(string raceName)
+    {
+        using (var stream = new MemoryStream())
+        using (var writer = new BinaryWriter(stream, Encoding.UTF8))
+        {
+            writer.Write(Encoding.ASCII.GetBytes("ARPLR"));
+            writer.Write((byte)1);
+            writer.Write(raceName);
+            writer.Flush();
+            return stream.ToArray();
         }
     }
 
