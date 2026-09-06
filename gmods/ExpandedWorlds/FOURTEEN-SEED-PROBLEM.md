@@ -91,6 +91,24 @@ For GitHub Actions, prefer an explicit `matrix.include` list in that size-first 
 
 This does not make an individual world generate faster. It improves throughput when runner concurrency is lower than the total job count: short Small/Medium jobs finish first and free runner slots sooner, basic workflow/seed-encoding failures surface earlier, and the queue reaches the long THICC tiers with less avoidable blocking.
 
+**Size-first is a queue-ordering policy, not a synchronization barrier.** Do not make every Small job finish before Medium jobs are allowed to become runnable, and do not make one arbitrary matrix shard finish before the next shard may start. The purpose is to present cheaper jobs to the runner pool first while still keeping every available runner busy.
+
+## Parallelism and matrix sharding for multi-run batches
+
+For large batches, let GitHub Actions consume the full runner capacity available to the repository/account.
+
+- **Omit `strategy.max-parallel` by default.** It is an optional throttle, not a request for more runners. Without it, GitHub starts as many runnable matrix jobs as the available runner/concurrency limits permit.
+- Set `max-parallel` only when there is a deliberate reason to run **below** the available runner capacity, such as protecting an external API/service, limiting expensive self-hosted hardware, or avoiding contention for a shared resource.
+- Do not pick an arbitrary high `max-parallel` merely to mean "run as fast as possible." Omitting it expresses that intent directly and automatically benefits from any future increase in runner concurrency.
+- A single GitHub Actions matrix is limited to **256 generated jobs**. If the batch exceeds that, split it into multiple matrix jobs/shards, each at or below the matrix limit.
+- **Matrix shards are queue partitions, not sequential phases.** After their common prerequisites are ready, all generation shards should become runnable together. Do not make `generate_b` depend on `generate_a`, or `generate_c` depend on `generate_b`, unless there is a real data dependency between them.
+- When sharding is required, partition the seed families across shards and keep each shard's explicit `matrix.include` list in the same size-first order: all assigned Small jobs, then all assigned Medium jobs, and so on through THICC 11. Starting all shards together then gives GitHub a large runnable pool without introducing artificial end-of-shard idle time.
+- The only normal shared prerequisite should be whatever genuinely must exist first, such as the plan and prepared runtime artifact. Once that prerequisite succeeds, every generation shard should be free to enter the queue.
+
+Why this matters: a sequential A -> B -> C arrangement can strand runners at the tail of a shard. If one pathological world is still generating while the rest of that shard has finished, every otherwise-free runner sits idle even though hundreds of later jobs are ready in principle. Independent shards let those free runners immediately start work from the remaining queue.
+
+For a batch containing `n` fourteen-seed families, there are `14 * n` generation jobs. The ideal workflow-level parallelism is therefore simply "all of them may be runnable"; the actual number executing at once should be left to GitHub's runner/concurrency limit unless an intentional lower throttle is required.
+
 ## Proven runner workflow
 
 This is the known-good path from the successful seed `1337420` run. Prefer this path instead of rediscovering the Windows/XNA dead ends.
@@ -153,6 +171,8 @@ The successful run established several things that should be treated as settled 
 - Do not treat a compose-only failure as a reason to regenerate already-valid world artifacts.
 - Do not launch the pinned `WinExe` compositor with `&` and immediately check for output; explicitly wait for the renderer process to exit.
 - Do not trust an unpaginated cross-run artifact wildcard when the source run has more than 100 artifacts; enumerate pages and require all fourteen expected world artifacts.
+- Do not use `max-parallel` as a "go fast" setting. Omit it unless intentionally throttling below available runner capacity.
+- Do not serialize matrix shards with A -> B -> C `needs` dependencies merely because the batch had to be split around GitHub's matrix-size limit. Queue all independent generation shards together.
 
 ## Required validation gates
 
@@ -196,4 +216,4 @@ The current definition keeps that exact process and extends only the size count 
 
 ## Short version
 
-**Fourteen seed problem = pick one seed, load ExpandedWorlds before Terraria queues worldgen, give generation 5+ hour timeouts, run all fourteen sizes on the official Linux x64/FNA server path with any requested special/secret-seed modifiers applied identically, verify every dimension, render with pinned TEdit, make the picture.**
+**Fourteen seed problem = pick one seed, load ExpandedWorlds before Terraria queues worldgen, give generation 5+ hour timeouts, run all fourteen sizes on the official Linux x64/FNA server path with any requested special/secret-seed modifiers applied identically, queue every independent matrix shard together without an artificial `max-parallel` throttle or A -> B -> C barrier, verify every dimension, render with pinned TEdit, make the picture.**
