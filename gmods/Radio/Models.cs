@@ -15,11 +15,8 @@ internal enum RadioHealth
 
 internal enum MetadataMode
 {
-    None,
     Icy,
-    Rainwave,
-    LautFm,
-    WebPage
+    Rainwave
 }
 
 internal sealed class TrackInfo
@@ -28,6 +25,10 @@ internal sealed class TrackInfo
     public string Title = string.Empty;
     public string Raw = string.Empty;
     public DateTime ReceivedUtc = DateTime.UtcNow;
+
+    // Metadata tied directly to an audio stream is published immediately.
+    // Schedule-backed metadata can specify a small playback-alignment delay.
+    public double PlaybackDelaySeconds;
 
     public string Display
     {
@@ -60,17 +61,9 @@ internal sealed class StreamVariant
     public string Url = string.Empty;
     public string Codec = string.Empty;
     public int BitrateKbps;
-    public bool Lossless;
-    public bool PublicFree = true;
-    public bool RequiresAuthentication;
     public string Resolver = string.Empty;
     public string ResolverArgument = string.Empty;
     public string Label = string.Empty;
-
-    public StreamVariant Clone()
-    {
-        return (StreamVariant)MemberwiseClone();
-    }
 }
 
 internal sealed class Station
@@ -80,47 +73,10 @@ internal sealed class Station
     public string Provider = string.Empty;
     public string ProviderDisplay = string.Empty;
     public string HomePage = string.Empty;
-    public readonly List<string> Tags = new List<string>();
-    public readonly List<int> Decades = new List<int>();
+    public string Description = string.Empty;
     public readonly List<StreamVariant> Streams = new List<StreamVariant>();
     public MetadataMode MetadataMode = MetadataMode.Icy;
     public string MetadataUrl = string.Empty;
-    public bool BuiltIn = true;
-    public bool LiveDirectory;
-    public string DirectorySource = string.Empty;
-    public bool MetadataVerified;
-    public string SourcePage = string.Empty;
-
-    public string CategorySummary
-    {
-        get
-        {
-            var values = Tags.Take(3).ToArray();
-            return values.Length == 0 ? ProviderDisplay : string.Join(" / ", values);
-        }
-    }
-
-    public Station AddTags(params string[] tags)
-    {
-        foreach (var tag in tags ?? new string[0])
-        {
-            var clean = RadioTaxonomy.NormalizeTag(tag);
-            if (clean.Length > 0 && !Tags.Contains(clean, StringComparer.OrdinalIgnoreCase))
-                Tags.Add(clean);
-        }
-        return this;
-    }
-
-    public Station AddDecades(params int[] decades)
-    {
-        foreach (var decade in decades ?? new int[0])
-        {
-            if (decade >= 1920 && decade <= 2030 && decade % 10 == 0 && !Decades.Contains(decade))
-                Decades.Add(decade);
-        }
-        Decades.Sort();
-        return this;
-    }
 }
 
 internal static class StreamRanking
@@ -128,46 +84,23 @@ internal static class StreamRanking
     internal static bool IsCompatibleCodec(string codec)
     {
         var value = (codec ?? string.Empty).Trim().ToLowerInvariant();
-        if (value.Length == 0)
-            return true; // Unknown direct MP3/AAC streams are allowed as a last resort.
-
-        return value.Contains("mp3") ||
-               value.Contains("mpeg") ||
-               value.Contains("aac") ||
-               value.Contains("wma") ||
-               value.Contains("wave") ||
-               value == "m4a";
+        if (value.Length == 0) return true;
+        return value.Contains("mp3") || value.Contains("mpeg") || value.Contains("aac") || value == "m4a";
     }
 
     internal static int Score(StreamVariant stream)
     {
-        if (stream == null || !stream.PublicFree || stream.RequiresAuthentication)
-            return int.MinValue;
-        if (!IsCompatibleCodec(stream.Codec))
-            return int.MinValue + 1;
-
+        if (stream == null || !IsCompatibleCodec(stream.Codec)) return int.MinValue;
         var codec = (stream.Codec ?? string.Empty).ToLowerInvariant();
-        var codecBonus = -250;
-        if (codec.Contains("aac")) codecBonus = 400;
-        else if (codec.Contains("mp3") || codec.Contains("mpeg")) codecBonus = 0;
-        else if (codec.Contains("wma")) codecBonus = -100;
-
-        // Bitrate is the dominant quality signal. The small AAC efficiency bonus means
-        // 96k AAC can beat 64k MP3, while 128k MP3 still correctly beats 64k AAC.
-        // This also avoids selecting a low-bitrate stream merely because its codec name
-        // sounds newer. Unsupported Ogg/Opus/Vorbis/FLAC mounts were already filtered.
-        var bitrateScore = stream.BitrateKbps > 0
-            ? Math.Max(0, Math.Min(1000, stream.BitrateKbps)) * 20
-            : 1000;
-        var score = bitrateScore + codecBonus;
-        if (stream.Lossless) score += 4000;
-        return score;
+        var codecBonus = codec.Contains("aac") ? 400 : 0;
+        var bitrateScore = stream.BitrateKbps > 0 ? Math.Min(1000, stream.BitrateKbps) * 20 : 1000;
+        return bitrateScore + codecBonus;
     }
 
     internal static List<StreamVariant> Rank(IEnumerable<StreamVariant> streams)
     {
         return (streams ?? Enumerable.Empty<StreamVariant>())
-            .Where(stream => Score(stream) > int.MinValue + 1)
+            .Where(stream => Score(stream) != int.MinValue)
             .OrderByDescending(Score)
             .ThenBy(stream => stream.Url ?? string.Empty, StringComparer.OrdinalIgnoreCase)
             .ToList();
