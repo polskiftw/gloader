@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using AuthenticRaces.Core;
+using HarmonyLib;
 using Terraria;
 using Terraria.IO;
 using Terraria.Utilities;
@@ -12,39 +13,48 @@ internal static class Program
         RaceRegistry.Initialize();
         RacePlayerState.ResetAll();
 
+        try
+        {
+            new Harmony("gloader.tests.authentic-races").PatchAll(typeof(RaceRegistry).Assembly);
+        }
+        catch (Exception ex)
+        {
+            return Fail(1, "AuthenticRaces Harmony targets did not resolve: " + ex);
+        }
+
         if (RaceRegistry.Count != 1 || RaceRegistry.DefaultRace.Name != "Human")
-            return Fail(1, "Human must remain the default proof race.");
+            return Fail(2, "Human must remain the default proof race.");
 
         if (!RaceRegistry.TryGet("MrPlagueRaces/Human", out var upstreamHuman) || upstreamHuman.Id != 0)
-            return Fail(2, "Upstream Human identity alias must resolve to race ID 0.");
+            return Fail(3, "Upstream Human identity alias must resolve to race ID 0.");
 
         var player = new Player();
         if (RacePlayerState.GetRace(player).Name != "Human")
-            return Fail(3, "New vanilla Player instances must resolve to the default Human race.");
+            return Fail(4, "New vanilla Player instances must resolve to the default Human race.");
 
         if (!RacePlayerState.TryRestoreRace(player, "MrPlagueRaces/Human"))
-            return Fail(4, "Persisted upstream race identities must restore without a live race switch.");
+            return Fail(5, "Persisted upstream race identities must restore without a live race switch.");
 
         const string savedRace = "MrPlagueRaces/Human";
         byte[] encoded = RacePersistence.Encode(savedRace);
         if (!RacePersistence.TryDecode(encoded, out var decoded, out var decodeError) || decoded != savedRace)
-            return Fail(5, "Race sidecar codec failed round-trip: " + decodeError);
+            return Fail(6, "Race sidecar codec failed round-trip: " + decodeError);
 
         var corrupted = (byte[])encoded.Clone();
         corrupted[0] ^= 0x7F;
         if (RacePersistence.TryDecode(corrupted, out _, out _))
-            return Fail(6, "Corrupted sidecar magic must be rejected.");
+            return Fail(7, "Corrupted sidecar magic must be rejected.");
 
         var unsupported = (byte[])encoded.Clone();
         unsupported[5] = 99;
         if (RacePersistence.TryDecode(unsupported, out _, out _))
-            return Fail(7, "Unknown sidecar schema versions must be rejected.");
+            return Fail(8, "Unknown sidecar schema versions must be rejected.");
 
         int storageResult = ExerciseStorage(player);
         if (storageResult != 0)
             return storageResult;
 
-        Console.WriteLine("PASS: AuthenticRaces identity, .arplr codec, backups, cloud moves, and erase behavior are deterministic.");
+        Console.WriteLine("PASS: AuthenticRaces Harmony targets, identity, .arplr codec, backups, cloud moves, and erase behavior are deterministic.");
         return 0;
     }
 
@@ -69,12 +79,12 @@ internal static class Program
 
             RacePersistence.Save(localFile);
             if (!File.Exists(localSidecarPath))
-                return Fail(8, "Local race sidecar was not written.");
+                return Fail(9, "Local race sidecar was not written.");
 
             // Saving again must preserve the previous valid sidecar as a backup.
             RacePersistence.Save(localFile);
             if (!File.Exists(localSidecarPath + ".bak"))
-                return Fail(9, "Race sidecar backup was not created on replacement save.");
+                return Fail(10, "Race sidecar backup was not created on replacement save.");
 
             var localReloadedPlayer = new Player();
             RacePersistence.Load(new PlayerFileData {
@@ -83,13 +93,13 @@ internal static class Program
                 IsCloudSave = false
             }, localPlayerPath, false);
             if (RacePlayerState.GetRace(localReloadedPlayer).Name != "Human")
-                return Fail(10, "Local sidecar did not restore the saved race.");
+                return Fail(11, "Local sidecar did not restore the saved race.");
 
             RacePersistence.MoveToCloud(localPlayerPath, cloudPlayerPath);
             if (File.Exists(localSidecarPath) || File.Exists(localSidecarPath + ".bak"))
-                return Fail(11, "Moving to cloud must remove local race sidecars.");
+                return Fail(12, "Moving to cloud must remove local race sidecars.");
             if (!FileUtilities.Exists(cloudSidecarPath, true) || !FileUtilities.Exists(cloudSidecarPath + ".bak", true))
-                return Fail(12, "Moving to cloud must move both race sidecar and backup.");
+                return Fail(13, "Moving to cloud must move both race sidecar and backup.");
 
             var cloudReloadedPlayer = new Player();
             RacePersistence.Load(new PlayerFileData {
@@ -98,17 +108,17 @@ internal static class Program
                 IsCloudSave = true
             }, cloudPlayerPath, true);
             if (RacePlayerState.GetRace(cloudReloadedPlayer).Name != "Human")
-                return Fail(13, "Cloud sidecar did not restore the saved race.");
+                return Fail(14, "Cloud sidecar did not restore the saved race.");
 
             RacePersistence.MoveToLocal(cloudPlayerPath, localPlayerPath);
             if (!File.Exists(localSidecarPath) || !File.Exists(localSidecarPath + ".bak"))
-                return Fail(14, "Moving to local storage must restore race sidecar and backup.");
+                return Fail(15, "Moving to local storage must restore race sidecar and backup.");
             if (FileUtilities.Exists(cloudSidecarPath, true) || FileUtilities.Exists(cloudSidecarPath + ".bak", true))
-                return Fail(15, "Moving to local storage must remove cloud race sidecars.");
+                return Fail(16, "Moving to local storage must remove cloud race sidecars.");
 
             RacePersistence.Erase(localPlayerPath, false);
             if (File.Exists(localSidecarPath) || File.Exists(localSidecarPath + ".bak"))
-                return Fail(16, "Erasing a player must erase race sidecar and backup.");
+                return Fail(17, "Erasing a player must erase race sidecar and backup.");
 
             return 0;
         }
