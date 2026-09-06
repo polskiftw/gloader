@@ -29,6 +29,11 @@ Current `port/` equivalents:
 - `Core/RacePersistence.cs` — independent `.arplr` player sidecar storage and schema migration.
 - `Core/RacePersistenceHooks.cs` — vanilla player save/load/cloud/local/delete bridge.
 - `Core/RaceSaveData.cs` — version-independent in-memory sidecar payload.
+- `Rendering/RaceRenderer.cs` — client-only race drawing adapter contract.
+- `Rendering/RaceRendererRegistry.cs` — deterministic renderer lookup by upstream race identity.
+- `Rendering/RaceRenderPipeline.cs` — selected-race and appearance-state bridge into rendering.
+- `Rendering/RaceRenderHooks.cs` — direct pre-render Harmony seam into vanilla player drawing.
+- `Rendering/VanillaPlayerDrawClassifier.cs` — identifies finished vanilla skin/hair draw records without mutating global texture tables.
 - `Races/HumanRace.cs` — intentionally boring proof race and default race.
 
 ## Verified lifecycle hooks
@@ -87,12 +92,40 @@ Vanilla `.plr` already owns the ordinary player appearance fields: primary hair,
 
 `.arplr` **schema 2** adds those custom appearance fields after the race identity. The reader remains backward-compatible with schema 1 race-only sidecars and upgrades them in memory using default appearance values. Corrupt, truncated, negative-hairstyle, or unknown-future schema data remains non-fatal to the vanilla character.
 
-`tests/AuthenticRacesCompile` is an executable Release-build regression fixture. The normal gloader solution build now checks Harmony target resolution, upstream race identity preservation, unresolved-race preservation, schema 1 -> 2 migration, full custom appearance round-trips, local save/backups, cloud movement, local restoration, and erase behavior.
+`tests/AuthenticRacesCompile` is an executable Release-build regression fixture. The normal gloader solution build checks Harmony target resolution, upstream race identity preservation, unresolved-race preservation, schema 1 -> 2 migration, full custom appearance round-trips, local save/backups, cloud movement, local restoration, and erase behavior.
+
+## Rendering checkpoint
+
+The direct renderer uses a **finished-draw-cache rewrite seam** instead of recreating tModLoader's `PlayerDrawLayer` framework.
+
+The clean Terraria 1.4.5.8 decompile establishes this vanilla order in `LegacyPlayerRenderer.DrawPlayer`:
+
+1. `PlayerDrawSet.BoringSetup(...)` calculates player visual state.
+2. vanilla `DrawPlayer_UseNormalLayers(ref drawInfo)` creates the ordered `DrawDataCache`;
+3. `PlayerDrawLayers.DrawPlayer_TransformDrawData(ref drawInfo)` applies player rotation/transforms;
+4. optional `DrawPlayer_ScaleDrawData` applies requested player scale;
+5. `PlayerDrawLayers.DrawPlayer_RenderAllLayers(ref drawInfo)` submits the finished cache to the GPU.
+
+Authentic Races prefixes step 5. At that point vanilla has already solved armour ordering, frame selection, mount offsets, sitting/composite-arm geometry, lighting, rotation, direction and scale. A race renderer can therefore replace or expand only race-owned `DrawData` records **in place** while preserving Terraria's own transforms.
+
+`VanillaPlayerDrawClassifier` identifies those race-owned records by texture identity against the active vanilla player texture slots plus primary/alternate hair. It does not edit `TextureAssets`.
+
+That is materially cleaner than the upstream implementation. Upstream race layers suppress vanilla body pieces by globally replacing entries in `TextureAssets.Players`, `TextureAssets.PlayerHair`, and `TextureAssets.PlayerHairAlt` with a blank texture. The direct port never poisons those shared global asset tables.
+
+This also matches the upstream data model: `RaceSheet` contains texture plus sheet/category/colour/hairstyle identity, but **no position, rotation, frame, origin or draw-order metadata**. Reusing Terraria's finished `DrawData` geometry therefore preserves upstream intent while deleting a large amount of duplicated vanilla positioning code.
+
+Human registers a deliberate pass-through renderer, so this checkpoint changes no normal player pixels.
+
+`tests/AuthenticRacesClientCompile` is a separate `GLOADER_CLIENT` executable fixture. The normal solution build now verifies that the client Harmony target resolves, vanilla player/primary-hair/alternate-hair records classify correctly, an unrelated draw record stays untouched, a probe renderer can rewrite one finished draw record through the real Harmony prefix, and resetting the registry restores Human's pass-through behavior.
+
+### Deliberate scope boundary
+
+This first render seam covers the normal full-player path. Vanilla's dedicated head-only/UI renderer uses a separate head draw path; do not fake coverage for character-list/head-preview rendering. Add that as a small companion seam when the first actual race sheet needs head-only previews.
 
 ## Next seam
 
-**Rendering is the next architectural knot.**
+**One real race-sheet substitution is next.**
 
-Do not start by copying every race's sprites or tModLoader player-layer classes. First isolate the smallest direct-Terraria rendering bridge that can answer: given a vanilla `Player`, its selected `Race`, and `RaceAppearanceState`, how do we substitute one race sheet while preserving vanilla armour, frames, lighting, direction, and draw ordering?
+Do not port every asset table yet. First add the smallest client asset loader that can resolve one bundled race texture without `ModContent`, then use a deliberately simple substitution to prove one classified vanilla player record can be replaced by race art in-game while armour and unrelated layers remain vanilla.
 
-That bridge should replace the upstream `ModContent`/`PlayerDrawLayer` dependency rather than emulating it. Once a single deliberately simple visual substitution works, expand the race sheet/asset loader and only then begin moving individual non-Human races across.
+Once that proof is stable, expand the sheet vocabulary (16 colour channels, hairstyle tracks, glow masks, clothing) and then begin moving individual non-Human races across.
