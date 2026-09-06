@@ -1,0 +1,86 @@
+name: Fourteen Seed 777 runtime preparation
+description: Build and upload the private x64 gloader/Terraria runtime used by the seed-777 batch.
+
+outputs:
+  runtime-artifact-id:
+    description: Artifact ID of the prepared runtime package.
+    value: ${{ steps.upload_runtime.outputs.artifact-id }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: "10.0.x"
+
+    - name: Locate private retail input
+      shell: pwsh
+      env:
+        GH_TOKEN: ${{ github.token }}
+        RETAIL_RELEASE_NAME: gloader-private-input
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $releases = @(gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json)
+        $release = @($releases | Where-Object { $_.draft -and ($_.name -eq $env:RETAIL_RELEASE_NAME -or $_.tag_name -eq $env:RETAIL_RELEASE_NAME) }) | Select-Object -First 1
+        if ($null -eq $release) { throw "Draft release '$env:RETAIL_RELEASE_NAME' was not found." }
+        $assets = @($release.assets | Where-Object { $_.name -in @('Terraria.exe', 'Terraria.zip') })
+        if ($assets.Count -ne 1) { throw "Expected exactly one Terraria.exe/Terraria.zip private asset; found $($assets.Count)." }
+        "TERRARIA_ASSET_ID=$($assets[0].id)" >> $env:GITHUB_ENV
+        "TERRARIA_ASSET_NAME=$($assets[0].name)" >> $env:GITHUB_ENV
+        if (-not [string]::IsNullOrWhiteSpace([string]$assets[0].digest)) { "TERRARIA_ASSET_DIGEST=$($assets[0].digest)" >> $env:GITHUB_ENV }
+
+    - name: Build gloader package
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        ./build.ps1
+        $stage = (Resolve-Path 'dist/gloader').Path
+        if (-not (Test-Path (Join-Path $stage 'gloader.exe'))) { throw 'gloader.exe was not produced.' }
+        "GLOADER_STAGE=$stage" >> $env:GITHUB_ENV
+
+    - name: Stage matching retail Terraria.exe
+      shell: pwsh
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $download = Join-Path $env:RUNNER_TEMP $env:TERRARIA_ASSET_NAME
+        $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/octet-stream'; 'X-GitHub-Api-Version' = '2022-11-28' }
+        Invoke-WebRequest -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/assets/$env:TERRARIA_ASSET_ID" -Headers $headers -OutFile $download
+        if (-not [string]::IsNullOrWhiteSpace($env:TERRARIA_ASSET_DIGEST) -and $env:TERRARIA_ASSET_DIGEST.StartsWith('sha256:', [System.StringComparison]::OrdinalIgnoreCase)) {
+          $expected = $env:TERRARIA_ASSET_DIGEST.Substring(7)
+          $actual = (Get-FileHash -LiteralPath $download -Algorithm SHA256).Hash
+          if ($actual -ne $expected) { throw 'Private Terraria asset digest mismatch.' }
+        }
+        $bytes = [IO.File]::ReadAllBytes($download)
+        $target = Join-Path $env:GLOADER_STAGE 'Terraria.exe'
+        if ($bytes.Length -ge 2 -and $bytes[0] -eq 0x50 -and $bytes[1] -eq 0x4B) {
+          $expanded = Join-Path $env:RUNNER_TEMP 'terraria-private-input'
+          Expand-Archive -LiteralPath $download -DestinationPath $expanded -Force
+          $matches = @(Get-ChildItem $expanded -Recurse -File -Filter Terraria.exe)
+          if ($matches.Count -ne 1) { throw "Expected exactly one Terraria.exe in private archive; found $($matches.Count)." }
+          Copy-Item $matches[0].FullName $target -Force
+        } else {
+          Move-Item $download $target -Force
+        }
+
+    - name: Build private x64 Terraria runtime
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        ./tools/x64-runtime/Build-X64Runtime.ps1 `
+          -TerrariaDirectory $env:GLOADER_STAGE `
+          -OutputDirectory (Join-Path $env:GLOADER_STAGE 'gdeps/x64-runtime') `
+          -WorkspaceDirectory (Join-Path $env:RUNNER_TEMP 'fourteen-seed-777-x64-workspace')
+        $runtime = Join-Path $env:GLOADER_STAGE 'gdeps/x64-runtime/TerrariaRelease.dll'
+        if (-not (Test-Path $runtime -PathType Leaf)) { throw 'Private x64 TerrariaRelease.dll was not produced.' }
+        Remove-Item (Join-Path $env:GLOADER_STAGE 'Terraria.exe') -Force -ErrorAction SilentlyContinue
+
+    - name: Upload prepared x64 runtime
+      id: upload_runtime
+      uses: actions/upload-artifact@v4
+      with:
+        name: fourteen-seed-777-runtime
+        path: dist/gloader/
+        if-no-files-found: error
+        retention-days: 2
