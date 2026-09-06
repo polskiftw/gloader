@@ -7,7 +7,7 @@ namespace AuthenticRaces.Core
 {
     /// <summary>
     /// Per-Player race state without modifying Terraria.Player or depending on ModPlayer.
-    /// Persistence/network serialization will sit on top of this state instead of being mixed into it.
+    /// Persistence/network serialization sits on top of this state instead of being mixed into it.
     /// </summary>
     internal static class RacePlayerState
     {
@@ -67,6 +67,30 @@ namespace AuthenticRaces.Core
             previous.PreRaceChange(player);
             state.RaceId = race.Id;
             race.PostRaceChange(player);
+        }
+
+        /// <summary>
+        /// Restores serialized state without firing race-change behavior. Upstream LoadData
+        /// assigns the saved race directly as well; loading a character is not a live race switch.
+        /// </summary>
+        public static bool TryRestoreRace(Player player, string raceName)
+        {
+            if (player == null)
+                throw new ArgumentNullException(nameof(player));
+
+            if (!RaceRegistry.TryGet(raceName, out var race))
+                return false;
+
+            GetState(player).RaceId = race.Id;
+            return true;
+        }
+
+        public static void RestoreDefaultRace(Player player)
+        {
+            if (player == null)
+                throw new ArgumentNullException(nameof(player));
+
+            GetState(player).RaceId = RaceRegistry.DefaultRace.Id;
         }
 
         private static State GetState(Player player)
