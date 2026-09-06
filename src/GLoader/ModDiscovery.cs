@@ -8,6 +8,8 @@ namespace GLoader
 {
     internal static class ModDiscovery
     {
+        private const string IgnoreMarkerName = ".gloaderignore";
+
         public static IReadOnlyList<ModSource> Discover(string modsDirectory)
         {
             Directory.CreateDirectory(modsDirectory);
@@ -25,7 +27,7 @@ namespace GLoader
             var hasGeneralRadio = directories.Any(directory =>
                 !directory.EndsWith(".disabled", StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(Path.GetFileName(directory), "Radio", StringComparison.OrdinalIgnoreCase) &&
-                Directory.EnumerateFiles(directory, "*.cs", SearchOption.AllDirectories).Any(path => !IsDisabled(path)));
+                Directory.EnumerateFiles(directory, "*.cs", SearchOption.AllDirectories).Any(path => !IsDisabled(path, directory)));
 
             foreach (var directory in directories)
             {
@@ -42,7 +44,7 @@ namespace GLoader
 
                 var sources = Directory
                     .EnumerateFiles(directory, "*.cs", SearchOption.AllDirectories)
-                    .Where(path => !IsDisabled(path))
+                    .Where(path => !IsDisabled(path, directory))
                     .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
                     .ToArray();
 
@@ -60,9 +62,34 @@ namespace GLoader
             return mods;
         }
 
-        private static bool IsDisabled(string path)
+        private static bool IsDisabled(string path, string modDirectory)
         {
-            return path.EndsWith(".disabled.cs", StringComparison.OrdinalIgnoreCase);
+            if (path.EndsWith(".disabled.cs", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var modRoot = Path.GetFullPath(modDirectory)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var current = Path.GetDirectoryName(Path.GetFullPath(path));
+
+            while (!string.IsNullOrWhiteSpace(current))
+            {
+                if (File.Exists(Path.Combine(current, IgnoreMarkerName)))
+                {
+                    return true;
+                }
+
+                var normalized = current.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                if (string.Equals(normalized, modRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    break;
+                }
+
+                current = Path.GetDirectoryName(current);
+            }
+
+            return false;
         }
 
         private static string MakeId(string value)
