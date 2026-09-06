@@ -10,7 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="../../gmods/AuthenticRaces/port/**/*.cs" LinkBase="AuthenticRaces" />
+    <Compile Include="../../gmods/AuthenticRaces.disabled/port/**/*.cs" LinkBase="AuthenticRaces" />
     <Compile Include="TerrariaStubs.cs" />
     <Compile Include="Program.cs" />
     <PackageReference Include="Lib.Harmony" Version="2.4.2" />

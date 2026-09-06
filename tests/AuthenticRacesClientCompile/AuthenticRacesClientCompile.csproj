@@ -10,10 +10,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="../../gmods/AuthenticRaces/port/**/*.cs" LinkBase="AuthenticRaces" />
+    <Compile Include="../../gmods/AuthenticRaces.disabled/port/**/*.cs" LinkBase="AuthenticRaces" />
     <Compile Include="TerrariaStubs.cs" />
     <Compile Include="Program.cs" />
-    <Content Include="../../gmods/AuthenticRaces/source/Assets/Textures/Players/Races/Skeleton/Male/ColorSkin/Body.png"
+    <Content Include="../../gmods/AuthenticRaces.disabled/source/Assets/Textures/Players/Races/Skeleton/Male/ColorSkin/Body.png"
              Link="source/Assets/Textures/Players/Races/Skeleton/Male/ColorSkin/Body.png"
              CopyToOutputDirectory="PreserveNewest" />
     <PackageReference Include="Lib.Harmony" Version="2.4.2" />
