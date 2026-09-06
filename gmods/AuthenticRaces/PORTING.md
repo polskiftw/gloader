@@ -25,8 +25,10 @@ Current `port/` equivalents:
 - `Core/RaceRegistry.cs` — deterministic registry and upstream-name lookup.
 - `Core/RacePlayerState.cs` — per-`Terraria.Player` selected-race state via `ConditionalWeakTable`.
 - `Core/RaceHooks.cs` — direct Harmony bridge from verified vanilla `Player` lifecycle points into the selected race.
-- `Core/RacePersistence.cs` — independent `.arplr` player sidecar storage.
+- `Core/RaceAppearanceState.cs` — custom detail colours and auxiliary hairstyle state, independent of rendering.
+- `Core/RacePersistence.cs` — independent `.arplr` player sidecar storage and schema migration.
 - `Core/RacePersistenceHooks.cs` — vanilla player save/load/cloud/local/delete bridge.
+- `Core/RaceSaveData.cs` — version-independent in-memory sidecar payload.
 - `Races/HumanRace.cs` — intentionally boring proof race and default race.
 
 ## Verified lifecycle hooks
@@ -61,8 +63,6 @@ Alice.arplr
 Alice.arplr.bak
 ```
 
-`.arplr` schema 1 contains a short magic header, a schema byte, and the upstream-compatible race identity such as `MrPlagueRaces/Human`. Unknown/corrupt/future-version data falls back to Human rather than blocking the vanilla player file.
-
 The persistence bridge follows Terraria's own `PlayerFileData`/`FileUtilities` storage seam:
 
 - write after a successful vanilla `Player.SavePlayer`;
@@ -73,12 +73,26 @@ The persistence bridge follows Terraria's own `PlayerFileData`/`FileUtilities` s
 
 This intentionally mirrors the *storage lifecycle* tModLoader uses for `.tplr`, but the format and implementation are ours and have no tModLoader runtime dependency.
 
-`tests/AuthenticRacesCompile` is an executable Release-build regression fixture. The normal gloader solution build now checks the port compiles without tModLoader, verifies upstream Human identity restoration, tests the binary codec, and exercises local save, backup creation, cloud movement, local restoration, and erase behavior.
+An unavailable race now falls back to Human **without losing its saved identity**. For example, loading `MrPlagueRaces/Tabaxi` before Tabaxi has been ported runs Human temporarily but continues to save `MrPlagueRaces/Tabaxi`, so an incomplete port cannot silently destroy future race data.
+
+## Appearance checkpoint
+
+Vanilla `.plr` already owns the ordinary player appearance fields: primary hair, hair colour, skin colour, eye colour, shirt/undershirt/pants/shoe colours, and clothing/skin variant. Authentic Races therefore stores only MrPlague's custom appearance vocabulary outside vanilla:
+
+- detail colour;
+- auxiliary detail colours 1-3;
+- auxiliary hairstyle IDs 1-3.
+
+`RaceAppearanceState` keeps those values per vanilla `Player` without modifying `Player` or introducing rendering dependencies. Its initial custom colour values match the corresponding `MrPlagueRacesPlayer` field defaults; race-selection-specific defaults can replace them later when that seam is ported.
+
+`.arplr` **schema 2** adds those custom appearance fields after the race identity. The reader remains backward-compatible with schema 1 race-only sidecars and upgrades them in memory using default appearance values. Corrupt, truncated, negative-hairstyle, or unknown-future schema data remains non-fatal to the vanilla character.
+
+`tests/AuthenticRacesCompile` is an executable Release-build regression fixture. The normal gloader solution build now checks Harmony target resolution, upstream race identity preservation, unresolved-race preservation, schema 1 -> 2 migration, full custom appearance round-trips, local save/backups, cloud movement, local restoration, and erase behavior.
 
 ## Next seam
 
-**Human appearance state is next.**
+**Rendering is the next architectural knot.**
 
-Port the small saved appearance vocabulary before touching custom race rendering: detail colors, auxiliary detail colors, auxiliary hairstyle IDs, and the minimum race-default appearance values needed to prove a Human can round-trip its appearance cleanly. Keep appearance serialization layered on the existing `.arplr` schema rather than folding storage into `RacePlayerState`.
+Do not start by copying every race's sprites or tModLoader player-layer classes. First isolate the smallest direct-Terraria rendering bridge that can answer: given a vanilla `Player`, its selected `Race`, and `RaceAppearanceState`, how do we substitute one race sheet while preserving vanilla armour, frames, lighting, direction, and draw ordering?
 
-Only after that should individual non-Human races, race-selection UI, custom rendering, abilities, projectiles, sounds, or multiplayer race packets start moving across.
+That bridge should replace the upstream `ModContent`/`PlayerDrawLayer` dependency rather than emulating it. Once a single deliberately simple visual substitution works, expand the race sheet/asset loader and only then begin moving individual non-Human races across.
