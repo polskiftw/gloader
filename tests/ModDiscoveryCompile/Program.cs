@@ -12,7 +12,6 @@ internal static class Program
             WriteMod(root, "Radio");
             WriteMod(root, "VGMRadio");
             WriteMod(root, "OtherMod");
-            WriteIgnoredSourceFixture(root);
 
             var withRadio = GLoader.ModDiscovery.Discover(root);
             if (withRadio.Any(mod => string.Equals(mod.DisplayName, "VGMRadio", StringComparison.OrdinalIgnoreCase)))
@@ -27,24 +26,15 @@ internal static class Program
                 return 2;
             }
 
-            var ignoredFixture = withRadio.SingleOrDefault(mod =>
-                string.Equals(mod.DisplayName, "IgnoredSourceFixture", StringComparison.OrdinalIgnoreCase));
-            if (ignoredFixture == null || ignoredFixture.SourceFiles.Count != 1 ||
-                !ignoredFixture.SourceFiles[0].EndsWith(Path.Combine("port", "Main.cs"), StringComparison.OrdinalIgnoreCase))
-            {
-                Console.Error.WriteLine(".gloaderignore must exclude its directory tree without hiding sibling live sources.");
-                return 3;
-            }
-
             Directory.Delete(Path.Combine(root, "Radio"), true);
             var withoutRadio = GLoader.ModDiscovery.Discover(root);
             if (!withoutRadio.Any(mod => string.Equals(mod.DisplayName, "VGMRadio", StringComparison.OrdinalIgnoreCase)))
             {
                 Console.Error.WriteLine("VGMRadio should remain discoverable on an old install until Radio is present.");
-                return 4;
+                return 3;
             }
 
-            Console.WriteLine("PASS: mod discovery honors replacement suppression and .gloaderignore source subtrees.");
+            Console.WriteLine("PASS: General Radio suppresses a leftover VGMRadio folder only when its replacement is installed.");
             return 0;
         }
         finally
@@ -58,18 +48,5 @@ internal static class Program
         var directory = Path.Combine(root, name);
         Directory.CreateDirectory(directory);
         File.WriteAllText(Path.Combine(directory, "Main.cs"), "public static class Mod { public static void Load() { } }");
-    }
-
-    private static void WriteIgnoredSourceFixture(string root)
-    {
-        var directory = Path.Combine(root, "IgnoredSourceFixture");
-        var source = Path.Combine(directory, "source", "nested");
-        var port = Path.Combine(directory, "port");
-
-        Directory.CreateDirectory(source);
-        Directory.CreateDirectory(port);
-        File.WriteAllText(Path.Combine(directory, "source", ".gloaderignore"), "Reference-only source tree.\n");
-        File.WriteAllText(Path.Combine(source, "Upstream.cs"), "this deliberately is not valid C#");
-        File.WriteAllText(Path.Combine(port, "Main.cs"), "public static class Mod { public static void Load() { } }");
     }
 }

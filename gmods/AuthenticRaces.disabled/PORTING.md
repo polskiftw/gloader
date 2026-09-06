@@ -1,12 +1,13 @@
 # Authentic Races port map
 
-This directory is a staging workspace while MrPlagueRaces is being ported from tModLoader to direct Terraria/gloader hooks.
+This directory is a default-off staging workspace while MrPlagueRaces is being ported from tModLoader to direct Terraria/gloader hooks.
 
 ## Layout
 
 - `source/` — upstream MrPlagueRaces 1.4.4 reference snapshot. Do not port in place.
-- `source/.gloaderignore` — local gloader marker so the reference `.cs` files are never compiled as part of the live gmod.
 - `port/` — the new direct Terraria implementation. All port work stays here until the port is ready to be flattened into its final layout.
+
+Until the port is ready, the whole staging mod lives under `gmods/AuthenticRaces.disabled/`. gloader does not special-case the reference tree. If the folder is manually enabled before the port is complete, the staging tree is treated like any other enabled raw-source mod.
 
 ## First seam: race ownership and dispatch
 
