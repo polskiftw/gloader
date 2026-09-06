@@ -9,158 +9,130 @@ internal static class Program
 
     private static int Main()
     {
-        Console.WriteLine("Radio live provider smoke - current public/free/compatible truth");
+        Console.WriteLine("Radio live smoke - RadioMonster.fm + Rainwave only");
+        RadioCatalog.Initialize();
+        var stations = RadioCatalog.Snapshot();
 
-        Probe("Rainwave API + current song", () =>
-        {
-            TrackInfo track;
-            return RadioMetadata.TryParseRainwaveNowPlayingJson(
-                RadioNet.DownloadText("https://rainwave.cc/api4/info?sid=5", 10000), out track) &&
-                track != null && !string.IsNullOrWhiteSpace(track.Display);
-        });
+        Probe("Exactly 10 RadioMonster + 6 Rainwave stations", () =>
+            stations.Count == 16 &&
+            stations.Count(s => s.Provider == "radiomonster") == 10 &&
+            stations.Count(s => s.Provider == "rainwave") == 6 &&
+            stations.All(s => s.Provider == "radiomonster" || s.Provider == "rainwave"));
 
-        Probe("Nightride current Icecast catalog", () =>
-        {
-            var stations = RadioCatalog.ParseIcecastCatalog(
-                RadioNet.DownloadText("https://stream.nightride.fm/status-json.xsl", 10000),
-                "nightride", "Nightride FM", "https://nightride.fm/", "Electronic", "Synthwave");
-            Console.WriteLine("  Nightride stations: " + stations.Count);
-            return stations.Count >= 7 && stations.Any(s => StreamRanking.Rank(s.Streams).Count > 0);
-        });
+        Probe("No stream or metadata URL escapes the two providers", () =>
+            stations.All(station =>
+                station.Streams.Count > 0 &&
+                station.Streams.All(stream => IsAllowedUrl(stream.Url)) &&
+                (string.IsNullOrWhiteSpace(station.MetadataUrl) || IsAllowedUrl(station.MetadataUrl))));
 
-        Probe("181.FM full public legacy catalog + quality", () =>
-        {
-            var stations = RadioCatalog.Parse181FmLinks(RadioNet.DownloadText("https://www.181.fm/legacy.html", 10000));
-            Console.WriteLine("  181.FM stations: " + stations.Count);
-            return stations.Count >= 40 && stations.All(s =>
+        Probe("RadioMonster quality order is 320k MP3 first", () =>
+            stations.Where(s => s.Provider == "radiomonster").All(station =>
             {
-                var ranked = StreamRanking.Rank(s.Streams);
-                return ranked.Count > 0 && ranked[0].Codec == "mp3" && ranked[0].BitrateKbps >= 128;
+                var ranked = StreamRanking.Rank(station.Streams);
+                return ranked.Count == 3 &&
+                       ranked[0].BitrateKbps == 320 &&
+                       ranked[0].Codec == "mp3" &&
+                       ranked[0].Url.EndsWith("/ultra", StringComparison.OrdinalIgnoreCase);
+            }));
+
+        Probe("RadioMonster Tophits live audio", () =>
+        {
+            var station = RadioCatalog.Find("radiomonster:tophits");
+            var best = station == null ? null : StreamRanking.Rank(station.Streams).FirstOrDefault();
+            return best != null && ProbeAudio(RadioNet.ResolveStreamVariant(station, best), 10000);
+        });
+
+        Probe("RadioMonster Tophits ICY metadata", () =>
+        {
+            var station = RadioCatalog.Find("radiomonster:tophits");
+            var best = station == null ? null : StreamRanking.Rank(station.Streams).FirstOrDefault();
+            if (best == null) return false;
+            var title = RadioMetadata.ReadIcyStreamTitle(RadioNet.ResolveStreamVariant(station, best), 12000, 8);
+            Console.WriteLine("  RadioMonster title: " + title);
+            return RadioMetadata.IsTrackLike(title, station);
+        });
+
+        Probe("Rainwave station IDs and official playlists", () =>
+        {
+            var expected = new[] { "rainwave:1", "rainwave:2", "rainwave:3", "rainwave:4", "rainwave:5", "rainwave:6" };
+            return expected.All(id =>
+            {
+                var station = RadioCatalog.Find(id);
+                var best = station == null ? null : StreamRanking.Rank(station.Streams).FirstOrDefault();
+                return best != null &&
+                       best.Resolver == "rainwave" &&
+                       best.Url.StartsWith("https://rainwave.cc/tune_in/", StringComparison.OrdinalIgnoreCase);
             });
         });
 
-        Probe("181.FM representative stream reachable", () => ProbeAudio("https://listen.181fm.com/181-awesome80s_128k.mp3", 10000));
-
-        Probe("RADCAP current full database", () =>
+        Probe("Rainwave All playlist resolves to live audio", () =>
         {
-            var stations = RadioCatalog.ParseProviderStationLinks(
-                RadioNet.DownloadText("https://radcap.ru/index-db.html", 12000),
-                "radcap", "Radio Caprice", "https://radcap.ru/");
-            Console.WriteLine("  RADCAP stations: " + stations.Count);
-            return stations.Count >= 400 && stations.Any(s => StreamRanking.Rank(s.Streams).FirstOrDefault()?.BitrateKbps >= 320);
+            var station = RadioCatalog.Find("rainwave:5");
+            var best = station == null ? null : StreamRanking.Rank(station.Streams).FirstOrDefault();
+            if (best == null) return false;
+            var resolved = RadioNet.ResolveStreamVariant(station, best);
+            Console.WriteLine("  Rainwave resolved stream: " + resolved);
+            return ProbeAudio(resolved, 10000);
         });
 
-        Probe("RADCAP 320k station-page resolver", () =>
+        Probe("Rainwave API current song + fallback alignment", () =>
         {
-            var stations = RadioCatalog.ParseProviderStationLinks(
-                RadioNet.DownloadText("https://radcap.ru/index-db.html", 12000),
-                "radcap", "Radio Caprice", "https://radcap.ru/");
-            var station = stations.FirstOrDefault(s => s.Name.IndexOf("ambient", StringComparison.OrdinalIgnoreCase) >= 0) ?? stations.FirstOrDefault();
-            if (station == null) return false;
-            var variant = StreamRanking.Rank(station.Streams).FirstOrDefault();
-            if (variant == null || variant.BitrateKbps < 320) return false;
-            var resolved = RadioNet.ResolveStreamVariant(station, variant);
-            return !string.IsNullOrWhiteSpace(resolved) && resolved.StartsWith("http", StringComparison.OrdinalIgnoreCase);
-        });
-
-        Probe("113.FM direct public/free catalog", () =>
-        {
-            var stations = Radio113Fm.Discover(true);
-            Console.WriteLine("  113.FM validated logical stations: " + stations.Count);
-            foreach (var sample in stations.Take(5))
-            {
-                var stream = StreamRanking.Rank(sample.Streams).FirstOrDefault();
-                Console.WriteLine("    " + sample.Name + " -> " + (stream == null ? "<no compatible stream>" : stream.Url));
-            }
-
-            // The scanner requires an identifiable station name plus actual track-like
-            // ICY metadata. Requiring 60 independently validated logical stations catches
-            // a materially incomplete pass while allowing individual channels to be down.
-            return stations.Count >= 60 && stations.All(s =>
-                s.Provider == "113fm" && StreamRanking.Rank(s.Streams).Any());
-        });
-
-        Probe("113.FM audio does not require fake track metadata", () =>
-        {
-            var station = Radio113Fm.Discover().FirstOrDefault(s => StreamRanking.Rank(s.Streams).Count > 0);
-            if (station == null) return false;
-            return ProbeAudio(StreamRanking.Rank(station.Streams)[0].Url, 8000);
-        });
-
-        Advisory("SceneSat GitHub-runner reachability", () =>
-        {
-            // SceneSat's public listen menu was freshly verified during the implementation
-            // survey to advertise a high-bandwidth/max-quality MP3 option. Its website and
-            // Icecast hosts are not consistently reachable from GitHub-hosted Azure IPs,
-            // so this one provider is reported as an advisory instead of making Azure
-            // routing policy a release gate. Runtime keeps all direct paths plus directory
-            // fallback, and the public page is independently checked during provider review.
-            if (ProbeAudio("http://Oscar.SceneSat.com:8000/scenesatmax", 5000) ||
-                ProbeAudio("http://Salyut80.SceneSat.com:80/scenesatmax", 5000) ||
-                ProbeAudio("https://sj-1.scenesat.com/scenesatmax", 5000) ||
-                ProbeAudio("http://SC.SceneSat.com:8000", 5000))
-                return true;
-
-            return RadioDirectories.SearchRadioBrowser("SceneSat", 30)
-                .Any(s => StreamRanking.Rank(s.Streams).Count > 0);
-        });
-
-        Probe("RadioSEGA compatible public stream", () =>
-            ProbeAudio("https://icecast.radiosega.net/live", 10000) ||
-            ProbeAudio("https://icecast.radiosega.net/rs-mpeg.mp3", 10000));
-
-        Probe("CVGM public stream-page resolver", () =>
-        {
-            var station = RadioCatalog.One("cvgm:smoke", "CVGM Radio", "cvgm", "CVGM", "https://radio.cvgm.net/", "Video Game Music");
-            var variant = RadioCatalog.Variant("https://radio.cvgm.net/demovibes/streams/", "mp3", 192, "station-page", "192k MP3 relay resolver");
-            var resolved = RadioNet.ResolveStreamVariant(station, variant);
-            return !string.IsNullOrWhiteSpace(resolved) && resolved.StartsWith("http", StringComparison.OrdinalIgnoreCase);
-        });
-
-        Probe("SLAY Radio public MP3 relay", () =>
-            ProbeAudio("http://relay4.slayradio.org:8000/", 7000) ||
-            ProbeAudio("http://relay1.slayradio.org:8000/", 7000));
-
-        Probe("PulsRadio current official playlists", () =>
-        {
-            var urls = new[]
-            {
-                "https://www.pulsradio.com/pls/openstream/puls-adsl.m3u",
-                "https://www.pulsradio.com/pls/openstream/pulstrance-adsl.m3u",
-                "https://www.pulsradio.com/pls/openstream/pulsV80-adsl.m3u",
-                "https://www.pulsradio.com/pls/openstream/pulsV90-adsl.m3u"
-            };
-            return urls.All(url => RadioNet.ResolvePlaylist(url).StartsWith("http", StringComparison.OrdinalIgnoreCase));
-        });
-
-        Probe("Gensokyo Radio current public directory stream", () =>
-            RadioDirectories.SearchRadioBrowser("Gensokyo Radio", 20)
-                .Any(s => StreamRanking.Rank(s.Streams).Count > 0));
-
-        Probe("laut.fm live discovery + current_song", () =>
-        {
-            var stations = RadioDirectories.SearchLautFm("rock");
-            var station = stations.FirstOrDefault();
-            if (station == null) return false;
             TrackInfo track;
-            return RadioMetadata.TryParseLautFmCurrentSong(RadioNet.DownloadText(station.MetadataUrl, 8000), out track) &&
-                   track != null && !string.IsNullOrWhiteSpace(track.Display);
+            var ok = RadioMetadata.TryParseRainwaveNowPlayingJson(
+                RadioNet.DownloadText("https://rainwave.cc/api4/info?sid=5", 10000), out track);
+            if (track != null) Console.WriteLine("  Rainwave API title: " + track.Display);
+            return ok && track != null &&
+                   !string.IsNullOrWhiteSpace(track.Display) &&
+                   Math.Abs(track.PlaybackDelaySeconds - RadioMetadata.RainwaveScheduleFallbackDelaySeconds) < 0.001;
         });
 
-        Probe("Radio Browser healthy compatible discovery", () =>
-            RadioDirectories.SearchRadioBrowser("jazz", 30).Any(s => StreamRanking.Rank(s.Streams).Count > 0));
+        Probe("Rainwave schedule parser holds fallback by ten seconds", () =>
+        {
+            const string json = "{\"sched_current\":{\"songs\":[{\"title\":\"Synthetic Song\",\"artists\":[{\"name\":\"Synthetic Artist\"}]}]}}";
+            TrackInfo track;
+            return RadioMetadata.TryParseRainwaveNowPlayingJson(json, out track) &&
+                   track != null &&
+                   track.Display == "Synthetic Artist - Synthetic Song" &&
+                   Math.Abs(track.PlaybackDelaySeconds - 10.0) < 0.001;
+        });
 
-        Probe("Game That Tune 320k + ICY", () =>
-            !string.IsNullOrWhiteSpace(RadioMetadata.ReadIcyStreamTitle("https://icecast.gttradio.com/mp3_320k", 12000, 8)));
+        Advisory("Rainwave stream carries usable ICY metadata", () =>
+        {
+            var station = RadioCatalog.Find("rainwave:5");
+            var best = station == null ? null : StreamRanking.Rank(station.Streams).FirstOrDefault();
+            if (best == null) return false;
+            var resolved = RadioNet.ResolveStreamVariant(station, best);
+            var title = RadioMetadata.ReadIcyStreamTitle(resolved, 10000, 8);
+            Console.WriteLine("  Rainwave stream title: " + title);
+            return RadioMetadata.IsTrackLike(title, station);
+        });
+
+        Probe("Rainwave metadata path always returns stream-aligned or delayed data", () =>
+        {
+            var station = RadioCatalog.Find("rainwave:5");
+            TrackInfo track;
+            if (station == null || !RadioMetadata.TryReadTrack(station, out track) || track == null) return false;
+            return track.PlaybackDelaySeconds == 0 ||
+                   Math.Abs(track.PlaybackDelaySeconds - RadioMetadata.RainwaveScheduleFallbackDelaySeconds) < 0.001;
+        });
 
         if (Failures.Count == 0)
         {
-            Console.WriteLine("PASS: all gating Radio live provider checks.");
+            Console.WriteLine("PASS: two-source Radio live smoke passed.");
             return 0;
         }
 
         Console.Error.WriteLine("FAIL: " + string.Join("; ", Failures));
         return 2;
+    }
+
+    private static bool IsAllowedUrl(string value)
+    {
+        Uri uri;
+        if (!Uri.TryCreate(value, UriKind.Absolute, out uri)) return false;
+        var host = uri.Host.ToLowerInvariant();
+        return host == "rainwave.cc" || host.EndsWith(".rainwave.cc", StringComparison.Ordinal) ||
+               host == "radiomonster.fm" || host.EndsWith(".radiomonster.fm", StringComparison.Ordinal);
     }
 
     private static bool ProbeAudio(string url, int timeoutMilliseconds)
@@ -202,11 +174,11 @@ internal static class Program
         try
         {
             var ok = probe();
-            Console.WriteLine((ok ? "PASS" : "WARN") + ": " + name + (ok ? "" : " (unreachable from this runner; non-gating)"));
+            Console.WriteLine((ok ? "PASS" : "WARN") + ": " + name + (ok ? "" : " (API fallback remains available)"));
         }
         catch (Exception ex)
         {
-            Console.WriteLine("WARN: " + name + " - " + ex.Message + " (non-gating)");
+            Console.WriteLine("WARN: " + name + " - " + ex.Message + " (API fallback remains available)");
         }
     }
 }

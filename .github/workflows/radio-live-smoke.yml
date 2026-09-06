@@ -5,7 +5,7 @@ on:
   push:
     branches:
       - main
-      - general-radio-v1
+      - "feat/radio-*"
     paths:
       - "gmods/Radio/**"
       - "tests/RadioLiveSmoke/**"
@@ -37,7 +37,7 @@ jobs:
         shell: pwsh
         run: dotnet build tests/RadioLiveSmoke/RadioLiveSmoke.csproj -c Release --no-restore
 
-      - name: Fresh provider/catalog/stream/metadata probes
+      - name: RadioMonster + Rainwave live probes
         shell: pwsh
         run: |
           & "tests/RadioLiveSmoke/bin/Release/net48/RadioLiveSmoke.exe"
