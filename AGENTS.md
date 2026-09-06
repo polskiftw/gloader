@@ -93,3 +93,27 @@ When Claire does explicitly invoke **GitHub** or **`@GitHub`**, that is an espec
 If one particular GitHub operation is not exposed by the connector in the current session, say exactly which operation is missing and use the available GitHub operations to accomplish the goal another way when practical. Do **not** turn the absence of one API action into the broader claim that GitHub itself is unavailable.
 
 **Thus is the law: if Claire asks for repository work, use GitHub without making her remind thee that GitHub exists.**
+
+# The Sixth Commandment
+
+> **Thou shalt build for the 64-bit Terraria that gloader actually runs.**
+
+gloader is a **64-bit-only Windows loader** and supports the rebuilt modern CoreCLR/FNA Terraria runtime used by gloader. The stock/legacy 32-bit XNA Terraria runtime is not a supported execution target.
+
+This rule applies repository-wide to the loader, every `gmod`, runtime helpers, native dependencies, build tooling, tests, examples, documentation, and future architecture decisions.
+
+Rules:
+
+- Treat **x64 Terraria as the only supported runtime target** unless Claire explicitly orders otherwise for a narrowly defined task.
+- All new loader and `gmod` code must be designed, reviewed, and tested for the x64 CoreCLR/FNA Terraria runtime that gloader loads.
+- Do **not** preserve, add, or design around x86/32-bit Terraria compatibility merely for backward compatibility. Supporting stock 32-bit XNA Terraria is out of scope for gloader.
+- When runtime behavior or API compatibility matters, use the same x64 Terraria runtime/assemblies that gloader actually loads. Do not anchor implementation decisions to an old 32-bit Terraria binary, decompile, XNA assumption, or x86-only behavior.
+- Native libraries, P/Invoke targets, bundled runtime components, and architecture-specific dependencies used by gloader or a `gmod` must be **x64-compatible**. Do not introduce an x86-only native dependency.
+- Managed dependencies may be architecture-neutral, but they must work correctly inside gloader's 64-bit process.
+- Client and dedicated-server work are both subject to this x64-only rule.
+- CI, smoke tests, release verification, and runtime tests should validate the x64 path. A change that only works under 32-bit Terraria is not a compatibility feature; it is the wrong target.
+- If documentation or code comments mention Terraria architecture without qualification, assume they mean the supported **64-bit gloader Terraria runtime**, not stock 32-bit XNA Terraria.
+
+The existing loader configuration and runtime validation are the executable expression of this rule: gloader targets `x64`/`win-x64`, refuses to run as a 32-bit process, and rejects legacy 32-bit XNA Terraria targets.
+
+**Thus is the law: if it is meant to run under gloader, build it for 64-bit Terraria and do not spend complexity preserving the dead 32-bit path.**
