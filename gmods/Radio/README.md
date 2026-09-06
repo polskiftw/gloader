@@ -2,6 +2,10 @@
 
 Radio is a deliberately small internet-radio mod for gloader.
 
+## Runtime target
+
+Radio targets the same **64-bit CoreCLR/FNA Terraria runtime** that gloader loads. It is not designed or tested for stock 32-bit/XNA Terraria, and no x86 compatibility path is maintained.
+
 ## Content policy
 
 There are exactly two content sources:
