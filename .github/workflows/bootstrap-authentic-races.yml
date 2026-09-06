@@ -1,0 +1,47 @@
+name: Bootstrap AuthenticRaces source
+
+on:
+  push:
+    branches:
+      - feat/authentic-races-port
+    paths:
+      - .github/workflows/bootstrap-authentic-races.yml
+
+permissions:
+  contents: write
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out gloader
+        uses: actions/checkout@v4
+        with:
+          ref: feat/authentic-races-port
+
+      - name: Import pristine upstream source
+        shell: bash
+        run: |
+          set -euo pipefail
+          upstream_dir="$(mktemp -d)"
+          git clone --depth 1 --branch 1.4.4 https://github.com/Mr-Plauge/MrPlagueRaces-1.4.git "$upstream_dir"
+          test "$(git -C "$upstream_dir" rev-parse HEAD)" = "a08c30ece95c4c03d7527ddc75c1277de9dff50c"
+
+          rm -rf gmods/AuthenticRaces
+          mkdir -p gmods/AuthenticRaces/source gmods/AuthenticRaces/port
+          cp -a "$upstream_dir"/. gmods/AuthenticRaces/source/
+          rm -rf gmods/AuthenticRaces/source/.git
+          touch gmods/AuthenticRaces/port/.gitkeep
+
+          # This workflow is only a bootstrap transport for the upstream tree.
+          rm -f .github/workflows/bootstrap-authentic-races.yml
+
+      - name: Commit imported source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: stage AuthenticRaces upstream source"
+          git push origin HEAD:feat/authentic-races-port
