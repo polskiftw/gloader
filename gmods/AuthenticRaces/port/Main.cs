@@ -8,6 +8,7 @@ public static class Mod
     {
         RaceRegistry.Initialize();
         RacePlayerState.ResetAll();
+        RaceAppearanceState.ResetAll();
 
         Console.WriteLine(
             "[Authentic Races] Core loaded. Registered " + RaceRegistry.Count +
