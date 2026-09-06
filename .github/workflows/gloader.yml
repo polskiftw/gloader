@@ -108,7 +108,7 @@ jobs:
             throw "Radio regression test failed with exit code $LASTEXITCODE"
           }
 
-      - name: Radio catalog/browser policy tests
+      - name: Radio two-source policy tests
         shell: pwsh
         run: |
           & "tests/RadioPolicyCompile/bin/Release/net48/RadioPolicyCompile.exe"
