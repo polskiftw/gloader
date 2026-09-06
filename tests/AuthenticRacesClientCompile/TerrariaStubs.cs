@@ -5,8 +5,42 @@ using Terraria.IO;
 
 namespace Microsoft.Xna.Framework.Graphics
 {
+    public class GraphicsDevice
+    {
+    }
+
     public class Texture2D
     {
+        public bool WasLoadedFromPngStream { get; private set; }
+        public long SourceByteLength { get; private set; }
+
+        public static Texture2D FromStream(GraphicsDevice graphicsDevice, Stream stream)
+        {
+            if (graphicsDevice == null)
+                throw new ArgumentNullException(nameof(graphicsDevice));
+            if (stream == null)
+                throw new ArgumentNullException(nameof(stream));
+
+            var signature = new byte[8];
+            int read = stream.Read(signature, 0, signature.Length);
+            bool png = read == 8 &&
+                signature[0] == 0x89 &&
+                signature[1] == 0x50 &&
+                signature[2] == 0x4E &&
+                signature[3] == 0x47 &&
+                signature[4] == 0x0D &&
+                signature[5] == 0x0A &&
+                signature[6] == 0x1A &&
+                signature[7] == 0x0A;
+
+            if (!png)
+                throw new InvalidDataException("Fixture Texture2D.FromStream expected a PNG file.");
+
+            return new Texture2D {
+                WasLoadedFromPngStream = true,
+                SourceByteLength = stream.CanSeek ? stream.Length : read
+            };
+        }
     }
 }
 
@@ -25,9 +59,12 @@ namespace ReLogic.Content
 
 namespace Terraria
 {
+    using Microsoft.Xna.Framework.Graphics;
+
     public class Player
     {
         public int hair;
+        public bool Male = true;
 
         public void ResetEffects() { }
         public void Update(int whoAmI) { }
@@ -47,6 +84,9 @@ namespace Terraria
     public class Main
     {
         public static readonly List<PlayerFileData> PlayerList = new List<PlayerFileData>();
+        public static Main instance = new Main();
+
+        public GraphicsDevice GraphicsDevice { get; } = new GraphicsDevice();
 
         public static void ErasePlayer(int index)
         {

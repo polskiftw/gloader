@@ -13,6 +13,7 @@ public static class Mod
         RacePlayerState.ResetAll();
         RaceAppearanceState.ResetAll();
 #if GLOADER_CLIENT
+        RaceTextureLoader.Initialize();
         RaceRendererRegistry.Initialize();
 #endif
 
