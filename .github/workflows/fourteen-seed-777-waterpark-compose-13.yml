@@ -1,0 +1,218 @@
+name: Fourteen Seed 777 - Waterpark 13-World Recovery
+
+on:
+  push:
+    branches:
+      - fix/waterpark-777-compose-13
+    paths:
+      - .github/workflows/fourteen-seed-777-waterpark-compose-13.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  compose-waterpark:
+    runs-on: windows-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout gloader history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download exact thirteen Waterpark worlds from source run
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: '34010583841'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+
+          $artifacts = @()
+          $page = 1
+          do {
+            $url = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/runs/$env:SOURCE_RUN_ID/artifacts?per_page=100&page=$page"
+            $response = Invoke-RestMethod -Uri $url -Headers $headers
+            $batch = @($response.artifacts)
+            $artifacts += $batch
+            $page++
+          } while ($batch.Count -eq 100)
+
+          $worldSlugs = @('small','medium','large','thicc','thicc2','thicc3','thicc4','thicc5','thicc6','thicc7','thicc8','thicc9','thicc10')
+          $worldDir = Join-Path $PWD 'worlds'
+          New-Item -ItemType Directory -Force $worldDir | Out-Null
+
+          foreach ($slug in $worldSlugs) {
+            $name = "world-waterpark-$slug"
+            $matches = @($artifacts | Where-Object { $_.name -eq $name -and -not $_.expired })
+            if ($matches.Count -ne 1) {
+              throw "Expected exactly one live artifact named '$name' in run $env:SOURCE_RUN_ID; found $($matches.Count)."
+            }
+
+            $artifact = $matches[0]
+            $zip = Join-Path $env:RUNNER_TEMP ("$name.zip")
+            $expanded = Join-Path $env:RUNNER_TEMP ("expanded-$name")
+            Invoke-WebRequest -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/artifacts/$($artifact.id)/zip" -Headers $headers -OutFile $zip
+            Expand-Archive -LiteralPath $zip -DestinationPath $expanded -Force
+            $wlds = @(Get-ChildItem $expanded -Recurse -File -Filter '*.wld')
+            if ($wlds.Count -ne 1) { throw "Artifact '$name' contained $($wlds.Count) .wld files; expected exactly one." }
+            Copy-Item $wlds[0].FullName (Join-Path $worldDir "$slug.wld") -Force
+          }
+
+          $downloaded = @(Get-ChildItem $worldDir -File -Filter '*.wld')
+          if ($downloaded.Count -ne 13) { throw "Expected 13 downloaded Waterpark worlds, found $($downloaded.Count)." }
+          Write-Host 'Downloaded Waterpark Small through THICC 10. THICC 11 is intentionally omitted after exceeding the GitHub-hosted runner time budget.'
+
+      - name: Restore pinned TEdit renderer source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git checkout 01b5009e968e9fbdef94256a54affce3d8f2ac3b -- tools/world-family-renderer
+          $dir = 'tools/world-family-renderer'
+          Remove-Item "$dir/GenerationEngine.cs","$dir/MainForm.cs","$dir/RuntimeLocator.cs","$dir/WorldFamilyJob.cs" -Force
+
+          $projectPath = "$dir/WorldFamilyRenderer.csproj"
+          $projectText = Get-Content $projectPath -Raw
+          if (-not $projectText.Contains('<OutputType>WinExe</OutputType>')) {
+            throw 'Pinned renderer project no longer has the expected WinExe OutputType.'
+          }
+          $projectText = $projectText.Replace('<OutputType>WinExe</OutputType>', '<OutputType>Exe</OutputType>')
+          Set-Content $projectPath $projectText -Encoding UTF8
+
+          @'
+          namespace WorldFamilyRenderer;
+
+          internal sealed record WorldPreset(int Number, string Name, string Slug, int Width, int Height)
+          {
+              public static IReadOnlyList<WorldPreset> All { get; } = new[]
+              {
+                  new WorldPreset(1, "Small", "small", 4200, 1200),
+                  new WorldPreset(2, "Medium", "medium", 6400, 1800),
+                  new WorldPreset(3, "Large", "large", 8400, 2400),
+                  new WorldPreset(4, "THICC", "thicc", 10600, 3000),
+                  new WorldPreset(5, "THICC 2", "thicc2", 12600, 3600),
+                  new WorldPreset(6, "THICC 3", "thicc3", 14800, 4200),
+                  new WorldPreset(7, "THICC 4", "thicc4", 16800, 4800),
+                  new WorldPreset(8, "THICC 5", "thicc5", 19000, 5400),
+                  new WorldPreset(9, "THICC 6", "thicc6", 21000, 6000),
+                  new WorldPreset(10, "THICC 7", "thicc7", 23200, 6600),
+                  new WorldPreset(11, "THICC 8", "thicc8", 25200, 7200),
+                  new WorldPreset(12, "THICC 9", "thicc9", 27400, 7800),
+                  new WorldPreset(13, "THICC 10", "thicc10", 29400, 8400)
+              };
+          }
+
+          internal sealed record RenderedWorld(WorldPreset Preset, string PngPath, int PixelWidth, int PixelHeight);
+          '@ | Set-Content "$dir/Models.cs" -Encoding UTF8
+
+          @'
+          using ReactiveUI.Builder;
+          using TEdit.Terraria;
+
+          namespace WorldFamilyRenderer;
+
+          internal static class Program
+          {
+              [STAThread]
+              private static int Main(string[] args)
+              {
+                  try
+                  {
+                      if (args.Length != 3) throw new ArgumentException("Usage: WorldFamilyRenderer <world-dir> <output-dir> <output-file>");
+                      _ = RxAppBuilder.CreateReactiveUIBuilder().WithCoreServices().BuildApp();
+                      WorldConfiguration.Initialize();
+                      string worldDir = Path.GetFullPath(args[0]);
+                      string outputDir = Path.GetFullPath(args[1]);
+                      string outputFile = args[2];
+                      Directory.CreateDirectory(outputDir);
+                      var rendered = new List<RenderedWorld>();
+                      var progress = new Progress<string>(Console.WriteLine);
+
+                      foreach (WorldPreset preset in WorldPreset.All)
+                      {
+                          string worldPath = Path.Combine(worldDir, preset.Slug + ".wld");
+                          if (!File.Exists(worldPath)) throw new FileNotFoundException("Missing generated world", worldPath);
+                          var loaded = World.LoadWorld(worldPath, headersOnly: true);
+                          if (loaded.Error != null || loaded.World == null) throw new InvalidDataException("TEdit could not validate " + preset.Name, loaded.Error);
+                          if (loaded.World.TilesWide != preset.Width || loaded.World.TilesHigh != preset.Height)
+                              throw new InvalidDataException($"{preset.Name}: expected {preset.Width}x{preset.Height}, got {loaded.World.TilesWide}x{loaded.World.TilesHigh}");
+
+                          string png = Path.Combine(outputDir, $"{preset.Number:00}-{preset.Slug}.png");
+                          rendered.Add(TEditPaletteRenderer.RenderAsync(worldPath, preset, 3840, png, progress, CancellationToken.None).GetAwaiter().GetResult());
+                      }
+
+                      ComparisonComposer.Compose(rendered, Path.Combine(outputDir, outputFile), CancellationToken.None);
+                      Console.WriteLine("Waterpark recovery render complete: 13 worlds, THICC 11 intentionally omitted.");
+                      return 0;
+                  }
+                  catch (Exception ex)
+                  {
+                      Console.Error.WriteLine(ex);
+                      return 1;
+                  }
+              }
+          }
+          '@ | Set-Content "$dir/Program.cs" -Encoding UTF8
+
+          $composer = Get-Content "$dir/ComparisonComposer.cs" -Raw
+          $composer = $composer.Replace('rendered.Count != 6', 'rendered.Count != 13')
+          $composer = $composer.Replace('Exactly six rendered worlds are required.', 'Exactly thirteen rendered worlds are required.')
+          $composer = $composer.Replace('Vanilla + XL + Huge + THICC', 'Seed 777 + Waterpark + Small through THICC 10 — THICC 11 omitted (hosted-runner timeout)')
+          Set-Content "$dir/ComparisonComposer.cs" $composer -Encoding UTF8
+
+      - name: Checkout pinned TEdit
+        uses: actions/checkout@v4
+        with:
+          repository: TEdit/Terraria-Map-Editor
+          ref: cca62adbe37f8cbbd447061650f91a357836f5d0
+          path: _deps/TEdit
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build and run Waterpark compositor
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputFile = '777-waterpark-fourteen-seed.png'
+          $project = 'tools/world-family-renderer/WorldFamilyRenderer.csproj'
+          $tedit = Join-Path $env:GITHUB_WORKSPACE '_deps/TEdit'
+
+          dotnet restore $project -p:TEditRoot="$tedit"
+          if ($LASTEXITCODE -ne 0) { throw "dotnet restore failed with exit code $LASTEXITCODE" }
+          dotnet publish $project -c Release -r win-x64 --self-contained true --no-restore -p:PublishSingleFile=true -p:TEditRoot="$tedit"
+          if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXITCODE" }
+
+          $exe = (Resolve-Path 'tools/world-family-renderer/bin/Release/net10.0-windows/win-x64/publish/WorldFamilyRenderer.exe').Path
+          $worldDir = (Resolve-Path 'worlds').Path
+          $outputDir = Join-Path $PWD 'rendered'
+          New-Item -ItemType Directory -Force $outputDir | Out-Null
+
+          $process = Start-Process -FilePath $exe -ArgumentList @($worldDir, $outputDir, $outputFile) -WorkingDirectory (Split-Path $exe) -NoNewWindow -PassThru -Wait
+          if ($process.ExitCode -ne 0) { throw "Renderer failed with exit code $($process.ExitCode)" }
+
+          $outputPath = Join-Path $outputDir $outputFile
+          $deadline = (Get-Date).AddSeconds(60)
+          while (-not (Test-Path $outputPath -PathType Leaf) -and (Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 2
+          }
+          if (-not (Test-Path $outputPath -PathType Leaf)) { throw "Final comparison PNG was not produced: $outputPath" }
+
+          $pngs = @(Get-ChildItem $outputDir -File -Filter '*.png')
+          if ($pngs.Count -ne 14) { throw "Expected 14 PNGs (13 individual + 1 comparison), found $($pngs.Count)." }
+
+      - name: Upload recovered Waterpark family
+        uses: actions/upload-artifact@v4
+        with:
+          name: fourteen-seed-777-waterpark-recovery
+          path: rendered/*.png
+          if-no-files-found: error
+          retention-days: 14
