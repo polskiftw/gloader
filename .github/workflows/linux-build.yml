@@ -152,7 +152,7 @@ jobs:
           CS
           mcs -nologo \
             -target:exe \
-            -resource:"$fixture/ReLogic.dll",Terraria.Libraries.NET.ReLogic.dll \
+            -resource:"$fixture/ReLogic.dll",Terraria.Libraries.ReLogic.ReLogic.dll \
             -out:"$fixture/Terraria.exe" \
             "$fixture/Terraria.cs"
 

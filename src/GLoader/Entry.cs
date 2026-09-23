@@ -56,7 +56,7 @@ namespace GLoader
                         _resolver.LoadEmbedded(
                             gameAssembly,
                             "ReLogic",
-                            "Terraria.Libraries.NET.ReLogic.dll");
+                            "Terraria.Libraries.ReLogic.ReLogic.dll");
                     }
 
                     if (!options.DisableMods)
