@@ -54,7 +54,7 @@ namespace GLoader
                 InvokeOptionalLoad(assembly, mod.Directory);
 
                 harmony = new Harmony(harmonyId);
-                harmony.PatchAll(assembly);
+                PatchAssembly(harmony, assembly, mod.DisplayName);
 
                 Log.Info("Loaded mod: " + mod.DisplayName);
             }
@@ -71,6 +71,23 @@ namespace GLoader
                 }
 
                 Log.Error("Mod failed: " + mod.DisplayName + Environment.NewLine + Unwrap(ex));
+            }
+        }
+
+        private static void PatchAssembly(Harmony harmony, Assembly assembly, string displayName)
+        {
+            var patchTypes = assembly
+                .GetTypes()
+                .Where(type => type.GetCustomAttributes(typeof(HarmonyPatch), true).Length != 0)
+                .ToArray();
+
+            Log.Info("Applying " + patchTypes.Length + " Harmony patch class(es) for " + displayName + ".");
+
+            foreach (var type in patchTypes)
+            {
+                Log.Info("Patching class: " + type.FullName);
+                harmony.CreateClassProcessor(type).Patch();
+                Log.Info("Patched class: " + type.FullName);
             }
         }
 
