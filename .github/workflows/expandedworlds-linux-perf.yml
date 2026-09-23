@@ -1,14 +1,6 @@
 name: ExpandedWorlds Linux perf probe
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/expandedworlds-linux-perf.yml"
-      - "tests/WorldgenPerfProbe/**"
-      - "gmods/ExpandedWorlds/**"
-      - "src/**"
-      - "build.sh"
   workflow_dispatch:
 
 permissions:
