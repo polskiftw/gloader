@@ -1,100 +1,130 @@
 # gloader
 
-gloader is a native Linux/Mono raw C# source mod loader for the Linux Steam build of Terraria.
+gloader is a native Linux/Mono raw C# source-mod loader for the Linux Steam build of Terraria.
 
-This repository is the Linux line. The former Windows 0.2.x implementation has been moved to the \`gloader-windows/\` maintenance snapshot in \`polskiftw/gpages\`.
+This repository is the Linux-native line. The former Windows 0.2.x implementation lives in the `gloader-windows/` maintenance snapshot in `polskiftw/gpages`.
 
-## Product contract
+## Install contract
 
-Everything installs directly into the existing Terraria directory:
+Everything lives directly inside the existing Terraria directory:
 
-\`\`\`text
+```text
 Terraria/
+├── Terraria
 ├── Terraria.bin.x86_64
 ├── Terraria.exe
+├── TerrariaServer
+├── TerrariaServer.bin.x86_64
+├── TerrariaServer.exe
 ├── FNA.dll
 ├── lib64/
 ├── gloader
 ├── gdeps/
 │   ├── GLoader.dll
+│   ├── libmono-profiler-gloader.so
 │   ├── 0Harmony.dll
 │   ├── Microsoft.CodeAnalysis*.dll
+│   ├── selected Mono compatibility facades
 │   └── ...
 └── gmods/
-\`\`\`
+```
 
 Normal Steam use is one launch option:
 
-\`\`\`text
+```text
 ./gloader %command%
-\`\`\`
+```
 
-There is no public \`gloader.exe\`, no launcher UI, no private rebuilt Terraria runtime, and no per-user gloader configuration tree.
+There is no public `gloader.exe`, launcher UI, private rebuilt Terraria runtime, system-Mono runtime dependency, or per-user gloader configuration tree.
+
+## How it launches
+
+`gloader` is a small native x86-64 ELF. It does not host or `dlopen` Mono itself.
+
+For a normal client launch it:
+
+1. anchors all paths to its own directory;
+2. strips the Terraria executable token supplied by Steam's `%command%`;
+3. sets Terraria's normal `MONO_IOMAP=all`;
+4. adds `gdeps/` to the native library search path;
+5. injects `--profile=gloader` through `MONO_BUNDLED_OPTIONS`;
+6. directly `execv`s the existing `Terraria.bin.x86_64`.
+
+Terraria's own MonoKickstart host then starts its embedded Mono runtime. That runtime loads `gdeps/libmono-profiler-gloader.so`. The profiler waits for the real `Terraria` or `TerrariaServer` managed assembly, loads `gdeps/GLoader.dll` into the same Mono AppDomain, and calls `GLoader.Entry.Initialize()`.
+
+GLoader installs resolution/patching/mod support and then returns control to Terraria's normal startup.
 
 ## Build
 
-Requirements for building the loader itself:
+Build requirements:
 
-- a C compiler
+- C compiler
 - .NET SDK 10
 
 Run:
 
-\`\`\`bash
+```bash
 ./build.sh
-\`\`\`
+```
 
-The package is written to \`dist/\`.
+The installable package is written to `dist/`.
 
-The native \`gloader\` ELF does **not** link against a system Mono. At runtime it locates and dynamically loads the Mono runtime shipped with the Terraria installation, then invokes \`gdeps/GLoader.dll\`.
+The repository pins 30 tiny architecture-neutral Mono compatibility facade assemblies under `third_party/mono-facades/`. Their SHA-256 hashes are checked by `build.sh`, then the exact bytes are copied into `dist/gdeps/`. They allow Roslyn 2.10 to run inside Terraria's stripped Mono framework profile; they are not a second Mono runtime.
 
-## Install
+## Dedicated server
 
-Copy the contents of \`dist/\` into the Linux Terraria installation directory. Do not replace or modify Terraria's own files.
+Direct server launch:
 
-Then set Terraria's Steam launch options to:
-
-\`\`\`text
-./gloader %command%
-\`\`\`
-
-For a no-mods diagnostic run:
-
-\`\`\`text
-./gloader --vanilla %command%
-\`\`\`
-
-The dedicated-server loader path is:
-
-\`\`\`text
+```text
 ./gloader --server -- <Terraria server arguments>
-\`\`\`
+```
+
+The client also patches the instance `System.Diagnostics.Process.Start()` used by Terraria's Host & Play path. A launch whose filename is `TerrariaServer*` is rewritten to the same `gloader --server -- ...` path, preserving Terraria's original server arguments.
+
+## Vanilla escape hatch
+
+```text
+./gloader --vanilla %command%
+```
+
+This removes the gloader profiler option and launches Terraria's native MonoKickstart host without injecting GLoader.
 
 ## gmods
 
-A raw source mod is enabled when its directory is directly under \`gmods/\`:
+An enabled raw-source mod is a directory directly under `gmods/`:
 
-\`\`\`text
+```text
 gmods/Foo/
-\`\`\`
+```
 
 Rename the directory to disable it:
 
-\`\`\`text
+```text
 gmods/Foo.disabled/
-\`\`\`
+```
 
-At startup, enabled mods are compiled against the assemblies actually present in the running Linux Terraria/Mono installation. Linux builds define:
+Linux source builds define:
 
-- \`GLOADER\`
-- \`GLOADER_LINUX\`
-- \`GLOADER_MONO\`
-- \`GLOADER_CLIENT\` or \`GLOADER_SERVER\`
+- `GLOADER`
+- `GLOADER_LINUX`
+- `GLOADER_MONO`
+- exactly one of `GLOADER_CLIENT` or `GLOADER_SERVER`
 
-The historical gmods remain in this repository as porting inputs. They are deliberately **not** copied into \`dist/gmods\` automatically until their Linux compatibility is verified. In particular, Radio's old Windows decoder path is a separate porting workstream, and the archived Windows Expanded Worlds release remains in \`gpages/gloader-windows/gmods/ExpandedWorlds\`.
+The historical gmods in this repository are porting inputs and are deliberately not copied into `dist/gmods/` as enabled defaults until each one is verified on Linux.
 
-## Architecture
+## Validation status
 
-See \`DGD.md\` for the canonical Linux design and implementation status.
+The Linux package has been tested in CI against the exact Steam Linux Terraria 1.4.5.8 client/server runtime used for development.
 
-GitHub Actions proves that the repository produces a real x86-64 ELF plus the managed loader/package shape. The decisive runtime proof still requires an installed Linux copy of Terraria: Steam -> \`./gloader %command%\` -> bundled Mono -> untouched Terraria title screen.
+That proof covers:
+
+- native MonoKickstart/profiler injection;
+- source-aligned embedded managed-DLL resolution;
+- exact dedicated-server attachment;
+- raw C# mod compilation and `Mod.Load()` using only the packaged dependencies;
+- client attachment;
+- Host & Play redirect installation.
+
+The headless Actions client proceeds through GLoader initialization and then stops when FNA/SDL reports that no video device exists. Reaching the actual graphical Terraria title screen remains an on-machine acceptance test.
+
+See `DGD.md` for the canonical architecture and implementation record.
