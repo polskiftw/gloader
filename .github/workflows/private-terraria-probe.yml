@@ -277,6 +277,58 @@ jobs:
           path: ${{ runner.temp }}/selected-facades/
           if-no-files-found: error
 
+      - name: Pin proven Mono facade set
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_dir="$RUNNER_TEMP/selected-facades"
+          target_dir="third_party/mono-facades"
+
+          test -d "$source_dir"
+          test -f "$source_dir/System.Runtime.dll"
+
+          if [ -f "$target_dir/System.Runtime.dll" ]; then
+            echo "Mono facade set is already pinned."
+            exit 0
+          fi
+
+          mkdir -p "$target_dir"
+          cp "$source_dir"/*.dll "$target_dir/"
+
+          cat > "$target_dir/README.md" <<'EOF'
+          # Mono compatibility facades
+
+          These 30 architecture-neutral managed facade assemblies are copied from
+          Ubuntu 24.04's Mono 6.8.0.105+dfsg-3.6ubuntu2 package
+          (/usr/lib/mono/4.5/Facades).
+
+          They are the minimal facade set obtained by intersecting the direct
+          System.* assembly references of GLoader's Roslyn 2.10 runtime payload
+          with Mono's runtime facade directory. The set was then validated by
+          compiling and loading a raw C# source mod inside the exact Steam Linux
+          TerrariaServer 1.4.5.8 MonoKickstart runtime.
+
+          GLoader does not use or ship a second Mono runtime. These tiny facade
+          assemblies only bridge Roslyn's contract assembly references to the
+          framework implementation already present in Terraria's embedded Mono
+          environment.
+
+          Mono runtime/class-library code is generally MIT-licensed; retain the
+          project's THIRD-PARTY-NOTICES.txt when redistributing GLoader.
+          EOF
+
+          (
+            cd "$target_dir"
+            sha256sum ./*.dll | sed 's#  \./#  #' | sort > SHA256SUMS
+          )
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$target_dir"
+          git commit -m "deps: pin Mono Roslyn facade set"
+          git push origin HEAD:main
+
       - name: Exact Steam dedicated-server gloader proof
         shell: bash
         run: |
