@@ -149,6 +149,7 @@ jobs:
           run_case large-default "" "" 7931
           run_case thicc-default THICC "" 7932
           run_case thicc-optimize-all THICC "--optimize=all" 7933
+          run_case thicc-llvm THICC "--llvm" 7934
 
       - name: Upload perf logs
         if: always()
@@ -159,4 +160,5 @@ jobs:
             ${{ runner.temp }}/large-default.out
             ${{ runner.temp }}/thicc-default.out
             ${{ runner.temp }}/thicc-optimize-all.out
+            ${{ runner.temp }}/thicc-llvm.out
           if-no-files-found: warn
