@@ -1,96 +1,115 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Text;
 
 namespace GLoader
 {
     public static class Entry
     {
-        public static int Run()
+        private static readonly object Gate = new object();
+        private static AssemblyResolver _resolver;
+        private static bool _logReady;
+        private static bool _initialized;
+        private static bool _processExitRegistered;
+
+        public static int Initialize()
         {
-            var root = ResolveRoot();
-            var dependenciesDirectory = Path.Combine(root, "gdeps");
-            var modsDirectory = Path.Combine(root, "gmods");
-            var logsDirectory = Path.Combine(dependenciesDirectory, "logs");
-            var options = LoaderOptions.Parse(root, NativeArguments.Decode());
-
-            if (options.ShowHelp)
+            lock (Gate)
             {
-                LoaderOptions.PrintHelp();
-                return 0;
-            }
+                if (_initialized)
+                    return 0;
 
-            AssemblyResolver resolver = null;
-            var logReady = false;
+                var root = ResolveRoot();
+                var dependenciesDirectory = Path.Combine(root, "gdeps");
+                var modsDirectory = Path.Combine(root, "gmods");
+                var logsDirectory = Path.Combine(dependenciesDirectory, "logs");
+                var options = LoaderOptions.FromEnvironment();
 
-            try
-            {
-                Directory.CreateDirectory(dependenciesDirectory);
-                Directory.CreateDirectory(modsDirectory);
-
-                Log.Initialize(logsDirectory, options.DedicatedServer ? "server" : "client");
-                logReady = true;
-
-                if (typeof(object).Assembly.GetType("Mono.Runtime", false) == null)
-                    throw new PlatformNotSupportedException("Linux gloader must run inside Mono. CoreCLR is not a supported Linux host.");
-
-                Log.Info("gloader 0.3.0-alpha (Linux/Mono)");
-                Log.Info("Terraria root: " + root);
-                Log.Info("Mode: " + (options.DedicatedServer ? "server" : "client"));
-                Log.Info("Mods: " + (options.DisableMods ? "disabled for this run" : modsDirectory));
-
-                resolver = new AssemblyResolver(root, dependenciesDirectory);
-                resolver.Install();
-
-                Directory.SetCurrentDirectory(root);
-                var targetPath = TargetLocator.Find(root, options.DedicatedServer);
-                var gameAssembly = GameBootstrap.Load(targetPath);
-                resolver.PreferAssembly(gameAssembly);
-
-                Log.Info("Target: " + targetPath);
-                Log.Info("Target assembly: " + gameAssembly.FullName);
-
-                if (!options.DisableMods)
+                try
                 {
-                    if (!options.DedicatedServer)
-                        HostPlayServerRedirect.TryInstall(gameAssembly, Path.Combine(root, "gloader"), root);
+                    Directory.CreateDirectory(dependenciesDirectory);
+                    Directory.CreateDirectory(modsDirectory);
 
-                    ModRuntime.LoadAll(
-                        modsDirectory,
-                        gameAssembly,
-                        root,
-                        dependenciesDirectory,
-                        resolver,
-                        options.DedicatedServer);
+                    Log.Initialize(logsDirectory, options.DedicatedServer ? "server" : "client");
+                    _logReady = true;
+
+                    if (typeof(object).Assembly.GetType("Mono.Runtime", false) == null)
+                        throw new PlatformNotSupportedException("Linux gloader must run inside Terraria's Mono runtime.");
+
+                    Log.Info("gloader 0.3.0-alpha (Linux/MonoKickstart)");
+                    Log.Info("Terraria root: " + root);
+                    Log.Info("Mode: " + (options.DedicatedServer ? "server" : "client"));
+                    Log.Info("Mods: " + (options.DisableMods ? "disabled for this run" : modsDirectory));
+
+                    _resolver = new AssemblyResolver(root, dependenciesDirectory);
+                    _resolver.Install();
+
+                    Directory.SetCurrentDirectory(root);
+                    var gameAssembly = FindLoadedTerraria(options.DedicatedServer);
+                    _resolver.PreferAssembly(gameAssembly);
+
+                    Log.Info("Attached target: " + gameAssembly.FullName);
+
+                    if (!options.DisableMods)
+                    {
+                        if (!options.DedicatedServer)
+                            HostPlayServerRedirect.TryInstall(gameAssembly, Path.Combine(root, "gloader"), root);
+
+                        ModRuntime.LoadAll(
+                            modsDirectory,
+                            gameAssembly,
+                            root,
+                            dependenciesDirectory,
+                            _resolver,
+                            options.DedicatedServer);
+                    }
+                    else
+                    {
+                        Log.Info("Source mods skipped for this run.");
+                    }
+
+                    RegisterProcessExit();
+                    _initialized = true;
+                    Log.Info("gloader initialization complete; returning control to Terraria's Mono host.");
+                    return 0;
                 }
-                else
+                catch (Exception ex)
                 {
-                    Log.Info("Source mods skipped for this run.");
+                    if (_logReady)
+                        Log.Error(ex.ToString());
+
+                    Console.Error.WriteLine("gloader failed:");
+                    Console.Error.WriteLine(ex);
+                    Cleanup();
+                    return 1;
                 }
-
-                Log.Info("Starting Terraria.");
-                return GameBootstrap.InvokeEntryPoint(gameAssembly, options.GameArguments.ToArray());
             }
-            catch (Exception ex)
+        }
+
+        private static Assembly FindLoadedTerraria(bool dedicatedServer)
+        {
+            var expected = dedicatedServer ? "TerrariaServer" : "Terraria";
+            var loaded = AppDomain.CurrentDomain.GetAssemblies();
+
+            var exact = loaded.FirstOrDefault(assembly =>
             {
-                if (logReady)
-                    Log.Error(ex.ToString());
+                try
+                {
+                    return string.Equals(assembly.GetName().Name, expected, StringComparison.OrdinalIgnoreCase);
+                }
+                catch
+                {
+                    return false;
+                }
+            });
 
-                Console.Error.WriteLine("gloader failed:");
-                Console.Error.WriteLine(ex);
-                return 1;
-            }
-            finally
-            {
-                if (resolver != null)
-                    resolver.Dispose();
+            if (exact != null)
+                return exact;
 
-                if (logReady)
-                    Log.Dispose();
-            }
+            throw new InvalidOperationException(
+                "The gloader profiler was injected, but the expected already-loaded managed assembly '" +
+                expected + "' was not visible in the current Mono AppDomain.");
         }
 
         private static string ResolveRoot()
@@ -106,60 +125,35 @@ namespace GLoader
             var parent = Directory.GetParent(Path.GetFullPath(assemblyDirectory));
             return parent == null ? Path.GetFullPath(assemblyDirectory) : parent.FullName;
         }
-    }
 
-    internal static class NativeArguments
-    {
-        public static string[] Decode()
+        private static void RegisterProcessExit()
         {
-            var countText = Environment.GetEnvironmentVariable("GLOADER_ARGC");
-            int count;
-            if (!int.TryParse(countText, out count) || count < 0)
-                throw new FormatException("Malformed GLOADER_ARGC value.");
+            if (_processExitRegistered)
+                return;
 
-            if (count == 0)
-                return Array.Empty<string>();
-
-            var encoded = Environment.GetEnvironmentVariable("GLOADER_ARGV_HEX") ?? string.Empty;
-            var parts = encoded.Split(new[] { ',' }, StringSplitOptions.None);
-
-            if (parts.Length != count)
-                throw new FormatException("GLOADER_ARGV_HEX does not match GLOADER_ARGC.");
-
-            return parts.Select(DecodeOne).ToArray();
+            AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
+            _processExitRegistered = true;
         }
 
-        private static string DecodeOne(string value)
+        private static void OnProcessExit(object sender, EventArgs args)
         {
-            if (value.Length == 0)
-                return string.Empty;
+            lock (Gate)
+                Cleanup();
+        }
 
-            if ((value.Length & 1) != 0)
-                throw new FormatException("Malformed GLOADER_ARGV_HEX argument.");
-
-            var bytes = new byte[value.Length / 2];
-            for (var index = 0; index < bytes.Length; index++)
+        private static void Cleanup()
+        {
+            if (_resolver != null)
             {
-                var high = Hex(value[index * 2]);
-                var low = Hex(value[index * 2 + 1]);
-                if (high < 0 || low < 0)
-                    throw new FormatException("Malformed GLOADER_ARGV_HEX argument.");
-
-                bytes[index] = (byte)((high << 4) | low);
+                _resolver.Dispose();
+                _resolver = null;
             }
 
-            return Encoding.UTF8.GetString(bytes);
-        }
-
-        private static int Hex(char value)
-        {
-            if (value >= '0' && value <= '9')
-                return value - '0';
-            if (value >= 'a' && value <= 'f')
-                return value - 'a' + 10;
-            if (value >= 'A' && value <= 'F')
-                return value - 'A' + 10;
-            return -1;
+            if (_logReady)
+            {
+                Log.Dispose();
+                _logReady = false;
+            }
         }
     }
 }
