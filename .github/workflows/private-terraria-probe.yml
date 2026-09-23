@@ -142,8 +142,7 @@ jobs:
             dist/gdeps/Microsoft.CodeAnalysis.dll \
             dist/gdeps/Microsoft.CodeAnalysis.CSharp.dll \
             dist/gdeps/System.Collections.Immutable.dll \
-            dist/gdeps/System.Reflection.Metadata.dll \
-            dist/gdeps/System.Memory.dll; do
+            dist/gdeps/System.Reflection.Metadata.dll; do
             echo
             echo "--- $managed ---"
             monodis --assembly "$managed" | sed -n '1,40p'
