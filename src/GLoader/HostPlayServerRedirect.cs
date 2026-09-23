@@ -1,10 +1,7 @@
 using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
 using System.Reflection;
-using System.Reflection.Emit;
 using HarmonyLib;
 
 namespace GLoader
@@ -16,7 +13,7 @@ namespace GLoader
         private static string _root;
         private static bool _installed;
 
-        public static void TryInstall(Assembly gameAssembly, string loaderPath, string root)
+        public static void TryInstall(string loaderPath, string root)
         {
             if (_installed)
                 return;
@@ -26,178 +23,150 @@ namespace GLoader
                 _loaderPath = Path.GetFullPath(loaderPath);
                 _root = Path.GetFullPath(root);
 
-                var launcher = FindServerLauncher(gameAssembly);
-                if (launcher == null)
+                var harmony = new Harmony(HarmonyId);
+                var patched = 0;
+
+                var instanceStart = typeof(Process).GetMethod(
+                    "Start",
+                    BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    Type.EmptyTypes,
+                    null);
+
+                if (instanceStart != null)
                 {
-                    Log.Warn("Host & Play server launcher was not found; automatic server redirection is unavailable for this Terraria build.");
-                    return;
+                    harmony.Patch(
+                        instanceStart,
+                        prefix: new HarmonyMethod(
+                            typeof(HostPlayServerRedirect),
+                            "BeforeInstanceStart"));
+                    patched++;
                 }
 
-                var transpiler = typeof(HostPlayServerRedirect).GetMethod(
-                    "ServerLaunchTranspiler",
-                    BindingFlags.NonPublic | BindingFlags.Static);
+                var staticStartInfo = typeof(Process).GetMethod(
+                    "Start",
+                    BindingFlags.Public | BindingFlags.Static,
+                    null,
+                    new[] { typeof(ProcessStartInfo) },
+                    null);
 
-                new Harmony(HarmonyId).Patch(
-                    launcher,
-                    transpiler: new HarmonyMethod(transpiler));
+                if (staticStartInfo != null)
+                {
+                    harmony.Patch(
+                        staticStartInfo,
+                        prefix: new HarmonyMethod(
+                            typeof(HostPlayServerRedirect),
+                            "BeforeStaticStartInfo"));
+                    patched++;
+                }
+
+                var staticFile = typeof(Process).GetMethod(
+                    "Start",
+                    BindingFlags.Public | BindingFlags.Static,
+                    null,
+                    new[] { typeof(string) },
+                    null);
+
+                if (staticFile != null)
+                {
+                    harmony.Patch(
+                        staticFile,
+                        prefix: new HarmonyMethod(
+                            typeof(HostPlayServerRedirect),
+                            "BeforeStaticFile"));
+                    patched++;
+                }
+
+                var staticFileArgs = typeof(Process).GetMethod(
+                    "Start",
+                    BindingFlags.Public | BindingFlags.Static,
+                    null,
+                    new[] { typeof(string), typeof(string) },
+                    null);
+
+                if (staticFileArgs != null)
+                {
+                    harmony.Patch(
+                        staticFileArgs,
+                        prefix: new HarmonyMethod(
+                            typeof(HostPlayServerRedirect),
+                            "BeforeStaticFileArgs"));
+                    patched++;
+                }
+
+                if (patched == 0)
+                {
+                    Log.Warn("Host & Play process hooks were not found on this Mono runtime.");
+                    return;
+                }
 
                 _installed = true;
                 Log.Info("Host & Play server redirection enabled.");
             }
             catch (Exception ex)
             {
-                Log.Warn("Host & Play redirection could not be installed: " + ex.Message);
+                Log.Warn("Host & Play redirection could not be installed: " + ex);
             }
         }
 
-        private static MethodInfo FindServerLauncher(Assembly gameAssembly)
+        private static void BeforeInstanceStart(Process __instance)
         {
-            var mainType = gameAssembly.GetType("Terraria.Main", false);
-            if (mainType == null)
-                return null;
-
-            return mainType
-                .GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance)
-                .FirstOrDefault(MethodMentionsTerrariaServer);
+            if (__instance != null)
+                RedirectIfTerrariaServer(__instance.StartInfo);
         }
 
-        private static bool MethodMentionsTerrariaServer(MethodInfo method)
+        private static void BeforeStaticStartInfo(ref ProcessStartInfo __0)
         {
-            MethodBody body;
-            try
-            {
-                body = method.GetMethodBody();
-            }
-            catch
-            {
-                return false;
-            }
-
-            var il = body == null ? null : body.GetILAsByteArray();
-            if (il == null || il.Length < 5)
-                return false;
-
-            for (var index = 0; index <= il.Length - 5; index++)
-            {
-                if (il[index] != 0x72)
-                    continue;
-
-                try
-                {
-                    var token = BitConverter.ToInt32(il, index + 1);
-                    var value = method.Module.ResolveString(token);
-                    if (value != null && value.IndexOf("TerrariaServer", StringComparison.OrdinalIgnoreCase) >= 0)
-                        return true;
-                }
-                catch
-                {
-                }
-
-                index += 4;
-            }
-
-            return false;
+            RedirectIfTerrariaServer(__0);
         }
 
-        private static IEnumerable<CodeInstruction> ServerLaunchTranspiler(IEnumerable<CodeInstruction> instructions)
+        private static void BeforeStaticFile(ref string __0)
         {
-            var argumentsSetter = typeof(ProcessStartInfo)
-                .GetProperty("Arguments")
-                .GetSetMethod();
+            if (!IsTerrariaServer(__0))
+                return;
 
-            var argumentsRedirect = typeof(HostPlayServerRedirect).GetMethod(
-                "SetArgumentsAndRedirect",
-                BindingFlags.NonPublic | BindingFlags.Static);
-
-            var instanceStart = typeof(Process).GetMethod(
-                "Start",
-                BindingFlags.Public | BindingFlags.Instance,
-                null,
-                Type.EmptyTypes,
-                null);
-
-            var staticStart = typeof(Process).GetMethod(
-                "Start",
-                BindingFlags.Public | BindingFlags.Static,
-                null,
-                new[] { typeof(ProcessStartInfo) },
-                null);
-
-            var instanceRedirect = typeof(HostPlayServerRedirect).GetMethod(
-                "StartAndRedirect",
-                BindingFlags.NonPublic | BindingFlags.Static,
-                null,
-                new[] { typeof(Process) },
-                null);
-
-            var staticRedirect = typeof(HostPlayServerRedirect).GetMethod(
-                "StartAndRedirect",
-                BindingFlags.NonPublic | BindingFlags.Static,
-                null,
-                new[] { typeof(ProcessStartInfo) },
-                null);
-
-            foreach (var instruction in instructions)
-            {
-                if (argumentsSetter != null && instruction.Calls(argumentsSetter))
-                {
-                    instruction.opcode = OpCodes.Call;
-                    instruction.operand = argumentsRedirect;
-                }
-                else if (instanceStart != null && instruction.Calls(instanceStart))
-                {
-                    instruction.opcode = OpCodes.Call;
-                    instruction.operand = instanceRedirect;
-                }
-                else if (staticStart != null && instruction.Calls(staticStart))
-                {
-                    instruction.opcode = OpCodes.Call;
-                    instruction.operand = staticRedirect;
-                }
-
-                yield return instruction;
-            }
+            __0 = _loaderPath;
+            Log.Info("Routing Host & Play dedicated server through Linux gloader.");
         }
 
-        private static void SetArgumentsAndRedirect(ProcessStartInfo startInfo, string arguments)
+        private static void BeforeStaticFileArgs(ref string __0, ref string __1)
         {
-            startInfo.Arguments = arguments ?? string.Empty;
-            RedirectIfTerrariaServer(startInfo);
-        }
+            if (!IsTerrariaServer(__0))
+                return;
 
-        private static bool StartAndRedirect(Process process)
-        {
-            RedirectIfTerrariaServer(process.StartInfo);
-            return process.Start();
-        }
-
-        private static Process StartAndRedirect(ProcessStartInfo startInfo)
-        {
-            RedirectIfTerrariaServer(startInfo);
-            return Process.Start(startInfo);
+            __0 = _loaderPath;
+            __1 = BuildArguments(__1);
+            Log.Info("Routing Host & Play dedicated server through Linux gloader.");
         }
 
         private static void RedirectIfTerrariaServer(ProcessStartInfo startInfo)
         {
-            if (startInfo == null || string.IsNullOrWhiteSpace(startInfo.FileName))
+            if (startInfo == null || !IsTerrariaServer(startInfo.FileName))
                 return;
 
-            var requested = startInfo.FileName.Trim().Trim('"');
-            var fileName = Path.GetFileName(requested);
-
-            if (string.IsNullOrWhiteSpace(fileName) ||
-                !fileName.StartsWith("TerrariaServer", StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
-
-            var originalArguments = startInfo.Arguments ?? string.Empty;
             startInfo.FileName = _loaderPath;
             startInfo.WorkingDirectory = _root;
-            startInfo.Arguments = "--server --" +
-                (string.IsNullOrWhiteSpace(originalArguments) ? string.Empty : " " + originalArguments);
+            startInfo.Arguments = BuildArguments(startInfo.Arguments);
 
             Log.Info("Routing Host & Play dedicated server through Linux gloader.");
+        }
+
+        private static bool IsTerrariaServer(string requested)
+        {
+            if (string.IsNullOrWhiteSpace(requested))
+                return false;
+
+            var fileName = Path.GetFileName(requested.Trim().Trim('"'));
+            return !string.IsNullOrWhiteSpace(fileName) &&
+                fileName.StartsWith("TerrariaServer", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string BuildArguments(string originalArguments)
+        {
+            return "--server --" +
+                (string.IsNullOrWhiteSpace(originalArguments)
+                    ? string.Empty
+                    : " " + originalArguments);
         }
     }
 }
