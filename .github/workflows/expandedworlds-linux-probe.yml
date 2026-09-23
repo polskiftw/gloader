@@ -95,7 +95,7 @@ jobs:
           set +e
           (
             cd "$fixture"
-            xvfb-run -a env SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1               timeout -s KILL 30s ./gloader ./Terraria
+            xvfb-run -a env SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1               timeout -s KILL 90s ./gloader ./Terraria
           ) > "$fixture/client.out" 2>&1
           status=$?
           set -e
