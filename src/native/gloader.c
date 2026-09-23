@@ -207,30 +207,17 @@ static int resolve_command_path(
     char *out,
     size_t size,
     const char *root,
-    const char *requested,
     int dedicated_server)
 {
-    const char *fallback = dedicated_server ? "TerrariaServer" : "Terraria";
-    const char *selected = requested;
+    const char *binary = dedicated_server
+        ? "TerrariaServer.bin.x86_64"
+        : "Terraria.bin.x86_64";
 
-    if (dedicated_server && selected != NULL && is_client_command(selected))
-        selected = NULL;
-
-    if (selected == NULL)
-        selected = fallback;
-
-    if (selected[0] == '/') {
-        if (snprintf(out, size, "%s", selected) >= (int)size)
-            return 0;
-    } else {
-        while (selected[0] == '.' && selected[1] == '/')
-            selected += 2;
-        if (!join_path(out, size, root, selected))
-            return 0;
-    }
+    if (!join_path(out, size, root, binary))
+        return 0;
 
     if (!is_file(out)) {
-        fprintf(stderr, "gloader: Terraria launcher not found: %s\n", out);
+        fprintf(stderr, "gloader: Terraria MonoKickstart host not found: %s\n", out);
         return 0;
     }
 
@@ -293,7 +280,7 @@ int main(int argc, char **argv)
     }
 
     char command[PATH_MAX];
-    if (!resolve_command_path(command, sizeof(command), root, requested_command, dedicated_server))
+    if (!resolve_command_path(command, sizeof(command), root, dedicated_server))
         return 1;
 
     if (!set_loader_environment(root, dedicated_server, disable_mods)) {
