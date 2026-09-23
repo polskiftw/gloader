@@ -132,6 +132,16 @@ jobs:
           echo "=== Terraria refs ==="
           monodis --assemblyref "$steam_root/Terraria.exe" | head -220
 
+      - name: Inspect full-framework Roslyn toolset payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fL \
+            https://api.nuget.org/v3-flatcontainer/microsoft.net.compilers.toolset/4.8.0/microsoft.net.compilers.toolset.4.8.0.nupkg \
+            -o "$RUNNER_TEMP/roslyn.nupkg"
+          echo "=== ROSLYN NET472 PAYLOAD ==="
+          unzip -l "$RUNNER_TEMP/roslyn.nupkg" | grep 'tasks/net472/' | sed -n '1,220p'
+
       - name: Exact Steam dedicated-server gloader proof
         shell: bash
         run: |
