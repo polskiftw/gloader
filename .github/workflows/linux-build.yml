@@ -22,7 +22,7 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Build native ELF and managed loader
+      - name: Build native ELF, Mono profiler, and managed loader
         run: ./build.sh
 
       - name: Verify package contract
@@ -31,17 +31,69 @@ jobs:
           set -euo pipefail
           test -x dist/gloader
           test -f dist/gdeps/GLoader.dll
+          test -x dist/gdeps/libmono-profiler-gloader.so
           test -d dist/gmods
           test ! -e dist/gloader.exe
 
           file dist/gloader
+          file dist/gdeps/libmono-profiler-gloader.so
           file dist/gdeps/GLoader.dll
           readelf -h dist/gloader
-          readelf -d dist/gloader
+          readelf -h dist/gdeps/libmono-profiler-gloader.so
+          readelf -d dist/gdeps/libmono-profiler-gloader.so
 
           file dist/gloader | grep -q 'ELF 64-bit'
+          file dist/gdeps/libmono-profiler-gloader.so | grep -q 'ELF 64-bit.*shared object'
           readelf -h dist/gloader | grep -q 'Advanced Micro Devices X86-64'
-          readelf -d dist/gloader | grep -Fq '$ORIGIN/lib64:$ORIGIN/lib:$ORIGIN'
+          readelf -h dist/gdeps/libmono-profiler-gloader.so | grep -q 'Advanced Micro Devices X86-64'
+          nm -D dist/gdeps/libmono-profiler-gloader.so | grep -q ' T mono_profiler_init_gloader$'
+
+          if readelf -d dist/gloader | grep -Ei 'NEEDED.*mono'; then
+            echo 'gloader must not link against a system Mono runtime.' >&2
+            exit 1
+          fi
+          if readelf -d dist/gdeps/libmono-profiler-gloader.so | grep -Ei 'NEEDED.*mono'; then
+            echo 'gloader profiler must resolve Mono from Terraria, not link a system Mono runtime.' >&2
+            exit 1
+          fi
+
+      - name: Mono profiler attach smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq mono-runtime mono-mcs
+
+          fixture="$RUNNER_TEMP/gloader-mono-fixture"
+          rm -rf "$fixture"
+          mkdir -p "$fixture/gdeps" "$fixture/gmods"
+          cp -a dist/gdeps/. "$fixture/gdeps/"
+
+          cat > "$fixture/Terraria.cs" <<'CS'
+          using System;
+          public static class Program
+          {
+              public static void Main(string[] args)
+              {
+                  Console.WriteLine("TERRARIA_FIXTURE_MAIN");
+              }
+          }
+          CS
+          mcs -nologo -target:exe -out:"$fixture/Terraria.exe" "$fixture/Terraria.cs"
+
+          (
+            cd "$fixture"
+            GLOADER_ROOT="$fixture" \
+            GLOADER_MODE=client \
+            GLOADER_DISABLE_MODS=1 \
+            LD_LIBRARY_PATH="$fixture/gdeps${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            MONO_PATH="$fixture:$fixture/gdeps" \
+            mono --profile=gloader Terraria.exe | tee fixture.out
+          )
+
+          grep -q 'TERRARIA_FIXTURE_MAIN' "$fixture/fixture.out"
+          grep -q 'Attached target: Terraria' "$fixture/gdeps/logs/gloader-client.log"
+          grep -q 'returning control to Terraria' "$fixture/gdeps/logs/gloader-client.log"
 
       - name: Upload Linux package
         uses: actions/upload-artifact@v4
