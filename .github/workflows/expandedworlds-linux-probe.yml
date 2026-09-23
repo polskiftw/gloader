@@ -87,7 +87,7 @@ jobs:
           set +e
           (
             cd "$fixture"
-            xvfb-run -a env               SDL_AUDIODRIVER=dummy               LIBGL_ALWAYS_SOFTWARE=1               timeout 30s ./gloader ./Terraria
+            xvfb-run -a env               SDL_AUDIODRIVER=dummy               LIBGL_ALWAYS_SOFTWARE=1               timeout -s KILL 30s ./gloader ./Terraria
           ) > "$fixture/client.out" 2>&1
           status=$?
           set -e
@@ -100,7 +100,7 @@ jobs:
           test -f "$fixture/gdeps/logs/gloader-client.log"
           cat "$fixture/gdeps/logs/gloader-client.log"
 
-          test "$status" -eq 124
+          test "$status" -eq 124 -o "$status" -eq 137
           grep -q 'Attached target: Terraria, Version=1.4.5.8' "$fixture/gdeps/logs/gloader-client.log"
           grep -q 'source mods armed for Main.OnEnginePreload' "$fixture/gdeps/logs/gloader-client.log"
           grep -q 'Terraria mod-safe startup point reached; loading source mods' "$fixture/gdeps/logs/gloader-client.log"
