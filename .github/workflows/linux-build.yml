@@ -66,9 +66,10 @@ jobs:
           mkdir -p "$fixture/gdeps"
           cp dist/gloader "$fixture/gloader"
 
-          cat > "$fixture/Terraria" <<'SH'
+          cat > "$fixture/Terraria.bin.x86_64" <<'SH'
           #!/usr/bin/env bash
           {
+            echo "HOST=${0##*/}"
             echo "MONO=${MONO_BUNDLED_OPTIONS-}"
             echo "ROOT=${GLOADER_ROOT-}"
             echo "MODE=${GLOADER_MODE-}"
@@ -77,13 +78,14 @@ jobs:
             printf 'ARG=%s\n' "$@"
           } > "$CAPTURE"
           SH
-          cp "$fixture/Terraria" "$fixture/TerrariaServer"
-          chmod 0755 "$fixture/Terraria" "$fixture/TerrariaServer"
+          cp "$fixture/Terraria.bin.x86_64" "$fixture/TerrariaServer.bin.x86_64"
+          chmod 0755 "$fixture/Terraria.bin.x86_64" "$fixture/TerrariaServer.bin.x86_64"
 
           CAPTURE="$fixture/client.out" \
           MONO_BUNDLED_OPTIONS='--debug --profile=gloader:stale' \
           "$fixture/gloader" "$fixture/Terraria" alpha 'two words'
 
+          grep -Fxq 'HOST=Terraria.bin.x86_64' "$fixture/client.out"
           grep -Fxq 'MONO=--debug --profile=gloader' "$fixture/client.out"
           grep -Fxq "ROOT=$fixture" "$fixture/client.out"
           grep -Fxq 'MODE=client' "$fixture/client.out"
@@ -95,6 +97,7 @@ jobs:
           CAPTURE="$fixture/server.out" \
           "$fixture/gloader" --server -- -port 7777
 
+          grep -Fxq 'HOST=TerrariaServer.bin.x86_64' "$fixture/server.out"
           grep -Fxq 'MODE=server' "$fixture/server.out"
           grep -Fxq 'ARG=-port' "$fixture/server.out"
           grep -Fxq 'ARG=7777' "$fixture/server.out"
