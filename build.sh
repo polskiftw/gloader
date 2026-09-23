@@ -6,7 +6,8 @@ DIST="$ROOT/dist"
 DEPS="$DIST/gdeps"
 MODS="$DIST/gmods"
 PROJECT="$ROOT/src/GLoader/GLoader.csproj"
-NATIVE="$ROOT/src/native/gloader.c"
+LAUNCHER="$ROOT/src/native/gloader.c"
+PROFILER="$ROOT/src/native/profiler.c"
 
 rm -rf "$DIST"
 mkdir -p "$DEPS" "$MODS"
@@ -23,32 +24,42 @@ if [ -z "$CC_VALUE" ]; then
   CC_VALUE=cc
 fi
 
+COMMON_CFLAGS=(
+  -std=c11
+  -O2
+  -pipe
+  -Wall
+  -Wextra
+  -Wl,-z,relro
+  -Wl,-z,now
+  -Wl,-z,noexecstack
+)
+
 "$CC_VALUE" \
-  -std=c11 \
-  -O2 \
-  -pipe \
+  "${COMMON_CFLAGS[@]}" \
   -fPIE \
   -pie \
-  -Wall \
-  -Wextra \
-  -Wl,-z,relro \
-  -Wl,-z,now \
-  -Wl,-z,noexecstack \
-  -Wl,--disable-new-dtags \
-  -Wl,-rpath,'$ORIGIN/lib64:$ORIGIN/lib:$ORIGIN' \
-  "$NATIVE" \
-  -ldl \
+  "$LAUNCHER" \
   -o "$DIST/gloader"
 
-chmod 0755 "$DIST/gloader"
+"$CC_VALUE" \
+  "${COMMON_CFLAGS[@]}" \
+  -fPIC \
+  -shared \
+  "$PROFILER" \
+  -ldl \
+  -o "$DEPS/libmono-profiler-gloader.so"
 
-cat > "$MODS/README.txt" <<'EOF'
+chmod 0755 "$DIST/gloader"
+chmod 0755 "$DEPS/libmono-profiler-gloader.so"
+
+cat > "$MODS/README.txt" <<'MODREADME'
 Place enabled raw C# source-mod folders directly in this directory.
 Rename a mod directory to *.disabled to disable it.
 
 Historical gmods in the source repository are porting inputs and are not
 automatically bundled as enabled Linux defaults until individually verified.
-EOF
+MODREADME
 
 cp "$ROOT/LICENSE.md" "$DEPS/LICENSE.md"
 cp "$ROOT/THIRD-PARTY-NOTICES.txt" "$DEPS/THIRD-PARTY-NOTICES.txt"
