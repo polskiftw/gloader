@@ -16,13 +16,9 @@ namespace GLoader
             string modDirectory)
         {
             var paths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            var inMemoryAssemblies = new Dictionary<string, Assembly>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
-            {
-                if (!AddAssemblyLocation(paths, assembly, false))
-                    AddInMemoryAssembly(inMemoryAssemblies, assembly);
-            }
+                AddAssemblyLocation(paths, assembly, false);
 
             AddManagedFiles(paths, root, false);
             AddManagedFiles(paths, dependencies, false);
@@ -30,7 +26,6 @@ namespace GLoader
 
             RemoveOtherTerrariaAssemblies(paths, gameAssembly);
             AddAssemblyLocation(paths, gameAssembly, true);
-            inMemoryAssemblies.Remove(gameAssembly.GetName().Name);
 
             var references = new List<MetadataReference>();
             foreach (var path in paths.Values.OrderBy(value => value, StringComparer.OrdinalIgnoreCase))
@@ -45,26 +40,6 @@ namespace GLoader
                 catch (IOException ex)
                 {
                     Log.Warn("Could not use compiler reference " + path + ": " + ex.Message);
-                }
-            }
-
-            foreach (var pair in inMemoryAssemblies.OrderBy(
-                pair => pair.Key,
-                StringComparer.OrdinalIgnoreCase))
-            {
-                if (paths.ContainsKey(pair.Key))
-                    continue;
-
-                try
-                {
-#pragma warning disable 618
-                    references.Add(MetadataReference.CreateFromAssembly(pair.Value));
-#pragma warning restore 618
-                }
-                catch (Exception ex)
-                {
-                    Log.Warn("Could not use in-memory compiler reference " +
-                        pair.Key + ": " + ex.Message);
                 }
             }
 
@@ -100,7 +75,7 @@ namespace GLoader
                 AddManagedPath(paths, path, overwrite);
         }
 
-        private static bool AddAssemblyLocation(
+        private static void AddAssemblyLocation(
             IDictionary<string, string> paths,
             Assembly assembly,
             bool overwrite)
@@ -108,29 +83,9 @@ namespace GLoader
             try
             {
                 if (assembly == null || assembly.IsDynamic || string.IsNullOrWhiteSpace(assembly.Location))
-                    return false;
-
-                AddManagedPath(paths, assembly.Location, overwrite);
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private static void AddInMemoryAssembly(
-            IDictionary<string, Assembly> assemblies,
-            Assembly assembly)
-        {
-            try
-            {
-                if (assembly == null || assembly.IsDynamic)
                     return;
 
-                var name = assembly.GetName().Name;
-                if (!string.IsNullOrWhiteSpace(name) && !assemblies.ContainsKey(name))
-                    assemblies[name] = assembly;
+                AddManagedPath(paths, assembly.Location, overwrite);
             }
             catch
             {
