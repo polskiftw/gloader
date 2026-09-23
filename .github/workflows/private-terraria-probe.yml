@@ -56,26 +56,53 @@ jobs:
           nm -D input/Terraria.bin.x86_64 | grep -q ' mono_domain_assembly_open$'
           nm -D input/Terraria.bin.x86_64 | grep -q ' mono_set_assemblies_path$'
 
-      - name: Install fixture Mono class libraries
+      - name: Download public matching Terraria Linux runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$(curl -fsSL https://terraria.org/api/get/dedicated-servers-names | jq -r '.[0]')"
+          test -n "$archive"
+          test "$archive" != "null"
+          echo "Public dedicated-server archive: $archive"
+          curl -fL "https://terraria.org/api/download/pc-dedicated-server/$archive" -o server.zip
+          mkdir public-server
+          unzip -q server.zip -d public-server
+
+          server_bin="$(find public-server -type f -name TerrariaServer.bin.x86_64 -print -quit)"
+          test -n "$server_bin"
+          linux_dir="$(dirname "$server_bin")"
+          echo "$linux_dir" > linux-runtime-dir.txt
+
+          echo "Public Linux host SHA256:"
+          sha256sum "$server_bin"
+          echo "Runtime files:"
+          find "$linux_dir" -maxdepth 2 -type f -printf '%P\n' | sort | head -200
+
+          test -f "$linux_dir/monoconfig"
+          test -f "$linux_dir/monomachineconfig"
+          test -f "$linux_dir/mscorlib.dll"
+          test -f "$linux_dir/System.Core.dll"
+
+      - name: Install fixture C# compiler
         shell: bash
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq mono-runtime mono-mcs
+          sudo apt-get install -y -qq mono-mcs
 
-      - name: Prove gloader profiler inside Steam MonoKickstart
+      - name: Prove gloader profiler inside exact Steam MonoKickstart
         shell: bash
         run: |
           set -euo pipefail
           fixture="$RUNNER_TEMP/steam-terraria-profiler-proof"
+          linux_dir="$(cat linux-runtime-dir.txt)"
           rm -rf "$fixture"
+          mkdir -p "$fixture"
+          cp -a "$linux_dir/." "$fixture/"
           mkdir -p "$fixture/gdeps" "$fixture/gmods"
 
           cp input/Terraria.bin.x86_64 "$fixture/Terraria.bin.x86_64"
           chmod 0755 "$fixture/Terraria.bin.x86_64"
           cp -a dist/gdeps/. "$fixture/gdeps/"
-          ln -s /usr/lib/mono "$fixture/mono"
-          cp /etc/mono/config "$fixture/monoconfig"
-          cp /etc/mono/4.5/machine.config "$fixture/monomachineconfig"
 
           cat > "$fixture/Terraria.cs" <<'CS'
           using System;
@@ -96,7 +123,7 @@ jobs:
             GLOADER_DISABLE_MODS=1 \
             MONO_IOMAP=all \
             MONO_BUNDLED_OPTIONS=--profile=gloader \
-            LD_LIBRARY_PATH="$fixture/gdeps" \
+            LD_LIBRARY_PATH="$fixture/gdeps:$fixture/lib64" \
             ./Terraria.bin.x86_64 | tee fixture.out
           )
 
