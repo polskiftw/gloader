@@ -56,19 +56,19 @@ using (var assembly = AssemblyDefinition.ReadAssembly(
         ?? throw new InvalidOperationException(
             "Terraria.Main.ClientInitialize() was not found.");
 
-    var checkBunnyCalls = clientInitialize.Body.Instructions
+    var applyChangesCalls = clientInitialize.Body.Instructions
         .Where(instruction =>
             (instruction.OpCode == OpCodes.Call || instruction.OpCode == OpCodes.Callvirt) &&
             instruction.Operand is MethodReference method &&
-            method.DeclaringType.FullName == "Terraria.Main" &&
-            method.Name == "CheckBunny")
+            method.Name == "ApplyChanges" &&
+            method.Parameters.Count == 0)
         .ToArray();
 
-    if (checkBunnyCalls.Length != 1)
+    if (applyChangesCalls.Length != 1)
     {
         throw new InvalidOperationException(
-            "Expected exactly one CheckBunny call in Terraria.Main.ClientInitialize, found " +
-            checkBunnyCalls.Length + ".");
+            "Expected exactly one graphics ApplyChanges() call in " +
+            "Terraria.Main.ClientInitialize, found " + applyChangesCalls.Length + ".");
     }
 
     var runGame = programType.Methods.SingleOrDefault(method =>
@@ -104,36 +104,33 @@ using (var assembly = AssemblyDefinition.ReadAssembly(
     runGameIl.InsertAfter(socialCall, setClient);
     runGameIl.InsertAfter(setClient, storeClient);
 
-    // The headless probe reliably reaches ClientInitialize through
-    // graphics.ApplyChanges(), but does not advance to Main.LoadContent/Update.
-    // Raise Terraria's real engine-preload event immediately after that proven
-    // graphics initialization point, just before CheckBunny(), in this disposable
-    // probe copy only. Production Terraria/gloader binaries are not modified.
+    // Bare/headless FNA does not reliably advance to Terraria's first Update(),
+    // but it does create the client GraphicsDevice and execute graphics.ApplyChanges().
+    // Raise Terraria's real engine-preload event immediately after that exact call in
+    // this disposable probe copy only. Production Terraria/gloader are unchanged.
     var actionInvoke = module.ImportReference(
         typeof(Action).GetMethod(nameof(Action.Invoke))
         ?? throw new InvalidOperationException("System.Action.Invoke was not found."));
 
     var clientInitializeIl = clientInitialize.Body.GetILProcessor();
-    var checkBunnyCall = checkBunnyCalls[0];
+    var cursor = applyChangesCalls[0];
     var skipPreload = Instruction.Create(OpCodes.Nop);
+    var injected = new[]
+    {
+        Instruction.Create(OpCodes.Ldc_I4_1),
+        Instruction.Create(OpCodes.Stsfld, isEnginePreloadedField),
+        Instruction.Create(OpCodes.Ldsfld, enginePreloadField),
+        Instruction.Create(OpCodes.Brfalse_S, skipPreload),
+        Instruction.Create(OpCodes.Ldsfld, enginePreloadField),
+        Instruction.Create(OpCodes.Callvirt, actionInvoke),
+        skipPreload
+    };
 
-    clientInitializeIl.InsertBefore(checkBunnyCall, Instruction.Create(OpCodes.Ldc_I4_1));
-    clientInitializeIl.InsertBefore(
-        checkBunnyCall,
-        Instruction.Create(OpCodes.Stsfld, isEnginePreloadedField));
-    clientInitializeIl.InsertBefore(
-        checkBunnyCall,
-        Instruction.Create(OpCodes.Ldsfld, enginePreloadField));
-    clientInitializeIl.InsertBefore(
-        checkBunnyCall,
-        Instruction.Create(OpCodes.Brfalse_S, skipPreload));
-    clientInitializeIl.InsertBefore(
-        checkBunnyCall,
-        Instruction.Create(OpCodes.Ldsfld, enginePreloadField));
-    clientInitializeIl.InsertBefore(
-        checkBunnyCall,
-        Instruction.Create(OpCodes.Callvirt, actionInvoke));
-    clientInitializeIl.InsertBefore(checkBunnyCall, skipPreload);
+    foreach (var instruction in injected)
+    {
+        clientInitializeIl.InsertAfter(cursor, instruction);
+        cursor = instruction;
+    }
 
     assembly.Write(temporaryPath);
 }
