@@ -57,6 +57,63 @@ jobs:
             exit 1
           fi
 
+      - name: Native wrapper handoff smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture="$RUNNER_TEMP/gloader-wrapper-fixture"
+          rm -rf "$fixture"
+          mkdir -p "$fixture/gdeps"
+          cp dist/gloader "$fixture/gloader"
+
+          cat > "$fixture/Terraria" <<'SH'
+          #!/usr/bin/env bash
+          {
+            echo "MONO=${MONO_BUNDLED_OPTIONS-}"
+            echo "ROOT=${GLOADER_ROOT-}"
+            echo "MODE=${GLOADER_MODE-}"
+            echo "DISABLE=${GLOADER_DISABLE_MODS-}"
+            echo "LD=${LD_LIBRARY_PATH-}"
+            printf 'ARG=%s\n' "$@"
+          } > "$CAPTURE"
+          SH
+          cp "$fixture/Terraria" "$fixture/TerrariaServer"
+          chmod 0755 "$fixture/Terraria" "$fixture/TerrariaServer"
+
+          CAPTURE="$fixture/client.out" \
+          MONO_BUNDLED_OPTIONS='--debug --profile=gloader:stale' \
+          "$fixture/gloader" "$fixture/Terraria" alpha 'two words'
+
+          grep -Fxq 'MONO=--debug --profile=gloader' "$fixture/client.out"
+          grep -Fxq "ROOT=$fixture" "$fixture/client.out"
+          grep -Fxq 'MODE=client' "$fixture/client.out"
+          grep -Fxq 'DISABLE=0' "$fixture/client.out"
+          grep -Fq "LD=$fixture/gdeps" "$fixture/client.out"
+          grep -Fxq 'ARG=alpha' "$fixture/client.out"
+          grep -Fxq 'ARG=two words' "$fixture/client.out"
+
+          CAPTURE="$fixture/server.out" \
+          "$fixture/gloader" --server -- -port 7777
+
+          grep -Fxq 'MODE=server' "$fixture/server.out"
+          grep -Fxq 'ARG=-port' "$fixture/server.out"
+          grep -Fxq 'ARG=7777' "$fixture/server.out"
+
+          CAPTURE="$fixture/vanilla.out" \
+          GLOADER_ROOT=stale \
+          GLOADER_MODE=server \
+          GLOADER_DISABLE_MODS=1 \
+          LD_LIBRARY_PATH=/keep \
+          MONO_BUNDLED_OPTIONS='--debug --profile=gloader' \
+          "$fixture/gloader" --vanilla "$fixture/Terraria" vanilla
+
+          grep -Fxq 'MONO=--debug' "$fixture/vanilla.out"
+          grep -Fxq 'ROOT=' "$fixture/vanilla.out"
+          grep -Fxq 'MODE=' "$fixture/vanilla.out"
+          grep -Fxq 'DISABLE=' "$fixture/vanilla.out"
+          grep -Fxq 'LD=/keep' "$fixture/vanilla.out"
+          grep -Fxq 'ARG=vanilla' "$fixture/vanilla.out"
+
       - name: Mono profiler attach smoke test
         shell: bash
         run: |
