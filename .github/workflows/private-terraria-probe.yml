@@ -1,0 +1,74 @@
+name: Private Terraria probe
+
+on:
+  push:
+    paths:
+      - ".github/workflows/private-terraria-probe.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download draft release asset
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const response = await github.request('GET /repos/{owner}/{repo}/releases/assets/{asset_id}', {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              asset_id: 582741513,
+              headers: { accept: 'application/octet-stream' }
+            });
+            const bytes = Buffer.isBuffer(response.data)
+              ? response.data
+              : Buffer.from(response.data);
+            fs.writeFileSync('Terraria.tar.gz', bytes);
+
+      - name: Verify and inspect archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "=== ARCHIVE HASH ==="
+          sha256sum Terraria.tar.gz
+          echo
+          echo "=== TAR CONTENTS ==="
+          tar -tzvf Terraria.tar.gz
+          mkdir input
+          tar -xzf Terraria.tar.gz -C input
+          echo
+          echo "=== FILE INVENTORY ==="
+          find input -type f -printf '%P\t%s bytes\n' | sort
+          echo
+          echo "=== FILE TYPES ==="
+          while IFS= read -r -d '' f; do
+            printf '%s: ' "${f#input/}"
+            file -b "$f"
+          done < <(find input -type f -print0 | sort -z)
+
+      - name: Inspect ELF metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' f; do
+            kind="$(file -b "$f")"
+            if grep -q "ELF" <<<"$kind"; then
+              echo
+              echo "===== ${f#input/} ====="
+              readelf -h "$f" | grep -E 'Class:|Data:|Type:|Machine:|Entry point address:' || true
+              readelf -d "$f" 2>/dev/null | grep -E 'NEEDED|RPATH|RUNPATH|SONAME' || true
+              readelf -l "$f" 2>/dev/null | grep 'Requesting program interpreter' || true
+              strings -a "$f" | grep -Ei 'mono|fna|terraria|sdl|openal|lib64' | head -100 || true
+            fi
+          done < <(find input -type f -print0 | sort -z)
+
+      - name: Upload private bridge
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraria-private-input
+          path: Terraria.tar.gz
+          retention-days: 1
