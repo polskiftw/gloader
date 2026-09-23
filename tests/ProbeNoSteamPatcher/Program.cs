@@ -108,9 +108,13 @@ using (var assembly = AssemblyDefinition.ReadAssembly(
     // but it does create the client GraphicsDevice and execute graphics.ApplyChanges().
     // Raise Terraria's real engine-preload event immediately after that exact call in
     // this disposable probe copy only. Production Terraria/gloader are unchanged.
-    var actionInvoke = module.ImportReference(
-        typeof(Action).GetMethod(nameof(Action.Invoke))
-        ?? throw new InvalidOperationException("System.Action.Invoke was not found."));
+    var actionInvoke = new MethodReference(
+        "Invoke",
+        module.TypeSystem.Void,
+        enginePreloadField.FieldType)
+    {
+        HasThis = true
+    };
 
     var clientInitializeIl = clientInitialize.Body.GetILProcessor();
     var cursor = applyChangesCalls[0];
