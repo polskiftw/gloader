@@ -7,6 +7,7 @@ on:
       - ".github/workflows/expandedworlds-linux-probe.yml"
       - "gmods/ExpandedWorlds/**"
       - "src/**"
+      - "tests/ProbeNoSteamPatcher/**"
       - "third_party/mono-facades/**"
       - "build.sh"
   workflow_dispatch:
@@ -78,6 +79,13 @@ jobs:
 
           echo "$fixture" > fixture-path.txt
 
+      - name: Disable Steam social mode in probe copy only
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture="$(cat fixture-path.txt)"
+          dotnet run             --project tests/ProbeNoSteamPatcher/ProbeNoSteamPatcher.csproj             --configuration Release             -- "$fixture/Terraria.exe"
+
       - name: Load ExpandedWorlds in exact Steam client
         shell: bash
         run: |
@@ -87,7 +95,7 @@ jobs:
           set +e
           (
             cd "$fixture"
-            xvfb-run -a env               SDL_AUDIODRIVER=dummy               LIBGL_ALWAYS_SOFTWARE=1               timeout -s KILL 30s ./gloader ./Terraria
+            xvfb-run -a env SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1               timeout -s KILL 30s ./gloader ./Terraria
           ) > "$fixture/client.out" 2>&1
           status=$?
           set -e
