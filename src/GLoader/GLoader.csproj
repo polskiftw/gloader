@@ -21,8 +21,8 @@
 
   <ItemGroup>
     <PackageReference Include="Lib.Harmony" Version="2.4.2" />
-    <PackageReference Include="Microsoft.Net.Compilers.Toolset"
-                      Version="4.8.0"
+    <PackageReference Include="Microsoft.Net.Compilers"
+                      Version="2.10.0"
                       PrivateAssets="All"
                       GeneratePathProperty="true" />
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies"
@@ -32,46 +32,19 @@
 
   <ItemGroup>
     <Reference Include="Microsoft.CodeAnalysis">
-      <HintPath>$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/Microsoft.CodeAnalysis.dll</HintPath>
+      <HintPath>$(PkgMicrosoft_Net_Compilers)/tools/Microsoft.CodeAnalysis.dll</HintPath>
       <Private>true</Private>
     </Reference>
     <Reference Include="Microsoft.CodeAnalysis.CSharp">
-      <HintPath>$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/Microsoft.CodeAnalysis.CSharp.dll</HintPath>
-      <Private>true</Private>
-    </Reference>
-  </ItemGroup>
-
-  <ItemGroup>
-    <Reference Include="System.Buffers">
-      <HintPath>$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Buffers.dll</HintPath>
+      <HintPath>$(PkgMicrosoft_Net_Compilers)/tools/Microsoft.CodeAnalysis.CSharp.dll</HintPath>
       <Private>true</Private>
     </Reference>
     <Reference Include="System.Collections.Immutable">
-      <HintPath>$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Collections.Immutable.dll</HintPath>
-      <Private>true</Private>
-    </Reference>
-    <Reference Include="System.Memory">
-      <HintPath>$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Memory.dll</HintPath>
-      <Private>true</Private>
-    </Reference>
-    <Reference Include="System.Numerics.Vectors">
-      <HintPath>$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Numerics.Vectors.dll</HintPath>
+      <HintPath>$(PkgMicrosoft_Net_Compilers)/tools/System.Collections.Immutable.dll</HintPath>
       <Private>true</Private>
     </Reference>
     <Reference Include="System.Reflection.Metadata">
-      <HintPath>$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Reflection.Metadata.dll</HintPath>
-      <Private>true</Private>
-    </Reference>
-    <Reference Include="System.Runtime.CompilerServices.Unsafe">
-      <HintPath>$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Runtime.CompilerServices.Unsafe.dll</HintPath>
-      <Private>true</Private>
-    </Reference>
-    <Reference Include="System.Text.Encoding.CodePages">
-      <HintPath>$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Text.Encoding.CodePages.dll</HintPath>
-      <Private>true</Private>
-    </Reference>
-    <Reference Include="System.Threading.Tasks.Extensions">
-      <HintPath>$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Threading.Tasks.Extensions.dll</HintPath>
+      <HintPath>$(PkgMicrosoft_Net_Compilers)/tools/System.Reflection.Metadata.dll</HintPath>
       <Private>true</Private>
     </Reference>
   </ItemGroup>
