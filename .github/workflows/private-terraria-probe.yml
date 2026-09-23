@@ -13,7 +13,18 @@ jobs:
   probe:
     runs-on: ubuntu-24.04
     steps:
-      - name: Download draft release asset
+      - name: Check out current gloader
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build current Linux gloader
+        run: ./build.sh
+
+      - name: Download private Steam Terraria sample
         uses: actions/github-script@v7
         with:
           script: |
@@ -29,46 +40,66 @@ jobs:
               : Buffer.from(response.data);
             fs.writeFileSync('Terraria.tar.gz', bytes);
 
-      - name: Verify and inspect archive
+      - name: Verify exact Steam host
         shell: bash
         run: |
           set -euo pipefail
-          echo "=== ARCHIVE HASH ==="
-          sha256sum Terraria.tar.gz
-          echo
-          echo "=== TAR CONTENTS ==="
-          tar -tzvf Terraria.tar.gz
+          test "$(sha256sum Terraria.tar.gz | cut -d' ' -f1)" = "c973651f7eea527749be6ba92e4aced3ee61b514dad1a35c7f85163a04a28ec0"
           mkdir input
           tar -xzf Terraria.tar.gz -C input
-          echo
-          echo "=== FILE INVENTORY ==="
-          find input -type f -printf '%P\t%s bytes\n' | sort
-          echo
-          echo "=== FILE TYPES ==="
-          while IFS= read -r -d '' f; do
-            printf '%s: ' "${f#input/}"
-            file -b "$f"
-          done < <(find input -type f -print0 | sort -z)
 
-      - name: Inspect ELF metadata
+          test "$(sha256sum input/Terraria.bin.x86_64 | cut -d' ' -f1)" = "07ac140a3c0a2513d20bc3008c93f5cf464ea9f1ab68d0e2084c58a67a10f159"
+          test "$(sha256sum input/TerrariaServer.bin.x86_64 | cut -d' ' -f1)" = "07ac140a3c0a2513d20bc3008c93f5cf464ea9f1ab68d0e2084c58a67a10f159"
+
+          nm -D input/Terraria.bin.x86_64 | grep -q ' mono_profiler_create$'
+          nm -D input/Terraria.bin.x86_64 | grep -q ' mono_profiler_set_assembly_loaded_callback$'
+          nm -D input/Terraria.bin.x86_64 | grep -q ' mono_domain_assembly_open$'
+          nm -D input/Terraria.bin.x86_64 | grep -q ' mono_set_assemblies_path$'
+
+      - name: Install fixture Mono class libraries
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq mono-runtime mono-mcs
+
+      - name: Prove gloader profiler inside Steam MonoKickstart
         shell: bash
         run: |
           set -euo pipefail
-          while IFS= read -r -d '' f; do
-            kind="$(file -b "$f")"
-            if grep -q "ELF" <<<"$kind"; then
-              echo
-              echo "===== ${f#input/} ====="
-              readelf -h "$f" | grep -E 'Class:|Data:|Type:|Machine:|Entry point address:' || true
-              readelf -d "$f" 2>/dev/null | grep -E 'NEEDED|RPATH|RUNPATH|SONAME' || true
-              readelf -l "$f" 2>/dev/null | grep 'Requesting program interpreter' || true
-              strings -a "$f" | grep -Ei 'mono|fna|terraria|sdl|openal|lib64' | head -100 || true
-            fi
-          done < <(find input -type f -print0 | sort -z)
+          fixture="$RUNNER_TEMP/steam-terraria-profiler-proof"
+          rm -rf "$fixture"
+          mkdir -p "$fixture/gdeps" "$fixture/gmods"
 
-      - name: Upload private bridge
-        uses: actions/upload-artifact@v4
-        with:
-          name: terraria-private-input
-          path: Terraria.tar.gz
-          retention-days: 1
+          cp input/Terraria.bin.x86_64 "$fixture/Terraria.bin.x86_64"
+          chmod 0755 "$fixture/Terraria.bin.x86_64"
+          cp -a dist/gdeps/. "$fixture/gdeps/"
+          ln -s /usr/lib/mono "$fixture/mono"
+          cp /etc/mono/config "$fixture/monoconfig"
+          cp /etc/mono/4.5/machine.config "$fixture/monomachineconfig"
+
+          cat > "$fixture/Terraria.cs" <<'CS'
+          using System;
+          public static class Program
+          {
+              public static void Main(string[] args)
+              {
+                  Console.WriteLine("STEAM_MONOKICKSTART_FIXTURE_MAIN");
+              }
+          }
+          CS
+          mcs -nologo -target:exe -out:"$fixture/Terraria.exe" "$fixture/Terraria.cs"
+
+          (
+            cd "$fixture"
+            GLOADER_ROOT="$fixture" \
+            GLOADER_MODE=client \
+            GLOADER_DISABLE_MODS=1 \
+            MONO_IOMAP=all \
+            MONO_BUNDLED_OPTIONS=--profile=gloader \
+            LD_LIBRARY_PATH="$fixture/gdeps" \
+            ./Terraria.bin.x86_64 | tee fixture.out
+          )
+
+          grep -q 'STEAM_MONOKICKSTART_FIXTURE_MAIN' "$fixture/fixture.out"
+          grep -q 'Attached target: Terraria' "$fixture/gdeps/logs/gloader-client.log"
+          grep -q 'returning control to Terraria' "$fixture/gdeps/logs/gloader-client.log"
