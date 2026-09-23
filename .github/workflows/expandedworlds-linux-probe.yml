@@ -102,7 +102,7 @@ jobs:
               trap "kill $wm_pid 2>/dev/null || true" EXIT
 
               env SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1 \
-                timeout -s KILL 90s ./gloader ./Terraria &
+                timeout -s KILL 30s ./gloader ./Terraria &
               game_pid=$!
 
               for _ in $(seq 1 120); do
