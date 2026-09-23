@@ -84,6 +84,7 @@ jobs:
             preset="$2"
             mono_options="$3"
             port="$4"
+            gc_params="${5:-}"
 
             save="$RUNNER_TEMP/save-$name"
             world="$save/Worlds/perf-$name.wld"
@@ -106,6 +107,12 @@ jobs:
                 export MONO_BUNDLED_OPTIONS="$mono_options"
               else
                 unset MONO_BUNDLED_OPTIONS || true
+              fi
+
+              if [ -n "$gc_params" ]; then
+                export MONO_GC_PARAMS="$gc_params"
+              else
+                unset MONO_GC_PARAMS || true
               fi
 
               exec ./gloader --server --                 -savedirectory "$save"                 -world "$world"                 -autocreate 3                 -worldname "Perf$name"                 -seed "$seed"                 -difficulty 0                 -port "$port"                 -maxplayers 1                 -noupnp
@@ -150,6 +157,8 @@ jobs:
           run_case thicc-default THICC "" 7932
           run_case thicc-optimize-all THICC "--optimize=all" 7933
           run_case thicc-llvm THICC "--llvm" 7934
+          run_case thicc-gc64 THICC "" 7935 "nursery-size=64m"
+          run_case thicc-gc256 THICC "" 7936 "nursery-size=256m"
 
       - name: Upload perf logs
         if: always()
@@ -161,4 +170,6 @@ jobs:
             ${{ runner.temp }}/thicc-default.out
             ${{ runner.temp }}/thicc-optimize-all.out
             ${{ runner.temp }}/thicc-llvm.out
+            ${{ runner.temp }}/thicc-gc64.out
+            ${{ runner.temp }}/thicc-gc256.out
           if-no-files-found: warn
