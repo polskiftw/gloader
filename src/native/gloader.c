@@ -224,6 +224,72 @@ static int resolve_command_path(
     return 1;
 }
 
+static int handoff_steam_wrapper(
+    const char *root,
+    int argc,
+    char **argv,
+    int index,
+    int disable_mods,
+    int dedicated_server)
+{
+    if (index >= argc || is_terraria_command(argv[index]))
+        return 0;
+
+    int target_index = -1;
+    for (int scan = index + 1; scan < argc; scan++) {
+        if (is_terraria_command(argv[scan]))
+            target_index = scan;
+    }
+
+    if (target_index < 0)
+        return 0;
+
+    char self[PATH_MAX];
+    if (!join_path(self, sizeof(self), root, "gloader")) {
+        fprintf(stderr, "gloader: executable path is too long\n");
+        return -1;
+    }
+
+    const int option_count = (disable_mods ? 1 : 0) + (dedicated_server ? 1 : 0);
+    const int original_count = argc - index;
+    char **wrapper_argv = (char **)calloc(
+        (size_t)original_count + (size_t)option_count + 2,
+        sizeof(char *));
+
+    if (wrapper_argv == NULL) {
+        fprintf(stderr, "gloader: out of memory while preparing Steam wrapper handoff\n");
+        return -1;
+    }
+
+    int out = 0;
+    for (int source = index; source < argc; source++) {
+        if (source == target_index) {
+            wrapper_argv[out++] = self;
+
+            if (disable_mods)
+                wrapper_argv[out++] = "--vanilla";
+            if (dedicated_server)
+                wrapper_argv[out++] = "--server";
+
+            wrapper_argv[out++] = argv[source];
+        } else {
+            wrapper_argv[out++] = argv[source];
+        }
+    }
+    wrapper_argv[out] = NULL;
+
+    execv(wrapper_argv[0], wrapper_argv);
+
+    fprintf(
+        stderr,
+        "gloader: could not launch Steam wrapper %s: %s\n",
+        wrapper_argv[0],
+        strerror(errno));
+
+    free(wrapper_argv);
+    return -1;
+}
+
 int main(int argc, char **argv)
 {
     char root[PATH_MAX];
@@ -270,6 +336,19 @@ int main(int argc, char **argv)
     if (show_help) {
         print_help();
         return 0;
+    }
+
+    if (!passthrough) {
+        const int wrapper_handoff = handoff_steam_wrapper(
+            root,
+            argc,
+            argv,
+            index,
+            disable_mods,
+            dedicated_server);
+
+        if (wrapper_handoff < 0)
+            return 1;
     }
 
     const char *requested_command = NULL;
