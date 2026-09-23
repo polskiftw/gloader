@@ -8,11 +8,13 @@ namespace GLoader
 {
     internal sealed class AssemblyResolver : IDisposable
     {
+        private const string EmbeddedPrefix = "Terraria.Libraries.";
+
         private readonly string _root;
         private readonly string _dependencies;
         private readonly List<string> _extraDirectories = new List<string>();
         private readonly HashSet<string> _active = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        private readonly Dictionary<string, byte[]> _embeddedImages =
+        private readonly Dictionary<string, byte[]> _embeddedResources =
             new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
         private readonly object _gate = new object();
         private Assembly _preferredAssembly;
@@ -38,82 +40,67 @@ namespace GLoader
             _preferredAssembly = assembly;
         }
 
-        public Assembly LoadEmbedded(
-            Assembly container,
-            string simpleName,
-            string resourceName)
+        public void IndexEmbeddedLibraries(Assembly container)
         {
             if (container == null)
-                throw new ArgumentNullException("container");
-            if (string.IsNullOrWhiteSpace(simpleName))
-                throw new ArgumentException("Embedded assembly name is required.", "simpleName");
-            if (string.IsNullOrWhiteSpace(resourceName))
-                throw new ArgumentException("Embedded resource name is required.", "resourceName");
+                return;
 
-            var loaded = AppDomain.CurrentDomain
-                .GetAssemblies()
-                .FirstOrDefault(assembly =>
-                {
-                    try
-                    {
-                        return string.Equals(
-                            assembly.GetName().Name,
-                            simpleName,
-                            StringComparison.OrdinalIgnoreCase);
-                    }
-                    catch
-                    {
-                        return false;
-                    }
-                });
-
-            if (loaded != null)
-                return loaded;
-
-            byte[] image;
-            lock (_gate)
-                _embeddedImages.TryGetValue(simpleName, out image);
-
-            if (image == null)
-            {
-                using (var stream = container.GetManifestResourceStream(resourceName))
-                {
-                    if (stream == null)
-                    {
-                        throw new FileNotFoundException(
-                            "Terraria embedded managed resource was not found: " + resourceName);
-                    }
-
-                    using (var memory = new MemoryStream())
-                    {
-                        stream.CopyTo(memory);
-                        image = memory.ToArray();
-                    }
-                }
-
-                lock (_gate)
-                    _embeddedImages[simpleName] = image;
-            }
-
+            string[] resources;
             try
             {
-                var assembly = Assembly.Load(image);
-                Log.Info("Loaded Terraria embedded library: " + simpleName);
-                return assembly;
+                resources = container.GetManifestResourceNames();
             }
             catch (Exception ex)
             {
-                throw new InvalidOperationException(
-                    "Could not load Terraria embedded library '" + simpleName + "'.",
-                    ex);
+                Log.Warn("Could not enumerate Terraria embedded libraries: " + ex.Message);
+                return;
             }
+
+            var indexed = 0;
+            foreach (var resourceName in resources
+                .Where(name =>
+                    name.StartsWith(EmbeddedPrefix, StringComparison.OrdinalIgnoreCase) &&
+                    name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase))
+            {
+                lock (_gate)
+                {
+                    if (_embeddedResources.ContainsKey(resourceName))
+                        continue;
+                }
+
+                try
+                {
+                    using (var stream = container.GetManifestResourceStream(resourceName))
+                    {
+                        if (stream == null)
+                            continue;
+
+                        using (var memory = new MemoryStream())
+                        {
+                            stream.CopyTo(memory);
+                            lock (_gate)
+                                _embeddedResources[resourceName] = memory.ToArray();
+                        }
+                    }
+
+                    indexed++;
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn("Could not index embedded library " + resourceName + ": " + ex.Message);
+                }
+            }
+
+            if (indexed > 0)
+                Log.Info("Indexed " + indexed + " Terraria embedded managed librar" + (indexed == 1 ? "y." : "ies."));
         }
 
         public IEnumerable<KeyValuePair<string, byte[]>> GetEmbeddedAssemblyImages()
         {
             lock (_gate)
             {
-                return _embeddedImages
+                return _embeddedResources
                     .Select(pair => new KeyValuePair<string, byte[]>(pair.Key, pair.Value))
                     .ToArray();
             }
@@ -185,6 +172,10 @@ namespace GLoader
 
             try
             {
+                var embedded = TryLoadEmbedded(requestedName);
+                if (embedded != null)
+                    return embedded;
+
                 var directories = new List<string>();
 
                 if (args.RequestingAssembly != null)
@@ -222,6 +213,33 @@ namespace GLoader
             {
                 lock (_gate)
                     _active.Remove(requestedName);
+            }
+        }
+
+        private Assembly TryLoadEmbedded(string requestedName)
+        {
+            KeyValuePair<string, byte[]> match;
+            lock (_gate)
+            {
+                var suffix = "." + requestedName + ".dll";
+                match = _embeddedResources
+                    .FirstOrDefault(pair =>
+                        pair.Key.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (string.IsNullOrEmpty(match.Key) || match.Value == null)
+                return null;
+
+            try
+            {
+                var assembly = Assembly.Load(match.Value);
+                Log.Info("Loaded Terraria embedded library: " + assembly.GetName().Name);
+                return assembly;
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("Could not load Terraria embedded library " + match.Key + ": " + ex.Message);
+                return null;
             }
         }
 

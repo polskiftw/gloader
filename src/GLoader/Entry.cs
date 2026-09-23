@@ -48,16 +48,9 @@ namespace GLoader
                     Directory.SetCurrentDirectory(root);
                     var gameAssembly = FindLoadedTerraria(options.DedicatedServer);
                     _resolver.PreferAssembly(gameAssembly);
+                    _resolver.IndexEmbeddedLibraries(gameAssembly);
 
                     Log.Info("Attached target: " + gameAssembly.FullName);
-
-                    if (!options.DedicatedServer)
-                    {
-                        _resolver.LoadEmbedded(
-                            gameAssembly,
-                            "ReLogic",
-                            "Terraria.Libraries.ReLogic.ReLogic.dll");
-                    }
 
                     if (!options.DisableMods)
                     {

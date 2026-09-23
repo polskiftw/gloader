@@ -48,7 +48,12 @@ namespace GLoader
                 .GetEmbeddedAssemblyImages()
                 .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
             {
-                if (paths.ContainsKey(embedded.Key))
+                var duplicatesDiskAssembly = paths.Keys.Any(name =>
+                    embedded.Key.EndsWith(
+                        "." + name + ".dll",
+                        StringComparison.OrdinalIgnoreCase));
+
+                if (duplicatesDiskAssembly)
                     continue;
 
                 try
