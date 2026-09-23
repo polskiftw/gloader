@@ -34,6 +34,39 @@ using (var assembly = AssemblyDefinition.ReadAssembly(
         field.FieldType.MetadataType == MetadataType.Boolean)
         ?? throw new InvalidOperationException("Terraria.Main.dedServ was not found.");
 
+    var enginePreloadField = mainType.Fields.SingleOrDefault(field =>
+        field.Name == "OnEnginePreload" &&
+        field.IsStatic &&
+        field.FieldType.FullName == "System.Action")
+        ?? throw new InvalidOperationException(
+            "Terraria.Main.OnEnginePreload backing field was not found.");
+
+    var isEnginePreloadedField = mainType.Fields.SingleOrDefault(field =>
+        field.Name == "IsEnginePreloaded" &&
+        field.IsStatic &&
+        field.FieldType.MetadataType == MetadataType.Boolean)
+        ?? throw new InvalidOperationException(
+            "Terraria.Main.IsEnginePreloaded was not found.");
+
+    var loadContent = mainType.Methods.SingleOrDefault(method =>
+        method.Name == "LoadContent" &&
+        !method.IsStatic &&
+        method.Parameters.Count == 0 &&
+        method.ReturnType.MetadataType == MetadataType.Void)
+        ?? throw new InvalidOperationException(
+            "Terraria.Main.LoadContent() was not found.");
+
+    var loadContentReturns = loadContent.Body.Instructions
+        .Where(instruction => instruction.OpCode == OpCodes.Ret)
+        .ToArray();
+
+    if (loadContentReturns.Length != 1)
+    {
+        throw new InvalidOperationException(
+            "Expected exactly one return in Terraria.Main.LoadContent(), found " +
+            loadContentReturns.Length + ".");
+    }
+
     var runGame = programType.Methods.SingleOrDefault(method =>
         method.Name == "RunGame" &&
         method.IsStatic &&
@@ -55,20 +88,51 @@ using (var assembly = AssemblyDefinition.ReadAssembly(
             socialInitializeCalls.Length + ".");
     }
 
-    var call = socialInitializeCalls[0];
-    var il = runGame.Body.GetILProcessor();
+    var socialCall = socialInitializeCalls[0];
+    var runGameIl = runGame.Body.GetILProcessor();
     var setServer = Instruction.Create(OpCodes.Ldc_I4_1);
     var storeServer = Instruction.Create(OpCodes.Stsfld, dedServField);
     var setClient = Instruction.Create(OpCodes.Ldc_I4_0);
     var storeClient = Instruction.Create(OpCodes.Stsfld, dedServField);
 
-    il.InsertBefore(call, setServer);
-    il.InsertBefore(call, storeServer);
-    il.InsertAfter(call, setClient);
-    il.InsertAfter(setClient, storeClient);
+    runGameIl.InsertBefore(socialCall, setServer);
+    runGameIl.InsertBefore(socialCall, storeServer);
+    runGameIl.InsertAfter(socialCall, setClient);
+    runGameIl.InsertAfter(setClient, storeClient);
+
+    // The headless Xvfb probe reaches Main.LoadContent() but FNA never advances
+    // to the first Main.Update() where Terraria normally raises OnEnginePreload.
+    // Raise that exact event at the end of LoadContent in the disposable probe
+    // copy so gloader is exercised at essentially the same post-graphics point.
+    var actionInvoke = module.ImportReference(
+        typeof(Action).GetMethod(nameof(Action.Invoke))
+        ?? throw new InvalidOperationException("System.Action.Invoke was not found."));
+
+    var loadContentIl = loadContent.Body.GetILProcessor();
+    var loadContentReturn = loadContentReturns[0];
+    var skipPreload = Instruction.Create(OpCodes.Nop);
+
+    loadContentIl.InsertBefore(loadContentReturn, Instruction.Create(OpCodes.Ldc_I4_1));
+    loadContentIl.InsertBefore(
+        loadContentReturn,
+        Instruction.Create(OpCodes.Stsfld, isEnginePreloadedField));
+    loadContentIl.InsertBefore(
+        loadContentReturn,
+        Instruction.Create(OpCodes.Ldsfld, enginePreloadField));
+    loadContentIl.InsertBefore(
+        loadContentReturn,
+        Instruction.Create(OpCodes.Brfalse_S, skipPreload));
+    loadContentIl.InsertBefore(
+        loadContentReturn,
+        Instruction.Create(OpCodes.Ldsfld, enginePreloadField));
+    loadContentIl.InsertBefore(
+        loadContentReturn,
+        Instruction.Create(OpCodes.Callvirt, actionInvoke));
+    loadContentIl.InsertBefore(loadContentReturn, skipPreload);
 
     assembly.Write(temporaryPath);
 }
 
 File.Move(temporaryPath, path, overwrite: true);
-Console.WriteLine("Patched probe Terraria.exe to bypass Steam SocialAPI only.");
+Console.WriteLine(
+    "Patched probe Terraria.exe for offline SocialAPI and deterministic engine preload.");
