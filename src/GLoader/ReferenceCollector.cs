@@ -13,13 +13,16 @@ namespace GLoader
             Assembly gameAssembly,
             string root,
             string dependencies,
-            string modDirectory,
-            AssemblyResolver resolver)
+            string modDirectory)
         {
             var paths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var inMemoryAssemblies = new Dictionary<string, Assembly>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
-                AddAssemblyLocation(paths, assembly, false);
+            {
+                if (!AddAssemblyLocation(paths, assembly, false))
+                    AddInMemoryAssembly(inMemoryAssemblies, assembly);
+            }
 
             AddManagedFiles(paths, root, false);
             AddManagedFiles(paths, dependencies, false);
@@ -27,6 +30,7 @@ namespace GLoader
 
             RemoveOtherTerrariaAssemblies(paths, gameAssembly);
             AddAssemblyLocation(paths, gameAssembly, true);
+            inMemoryAssemblies.Remove(gameAssembly.GetName().Name);
 
             var references = new List<MetadataReference>();
             foreach (var path in paths.Values.OrderBy(value => value, StringComparer.OrdinalIgnoreCase))
@@ -44,24 +48,23 @@ namespace GLoader
                 }
             }
 
-            foreach (var embedded in resolver
-                .GetEmbeddedAssemblyImages()
-                .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
+            foreach (var pair in inMemoryAssemblies.OrderBy(
+                pair => pair.Key,
+                StringComparer.OrdinalIgnoreCase))
             {
-                if (paths.ContainsKey(embedded.Key))
+                if (paths.ContainsKey(pair.Key))
                     continue;
 
                 try
                 {
-                    references.Add(MetadataReference.CreateFromImage(embedded.Value));
+#pragma warning disable 618
+                    references.Add(MetadataReference.CreateFromAssembly(pair.Value));
+#pragma warning restore 618
                 }
-                catch (BadImageFormatException)
+                catch (Exception ex)
                 {
-                }
-                catch (ArgumentException ex)
-                {
-                    Log.Warn("Could not use embedded compiler reference " +
-                        embedded.Key + ": " + ex.Message);
+                    Log.Warn("Could not use in-memory compiler reference " +
+                        pair.Key + ": " + ex.Message);
                 }
             }
 
@@ -97,7 +100,7 @@ namespace GLoader
                 AddManagedPath(paths, path, overwrite);
         }
 
-        private static void AddAssemblyLocation(
+        private static bool AddAssemblyLocation(
             IDictionary<string, string> paths,
             Assembly assembly,
             bool overwrite)
@@ -105,9 +108,29 @@ namespace GLoader
             try
             {
                 if (assembly == null || assembly.IsDynamic || string.IsNullOrWhiteSpace(assembly.Location))
-                    return;
+                    return false;
 
                 AddManagedPath(paths, assembly.Location, overwrite);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void AddInMemoryAssembly(
+            IDictionary<string, Assembly> assemblies,
+            Assembly assembly)
+        {
+            try
+            {
+                if (assembly == null || assembly.IsDynamic)
+                    return;
+
+                var name = assembly.GetName().Name;
+                if (!string.IsNullOrWhiteSpace(name) && !assemblies.ContainsKey(name))
+                    assemblies[name] = assembly;
             }
             catch
             {

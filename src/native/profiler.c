@@ -132,17 +132,34 @@ static void print_managed_exception(MonoObject *exception)
     api.free_memory(utf8);
 }
 
-static int is_target_assembly(MonoAssembly *assembly)
+static const char *assembly_simple_name(MonoAssembly *assembly)
 {
+    if (assembly == NULL)
+        return NULL;
+
     MonoAssemblyName *name = api.assembly_get_name(assembly);
     if (name == NULL)
-        return 0;
+        return NULL;
 
-    const char *simple_name = api.assembly_name_get_name(name);
+    return api.assembly_name_get_name(name);
+}
+
+static int is_attach_trigger(MonoAssembly *assembly)
+{
+    const char *simple_name = assembly_simple_name(assembly);
     if (simple_name == NULL)
         return 0;
 
-    return strcmp(simple_name, "Terraria") == 0 || strcmp(simple_name, "TerrariaServer") == 0;
+    const char *mode = getenv("GLOADER_MODE");
+    if (mode != NULL && strcmp(mode, "server") == 0)
+        return strcmp(simple_name, "TerrariaServer") == 0;
+
+    /*
+     * The client embeds ReLogic and installs its own resolver during startup.
+     * Waiting for ReLogic proves that Terraria's bootstrap has resolved its
+     * private managed libraries before GLoader reflects over game types.
+     */
+    return strcmp(simple_name, "ReLogic") == 0;
 }
 
 static void attach_loader(void)
@@ -207,7 +224,7 @@ static void on_assembly_loaded(MonoProfiler *profiler, MonoAssembly *assembly)
 {
     (void)profiler;
 
-    if (initialized || initializing || assembly == NULL || !is_target_assembly(assembly))
+    if (initialized || initializing || !is_attach_trigger(assembly))
         return;
 
     initializing = 1;
