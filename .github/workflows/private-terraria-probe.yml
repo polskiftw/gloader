@@ -96,6 +96,7 @@ jobs:
           rm -rf "$fixture"
           mkdir -p "$fixture"
           cp -a "$linux_dir/." "$fixture/"
+          chmod 0755 "$fixture/TerrariaServer.bin.x86_64"
           mkdir -p "$fixture/gdeps" "$fixture/gmods"
           cp -a dist/gdeps/. "$fixture/gdeps/"
 
