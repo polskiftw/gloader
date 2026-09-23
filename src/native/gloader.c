@@ -1,10 +1,7 @@
 #define _GNU_SOURCE
 
-#include <dirent.h>
-#include <dlfcn.h>
 #include <errno.h>
 #include <limits.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,50 +11,6 @@
 #ifndef PATH_MAX
 #define PATH_MAX 4096
 #endif
-
-typedef struct _MonoDomain MonoDomain;
-typedef struct _MonoAssembly MonoAssembly;
-typedef struct _MonoImage MonoImage;
-typedef struct _MonoClass MonoClass;
-typedef struct _MonoMethod MonoMethod;
-typedef struct _MonoObject MonoObject;
-typedef struct _MonoString MonoString;
-
-typedef void (*mono_config_parse_fn)(const char *);
-typedef void (*mono_set_dirs_fn)(const char *, const char *);
-typedef MonoDomain *(*mono_jit_init_version_fn)(const char *, const char *);
-typedef MonoAssembly *(*mono_domain_assembly_open_fn)(MonoDomain *, const char *);
-typedef MonoImage *(*mono_assembly_get_image_fn)(MonoAssembly *);
-typedef MonoClass *(*mono_class_from_name_fn)(MonoImage *, const char *, const char *);
-typedef MonoMethod *(*mono_class_get_method_from_name_fn)(MonoClass *, const char *, int);
-typedef MonoObject *(*mono_runtime_invoke_fn)(MonoMethod *, void *, void **, MonoObject **);
-typedef void *(*mono_object_unbox_fn)(MonoObject *);
-typedef MonoString *(*mono_object_to_string_fn)(MonoObject *, MonoObject **);
-typedef char *(*mono_string_to_utf8_fn)(MonoString *);
-typedef void (*mono_free_fn)(void *);
-typedef void (*mono_jit_cleanup_fn)(MonoDomain *);
-
-struct mono_api {
-    mono_config_parse_fn config_parse;
-    mono_set_dirs_fn set_dirs;
-    mono_jit_init_version_fn jit_init_version;
-    mono_domain_assembly_open_fn domain_assembly_open;
-    mono_assembly_get_image_fn assembly_get_image;
-    mono_class_from_name_fn class_from_name;
-    mono_class_get_method_from_name_fn class_get_method_from_name;
-    mono_runtime_invoke_fn runtime_invoke;
-    mono_object_unbox_fn object_unbox;
-    mono_object_to_string_fn object_to_string;
-    mono_string_to_utf8_fn string_to_utf8;
-    mono_free_fn free_memory;
-    mono_jit_cleanup_fn jit_cleanup;
-};
-
-static int is_directory(const char *path)
-{
-    struct stat info;
-    return stat(path, &info) == 0 && S_ISDIR(info.st_mode);
-}
 
 static int is_file(const char *path)
 {
@@ -97,281 +50,178 @@ static int get_executable_root(char *out, size_t size)
     return 1;
 }
 
-static int looks_like_mono_library(const char *name)
+static const char *base_name(const char *path)
 {
-    if (strncmp(name, "libmono", 7) != 0)
-        return 0;
-
-    return strstr(name, ".so") != NULL;
+    const char *slash = strrchr(path, '/');
+    return slash == NULL ? path : slash + 1;
 }
 
-static int find_mono_library_recursive(
-    const char *directory,
-    char *out,
-    size_t out_size,
-    int depth)
+static int is_client_command(const char *value)
 {
-    if (depth < 0)
-        return 0;
-
-    DIR *dir = opendir(directory);
-    if (dir == NULL)
-        return 0;
-
-    struct dirent *entry;
-    while ((entry = readdir(dir)) != NULL) {
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
-            continue;
-
-        char candidate[PATH_MAX];
-        if (!join_path(candidate, sizeof(candidate), directory, entry->d_name))
-            continue;
-
-        if (is_file(candidate) && looks_like_mono_library(entry->d_name)) {
-            if (snprintf(out, out_size, "%s", candidate) < (int)out_size) {
-                closedir(dir);
-                return 1;
-            }
-        }
-
-        if (depth > 0 && is_directory(candidate)) {
-            if (find_mono_library_recursive(candidate, out, out_size, depth - 1)) {
-                closedir(dir);
-                return 1;
-            }
-        }
-    }
-
-    closedir(dir);
-    return 0;
+    const char *name = base_name(value);
+    return strcmp(name, "Terraria") == 0 || strcmp(name, "Terraria.bin.x86_64") == 0;
 }
 
-static void *open_bundled_mono(const char *root, char *selected, size_t selected_size)
+static int is_server_command(const char *value)
 {
-    static const char *relative_candidates[] = {
-        "lib64/libmonosgen-2.0.so.1",
-        "lib64/libmonosgen-2.0.so",
-        "lib64/libmono-2.0.so.1",
-        "lib64/libmono-2.0.so",
-        "lib/libmonosgen-2.0.so.1",
-        "lib/libmonosgen-2.0.so",
-        "lib/libmono-2.0.so.1",
-        "lib/libmono-2.0.so"
-    };
-
-    for (size_t index = 0;
-         index < sizeof(relative_candidates) / sizeof(relative_candidates[0]);
-         index++) {
-        char candidate[PATH_MAX];
-        if (!join_path(candidate, sizeof(candidate), root, relative_candidates[index]))
-            continue;
-
-        if (!is_file(candidate))
-            continue;
-
-        void *handle = dlopen(candidate, RTLD_NOW | RTLD_GLOBAL);
-        if (handle != NULL) {
-            snprintf(selected, selected_size, "%s", candidate);
-            return handle;
-        }
-    }
-
-    const char *fallback_roots[] = { "lib64", "lib" };
-    for (size_t index = 0; index < 2; index++) {
-        char search_root[PATH_MAX];
-        if (!join_path(search_root, sizeof(search_root), root, fallback_roots[index]))
-            continue;
-
-        char candidate[PATH_MAX];
-        if (!find_mono_library_recursive(search_root, candidate, sizeof(candidate), 2))
-            continue;
-
-        void *handle = dlopen(candidate, RTLD_NOW | RTLD_GLOBAL);
-        if (handle != NULL) {
-            snprintf(selected, selected_size, "%s", candidate);
-            return handle;
-        }
-    }
-
-    fprintf(stderr,
-        "gloader: could not load Terraria's bundled Mono runtime.\n"
-        "Expected libmonosgen-2.0 or libmono-2.0 beneath %s/lib64 or %s/lib.\n",
-        root,
-        root);
-    return NULL;
+    const char *name = base_name(value);
+    return strcmp(name, "TerrariaServer") == 0 || strcmp(name, "TerrariaServer.bin.x86_64") == 0;
 }
 
-static int load_required_symbol(void *handle, const char *name, void *target, size_t target_size)
+static int is_terraria_command(const char *value)
 {
-    dlerror();
-    void *symbol = dlsym(handle, name);
-    const char *error = dlerror();
+    return value != NULL && (is_client_command(value) || is_server_command(value));
+}
 
-    if (error != NULL || symbol == NULL) {
-        fprintf(stderr, "gloader: bundled Mono is missing required symbol %s\n", name);
+static void print_help(void)
+{
+    puts("gloader - native Linux/Mono Terraria source-mod loader");
+    puts("");
+    puts("Steam launch option:");
+    puts("  ./gloader %command%");
+    puts("");
+    puts("Options:");
+    puts("  --vanilla, --no-mods   Launch Terraria without injecting gloader");
+    puts("  --server               Launch TerrariaServer through gloader");
+    puts("  --help, -h             Show this help");
+    puts("  --                     Pass all remaining arguments to Terraria");
+}
+
+static int is_gloader_profile(const char *token, size_t length)
+{
+    static const char prefix[] = "--profile=gloader";
+    const size_t prefix_length = sizeof(prefix) - 1;
+
+    if (length < prefix_length || strncmp(token, prefix, prefix_length) != 0)
         return 0;
-    }
 
-    if (target_size != sizeof(symbol)) {
-        fprintf(stderr, "gloader: unsupported function-pointer ABI for %s\n", name);
-        return 0;
-    }
-
-    memcpy(target, &symbol, sizeof(symbol));
-    return 1;
+    return length == prefix_length || token[prefix_length] == ':';
 }
 
-static void load_optional_symbol(void *handle, const char *name, void *target, size_t target_size)
+static char *build_mono_options(int inject_gloader)
 {
-    dlerror();
-    void *symbol = dlsym(handle, name);
-    if (dlerror() != NULL || symbol == NULL || target_size != sizeof(symbol))
-        return;
+    const char *existing = getenv("MONO_BUNDLED_OPTIONS");
+    const size_t existing_length = existing == NULL ? 0 : strlen(existing);
+    static const char profile[] = "--profile=gloader";
+    const size_t capacity = existing_length + sizeof(profile) + 2;
+    char *result = (char *)calloc(capacity, 1);
 
-    memcpy(target, &symbol, sizeof(symbol));
-}
-
-static int load_mono_api(void *handle, struct mono_api *api)
-{
-    memset(api, 0, sizeof(*api));
-
-    if (!load_required_symbol(handle, "mono_config_parse", &api->config_parse, sizeof(api->config_parse)) ||
-        !load_required_symbol(handle, "mono_jit_init_version", &api->jit_init_version, sizeof(api->jit_init_version)) ||
-        !load_required_symbol(handle, "mono_domain_assembly_open", &api->domain_assembly_open, sizeof(api->domain_assembly_open)) ||
-        !load_required_symbol(handle, "mono_assembly_get_image", &api->assembly_get_image, sizeof(api->assembly_get_image)) ||
-        !load_required_symbol(handle, "mono_class_from_name", &api->class_from_name, sizeof(api->class_from_name)) ||
-        !load_required_symbol(handle, "mono_class_get_method_from_name", &api->class_get_method_from_name, sizeof(api->class_get_method_from_name)) ||
-        !load_required_symbol(handle, "mono_runtime_invoke", &api->runtime_invoke, sizeof(api->runtime_invoke)) ||
-        !load_required_symbol(handle, "mono_object_unbox", &api->object_unbox, sizeof(api->object_unbox)) ||
-        !load_required_symbol(handle, "mono_object_to_string", &api->object_to_string, sizeof(api->object_to_string)) ||
-        !load_required_symbol(handle, "mono_string_to_utf8", &api->string_to_utf8, sizeof(api->string_to_utf8)) ||
-        !load_required_symbol(handle, "mono_jit_cleanup", &api->jit_cleanup, sizeof(api->jit_cleanup))) {
-        return 0;
-    }
-
-    load_optional_symbol(handle, "mono_set_dirs", &api->set_dirs, sizeof(api->set_dirs));
-    load_optional_symbol(handle, "mono_free", &api->free_memory, sizeof(api->free_memory));
-    return 1;
-}
-
-static char *encode_arguments(int argc, char **argv)
-{
-    size_t length = 0;
-
-    for (int index = 1; index < argc; index++) {
-        if (index > 1)
-            length++;
-        length += strlen(argv[index]) * 2;
-    }
-
-    char *encoded = (char *)malloc(length + 1);
-    if (encoded == NULL)
+    if (result == NULL)
         return NULL;
 
-    static const char hex[] = "0123456789abcdef";
-    char *write = encoded;
+    size_t written = 0;
+    const char *cursor = existing;
 
-    for (int index = 1; index < argc; index++) {
-        if (index > 1)
-            *write++ = ',';
+    while (cursor != NULL && *cursor != '\0') {
+        while (*cursor == ' ')
+            cursor++;
+        if (*cursor == '\0')
+            break;
 
-        const unsigned char *input = (const unsigned char *)argv[index];
-        while (*input != '\0') {
-            *write++ = hex[*input >> 4];
-            *write++ = hex[*input & 0x0f];
-            input++;
+        const char *end = strchr(cursor, ' ');
+        if (end == NULL)
+            end = cursor + strlen(cursor);
+
+        const size_t length = (size_t)(end - cursor);
+        if (length > 0 && !is_gloader_profile(cursor, length)) {
+            if (written > 0)
+                result[written++] = ' ';
+            memcpy(result + written, cursor, length);
+            written += length;
+            result[written] = '\0';
         }
+
+        cursor = *end == '\0' ? end : end + 1;
     }
 
-    *write = '\0';
-    return encoded;
+    if (inject_gloader) {
+        if (written > 0)
+            result[written++] = ' ';
+        memcpy(result + written, profile, sizeof(profile));
+    }
+
+    return result;
 }
 
-static void configure_mono_directories(const char *root, const struct mono_api *api)
-{
-    if (api->set_dirs == NULL)
-        return;
-
-    char candidate[PATH_MAX];
-    char mono_dir[PATH_MAX];
-
-    if (join_path(candidate, sizeof(candidate), root, "lib64") &&
-        join_path(mono_dir, sizeof(mono_dir), candidate, "mono") &&
-        is_directory(mono_dir)) {
-        api->set_dirs(candidate, root);
-        return;
-    }
-
-    if (join_path(candidate, sizeof(candidate), root, "lib") &&
-        join_path(mono_dir, sizeof(mono_dir), candidate, "mono") &&
-        is_directory(mono_dir)) {
-        api->set_dirs(candidate, root);
-    }
-}
-
-static int set_loader_environment(const char *root, int argc, char **argv)
+static int prepend_library_path(const char *root)
 {
     char dependencies[PATH_MAX];
     if (!join_path(dependencies, sizeof(dependencies), root, "gdeps"))
         return 0;
 
-    const char *existing = getenv("MONO_PATH");
-    size_t mono_path_length = strlen(root) + strlen(dependencies) + 2;
-    if (existing != NULL && *existing != '\0')
-        mono_path_length += strlen(existing) + 1;
-
-    char *mono_path = (char *)malloc(mono_path_length);
-    if (mono_path == NULL)
+    const char *existing = getenv("LD_LIBRARY_PATH");
+    const size_t length = strlen(dependencies) +
+        ((existing != NULL && *existing != '\0') ? strlen(existing) + 2 : 1);
+    char *value = (char *)malloc(length);
+    if (value == NULL)
         return 0;
 
     if (existing != NULL && *existing != '\0')
-        snprintf(mono_path, mono_path_length, "%s:%s:%s", root, dependencies, existing);
+        snprintf(value, length, "%s:%s", dependencies, existing);
     else
-        snprintf(mono_path, mono_path_length, "%s:%s", root, dependencies);
+        snprintf(value, length, "%s", dependencies);
 
-    char *encoded = encode_arguments(argc, argv);
-    if (encoded == NULL) {
-        free(mono_path);
-        return 0;
-    }
-
-    char argument_count[32];
-    snprintf(argument_count, sizeof(argument_count), "%d", argc > 0 ? argc - 1 : 0);
-
-    const int ok =
-        setenv("GLOADER_ROOT", root, 1) == 0 &&
-        setenv("GLOADER_ARGC", argument_count, 1) == 0 &&
-        setenv("GLOADER_ARGV_HEX", encoded, 1) == 0 &&
-        setenv("MONO_PATH", mono_path, 1) == 0;
-
-    free(encoded);
-    free(mono_path);
+    const int ok = setenv("LD_LIBRARY_PATH", value, 1) == 0;
+    free(value);
     return ok;
 }
 
-static void print_managed_exception(const struct mono_api *api, MonoObject *exception)
+static int set_loader_environment(const char *root, int dedicated_server, int disable_mods)
 {
-    if (exception == NULL)
-        return;
+    char *mono_options = build_mono_options(!disable_mods);
+    if (mono_options == NULL)
+        return 0;
 
-    MonoObject *format_exception = NULL;
-    MonoString *text = api->object_to_string(exception, &format_exception);
+    int ok =
+        setenv("GLOADER_ROOT", root, 1) == 0 &&
+        setenv("GLOADER_MODE", dedicated_server ? "server" : "client", 1) == 0 &&
+        setenv("GLOADER_DISABLE_MODS", disable_mods ? "1" : "0", 1) == 0 &&
+        setenv("MONO_IOMAP", "all", 1) == 0 &&
+        prepend_library_path(root);
 
-    if (text == NULL || format_exception != NULL) {
-        fprintf(stderr, "gloader: managed loader threw an exception (formatting failed)\n");
-        return;
+    if (ok) {
+        if (*mono_options != '\0')
+            ok = setenv("MONO_BUNDLED_OPTIONS", mono_options, 1) == 0;
+        else
+            ok = unsetenv("MONO_BUNDLED_OPTIONS") == 0;
     }
 
-    char *utf8 = api->string_to_utf8(text);
-    if (utf8 == NULL) {
-        fprintf(stderr, "gloader: managed loader threw an exception\n");
-        return;
+    free(mono_options);
+    return ok;
+}
+
+static int resolve_command_path(
+    char *out,
+    size_t size,
+    const char *root,
+    const char *requested,
+    int dedicated_server)
+{
+    const char *fallback = dedicated_server ? "TerrariaServer" : "Terraria";
+    const char *selected = requested;
+
+    if (dedicated_server && selected != NULL && is_client_command(selected))
+        selected = NULL;
+
+    if (selected == NULL)
+        selected = fallback;
+
+    if (selected[0] == '/') {
+        if (snprintf(out, size, "%s", selected) >= (int)size)
+            return 0;
+    } else {
+        while (selected[0] == '.' && selected[1] == '/')
+            selected += 2;
+        if (!join_path(out, size, root, selected))
+            return 0;
     }
 
-    fprintf(stderr, "gloader managed exception:\n%s\n", utf8);
+    if (!is_file(out)) {
+        fprintf(stderr, "gloader: Terraria launcher not found: %s\n", out);
+        return 0;
+    }
 
-    if (api->free_memory != NULL)
-        api->free_memory(utf8);
+    return 1;
 }
 
 int main(int argc, char **argv)
@@ -385,79 +235,71 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    if (!set_loader_environment(root, argc, argv)) {
-        fprintf(stderr, "gloader: could not prepare loader environment\n");
+    int disable_mods = 0;
+    int dedicated_server = 0;
+    int show_help = 0;
+    int index = 1;
+
+    while (index < argc) {
+        const char *argument = argv[index];
+
+        if (strcmp(argument, "--") == 0) {
+            index++;
+            break;
+        }
+        if (strcmp(argument, "--vanilla") == 0 || strcmp(argument, "--no-mods") == 0) {
+            disable_mods = 1;
+            index++;
+            continue;
+        }
+        if (strcmp(argument, "--server") == 0) {
+            dedicated_server = 1;
+            index++;
+            continue;
+        }
+        if (strcmp(argument, "--help") == 0 || strcmp(argument, "-h") == 0) {
+            show_help = 1;
+            index++;
+            continue;
+        }
+        break;
+    }
+
+    if (show_help) {
+        print_help();
+        return 0;
+    }
+
+    const char *requested_command = NULL;
+    if (index < argc && is_terraria_command(argv[index])) {
+        requested_command = argv[index++];
+        if (is_server_command(requested_command))
+            dedicated_server = 1;
+    }
+
+    char command[PATH_MAX];
+    if (!resolve_command_path(command, sizeof(command), root, requested_command, dedicated_server))
+        return 1;
+
+    if (!set_loader_environment(root, dedicated_server, disable_mods)) {
+        fprintf(stderr, "gloader: could not prepare Terraria launch environment\n");
         return 1;
     }
 
-    char mono_library[PATH_MAX];
-    void *mono_handle = open_bundled_mono(root, mono_library, sizeof(mono_library));
-    if (mono_handle == NULL)
-        return 1;
-
-    struct mono_api api;
-    if (!load_mono_api(mono_handle, &api))
-        return 1;
-
-    configure_mono_directories(root, &api);
-
-    char mono_config[PATH_MAX];
-    if (join_path(mono_config, sizeof(mono_config), root, "monoconfig") && is_file(mono_config))
-        api.config_parse(mono_config);
-    else
-        api.config_parse(NULL);
-
-    MonoDomain *domain = api.jit_init_version("gloader", "v4.0.30319");
-    if (domain == NULL) {
-        fprintf(stderr, "gloader: Terraria's bundled Mono runtime could not initialize\n");
+    const int game_argc = argc - index;
+    char **child_argv = (char **)calloc((size_t)game_argc + 2, sizeof(char *));
+    if (child_argv == NULL) {
+        fprintf(stderr, "gloader: out of memory while preparing Terraria arguments\n");
         return 1;
     }
 
-    char managed_loader[PATH_MAX];
-    if (!join_path(managed_loader, sizeof(managed_loader), root, "gdeps/GLoader.dll")) {
-        fprintf(stderr, "gloader: managed loader path is too long\n");
-        api.jit_cleanup(domain);
-        return 1;
-    }
+    child_argv[0] = command;
+    for (int game_index = 0; game_index < game_argc; game_index++)
+        child_argv[game_index + 1] = argv[index + game_index];
+    child_argv[game_argc + 1] = NULL;
 
-    MonoAssembly *assembly = api.domain_assembly_open(domain, managed_loader);
-    if (assembly == NULL) {
-        fprintf(stderr, "gloader: could not load %s\n", managed_loader);
-        api.jit_cleanup(domain);
-        return 1;
-    }
-
-    MonoImage *image = api.assembly_get_image(assembly);
-    MonoClass *entry_class = api.class_from_name(image, "GLoader", "Entry");
-    if (entry_class == NULL) {
-        fprintf(stderr, "gloader: GLoader.Entry was not found in %s\n", managed_loader);
-        api.jit_cleanup(domain);
-        return 1;
-    }
-
-    MonoMethod *run = api.class_get_method_from_name(entry_class, "Run", 0);
-    if (run == NULL) {
-        fprintf(stderr, "gloader: GLoader.Entry.Run() was not found\n");
-        api.jit_cleanup(domain);
-        return 1;
-    }
-
-    MonoObject *exception = NULL;
-    MonoObject *result = api.runtime_invoke(run, NULL, NULL, &exception);
-
-    if (exception != NULL) {
-        print_managed_exception(&api, exception);
-        api.jit_cleanup(domain);
-        return 1;
-    }
-
-    if (result == NULL) {
-        fprintf(stderr, "gloader: managed loader returned no exit status\n");
-        api.jit_cleanup(domain);
-        return 1;
-    }
-
-    int exit_code = *(int *)api.object_unbox(result);
-    api.jit_cleanup(domain);
-    return exit_code;
+    execv(command, child_argv);
+    fprintf(stderr, "gloader: could not launch %s: %s\n", command, strerror(errno));
+    free(child_argv);
+    return 1;
 }
