@@ -26,9 +26,10 @@
                       PrivateAssets="All"
                       GeneratePathProperty="true"
                       ExcludeAssets="build;buildTransitive;analyzers" />
-    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies"
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net472"
                       Version="1.0.3"
-                      PrivateAssets="All" />
+                      PrivateAssets="All"
+                      GeneratePathProperty="true" />
   </ItemGroup>
 
   <ItemGroup>
@@ -49,4 +50,13 @@
       <Private>true</Private>
     </Reference>
   </ItemGroup>
+
+  <Target Name="CopyTerrariaMonoFacades" AfterTargets="Build">
+    <ItemGroup>
+      <TerrariaMonoFacade Include="$(PkgMicrosoft_NETFramework_ReferenceAssemblies_net472)/build/.NETFramework/v4.7.2/Facades/*.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(TerrariaMonoFacade)"
+          DestinationFolder="$(OutDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
 </Project>
