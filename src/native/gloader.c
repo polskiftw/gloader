@@ -35,7 +35,7 @@ typedef void *(*mono_object_unbox_fn)(MonoObject *);
 typedef MonoString *(*mono_object_to_string_fn)(MonoObject *, MonoObject **);
 typedef char *(*mono_string_to_utf8_fn)(MonoString *);
 typedef void (*mono_free_fn)(void *);
-typedef int (*mono_jit_cleanup_fn)(MonoDomain *);
+typedef void (*mono_jit_cleanup_fn)(MonoDomain *);
 
 struct mono_api {
     mono_config_parse_fn config_parse;
