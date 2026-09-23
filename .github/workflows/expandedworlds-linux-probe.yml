@@ -1,0 +1,101 @@
+name: ExpandedWorlds Linux probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/expandedworlds-linux-probe.yml"
+      - "gmods/ExpandedWorlds/**"
+      - "src/**"
+      - "third_party/mono-facades/**"
+      - "build.sh"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out gloader
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build Linux gloader
+        run: ./build.sh
+
+      - name: Download exact Steam Terraria 1.4.5.8 Linux sample
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const response = await github.request('GET /repos/{owner}/{repo}/releases/assets/{asset_id}', {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              asset_id: 582791397,
+              headers: { accept: 'application/octet-stream' }
+            });
+            const bytes = Buffer.isBuffer(response.data)
+              ? response.data
+              : Buffer.from(response.data);
+            fs.writeFileSync('Terraria.Linux.tar.gz', bytes);
+
+      - name: Prepare exact client fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(sha256sum Terraria.Linux.tar.gz | cut -d' ' -f1)" = "e040584fc536c2c415dd8b8d6ab3cbcb60882f13da46fde0638e06b6de646860"
+
+          mkdir input
+          tar -xzf Terraria.Linux.tar.gz -C input
+
+          client_bin="$(find input -maxdepth 4 -type f -name Terraria.bin.x86_64 -print -quit)"
+          test -n "$client_bin"
+          steam_root="$(dirname "$client_bin")"
+          fixture="$RUNNER_TEMP/expandedworlds-client"
+
+          rm -rf "$fixture"
+          mkdir -p "$fixture/gdeps" "$fixture/gmods"
+          cp -a "$steam_root/." "$fixture/"
+          cp dist/gloader "$fixture/gloader"
+          rm -rf "$fixture/gdeps" "$fixture/gmods"
+          mkdir -p "$fixture/gdeps" "$fixture/gmods"
+          cp -a dist/gdeps/. "$fixture/gdeps/"
+          cp -a gmods/ExpandedWorlds "$fixture/gmods/ExpandedWorlds"
+
+          echo "$fixture" > fixture-path.txt
+
+      - name: Load ExpandedWorlds in exact Steam client
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture="$(cat fixture-path.txt)"
+
+          set +e
+          (
+            cd "$fixture"
+            SDL_AUDIODRIVER=dummy timeout 30s ./gloader ./Terraria
+          ) > "$fixture/client.out" 2>&1
+          status=$?
+          set -e
+
+          echo "Client process status: $status"
+          echo "=== PROCESS OUTPUT ==="
+          tail -250 "$fixture/client.out" || true
+
+          echo "=== GLOADER LOG ==="
+          test -f "$fixture/gdeps/logs/gloader-client.log"
+          cat "$fixture/gdeps/logs/gloader-client.log"
+
+          grep -q 'Attached target: Terraria, Version=1.4.5.8' "$fixture/gdeps/logs/gloader-client.log"
+          grep -q 'Compiling mod: ExpandedWorlds' "$fixture/gdeps/logs/gloader-client.log"
+          grep -q 'Applying .* Harmony patch class(es) for ExpandedWorlds' "$fixture/gdeps/logs/gloader-client.log"
+          grep -q 'Loaded mod: ExpandedWorlds' "$fixture/gdeps/logs/gloader-client.log"
+          grep -q 'gloader initialization complete; returning control to Terraria' "$fixture/gdeps/logs/gloader-client.log"
+          grep -q 'SDL_Init failed: No available video device' "$fixture/client.out"
