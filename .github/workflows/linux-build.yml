@@ -183,9 +183,24 @@ jobs:
           grep -q 'Loaded Terraria embedded library: ReLogic' "$fixture/gdeps/logs/gloader-client.log"
           grep -q 'returning control to Terraria' "$fixture/gdeps/logs/gloader-client.log"
 
+      - name: Package Linux build preserving Unix permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -C dist -czf gloader-linux.tar.gz .
+
+          verify="$RUNNER_TEMP/gloader-artifact-verify"
+          rm -rf "$verify"
+          mkdir -p "$verify"
+          tar -xzf gloader-linux.tar.gz -C "$verify"
+
+          test -x "$verify/gloader"
+          test -x "$verify/gdeps/libmono-profiler-gloader.so"
+          test -f "$verify/gdeps/GLoader.dll"
+
       - name: Upload Linux package
         uses: actions/upload-artifact@v4
         with:
           name: gloader-linux
-          path: dist/
+          path: gloader-linux.tar.gz
           if-no-files-found: error
