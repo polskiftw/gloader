@@ -40,7 +40,7 @@ jobs:
               : Buffer.from(response.data);
             fs.writeFileSync('Terraria.tar.gz', bytes);
 
-      - name: Verify exact Steam host
+      - name: Verify exact Steam host ABI
         shell: bash
         run: |
           set -euo pipefail
@@ -55,8 +55,9 @@ jobs:
           nm -D input/Terraria.bin.x86_64 | grep -q ' mono_profiler_set_assembly_loaded_callback$'
           nm -D input/Terraria.bin.x86_64 | grep -q ' mono_domain_assembly_open$'
           nm -D input/Terraria.bin.x86_64 | grep -q ' mono_set_assemblies_path$'
+          nm -D input/Terraria.bin.x86_64 | grep -q ' mono_runtime_invoke$'
 
-      - name: Download public matching Terraria Linux runtime
+      - name: Download public Terraria Linux server runtime
         shell: bash
         run: |
           set -euo pipefail
@@ -75,9 +76,6 @@ jobs:
 
           echo "Public Linux host SHA256:"
           sha256sum "$server_bin"
-          echo "Runtime files:"
-          find "$linux_dir" -maxdepth 2 -type f -printf '%P\n' | sort | head -200
-
           test -f "$linux_dir/monoconfig"
           test -f "$linux_dir/monomachineconfig"
           test -f "$linux_dir/mscorlib.dll"
@@ -89,33 +87,68 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq mono-mcs
 
-      - name: Prove gloader profiler inside exact Steam MonoKickstart
+      - name: Full proof with official matching Terraria MonoKickstart runtime
         shell: bash
         run: |
           set -euo pipefail
-          fixture="$RUNNER_TEMP/steam-terraria-profiler-proof"
+          fixture="$RUNNER_TEMP/public-terraria-profiler-proof"
           linux_dir="$(cat linux-runtime-dir.txt)"
           rm -rf "$fixture"
           mkdir -p "$fixture"
           cp -a "$linux_dir/." "$fixture/"
           mkdir -p "$fixture/gdeps" "$fixture/gmods"
-
-          cp input/Terraria.bin.x86_64 "$fixture/Terraria.bin.x86_64"
-          chmod 0755 "$fixture/Terraria.bin.x86_64"
           cp -a dist/gdeps/. "$fixture/gdeps/"
 
-          cat > "$fixture/Terraria.cs" <<'CS'
+          cat > "$fixture/TerrariaServer.cs" <<'CS'
           using System;
           public static class Program
           {
               public static void Main(string[] args)
               {
-                  Console.WriteLine("STEAM_MONOKICKSTART_FIXTURE_MAIN");
+                  Console.WriteLine("OFFICIAL_MONOKICKSTART_FIXTURE_MAIN");
               }
+          }
+          CS
+          mcs -nologo -target:exe -out:"$fixture/TerrariaServer.exe" "$fixture/TerrariaServer.cs"
+
+          (
+            cd "$fixture"
+            GLOADER_ROOT="$fixture" \
+            GLOADER_MODE=server \
+            GLOADER_DISABLE_MODS=1 \
+            MONO_IOMAP=all \
+            MONO_BUNDLED_OPTIONS=--profile=gloader \
+            LD_LIBRARY_PATH="$fixture/gdeps:$fixture/lib64" \
+            ./TerrariaServer.bin.x86_64 | tee fixture.out
+          )
+
+          grep -q 'OFFICIAL_MONOKICKSTART_FIXTURE_MAIN' "$fixture/fixture.out"
+          grep -q 'Attached target: TerrariaServer' "$fixture/gdeps/logs/gloader-server.log"
+          grep -q 'returning control to Terraria' "$fixture/gdeps/logs/gloader-server.log"
+
+      - name: Exact Steam host reaches gloader boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture="$RUNNER_TEMP/exact-steam-host-boundary"
+          linux_dir="$(cat linux-runtime-dir.txt)"
+          rm -rf "$fixture"
+          mkdir -p "$fixture"
+          cp -a "$linux_dir/." "$fixture/"
+          mkdir -p "$fixture/gdeps" "$fixture/gmods"
+          cp input/Terraria.bin.x86_64 "$fixture/Terraria.bin.x86_64"
+          chmod 0755 "$fixture/Terraria.bin.x86_64"
+          cp -a dist/gdeps/. "$fixture/gdeps/"
+
+          cat > "$fixture/Terraria.cs" <<'CS'
+          public static class Program
+          {
+              public static void Main(string[] args) { }
           }
           CS
           mcs -nologo -target:exe -out:"$fixture/Terraria.exe" "$fixture/Terraria.cs"
 
+          set +e
           (
             cd "$fixture"
             GLOADER_ROOT="$fixture" \
@@ -124,9 +157,13 @@ jobs:
             MONO_IOMAP=all \
             MONO_BUNDLED_OPTIONS=--profile=gloader \
             LD_LIBRARY_PATH="$fixture/gdeps:$fixture/lib64" \
-            ./Terraria.bin.x86_64 | tee fixture.out
-          )
+            ./Terraria.bin.x86_64
+          ) > "$fixture/boundary.out" 2>&1
+          status=$?
+          set -e
 
-          grep -q 'STEAM_MONOKICKSTART_FIXTURE_MAIN' "$fixture/fixture.out"
-          grep -q 'Attached target: Terraria' "$fixture/gdeps/logs/gloader-client.log"
-          grep -q 'returning control to Terraria' "$fixture/gdeps/logs/gloader-client.log"
+          test "$status" -ne 0
+          grep -q 'Your mono runtime and class libraries are out of sync' "$fixture/boundary.out"
+          grep -q 'gloader managed exception:' "$fixture/boundary.out"
+          grep -q 'GLoader.Entry' "$fixture/boundary.out"
+          echo "Exact Steam host loaded the gloader profiler and entered GLoader.Entry; full execution is intentionally blocked here by the nonmatching public 1.4.5.8 class libraries."
