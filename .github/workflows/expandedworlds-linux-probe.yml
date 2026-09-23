@@ -30,6 +30,13 @@ jobs:
       - name: Build Linux gloader
         run: ./build.sh
 
+      - name: Install virtual display
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb xauth
+
       - name: Download exact Steam Terraria 1.4.5.8 Linux sample
         uses: actions/github-script@v7
         with:
@@ -80,7 +87,7 @@ jobs:
           set +e
           (
             cd "$fixture"
-            SDL_AUDIODRIVER=dummy timeout 30s ./gloader ./Terraria
+            xvfb-run -a env               SDL_AUDIODRIVER=dummy               LIBGL_ALWAYS_SOFTWARE=1               timeout 30s ./gloader ./Terraria
           ) > "$fixture/client.out" 2>&1
           status=$?
           set -e
@@ -93,9 +100,14 @@ jobs:
           test -f "$fixture/gdeps/logs/gloader-client.log"
           cat "$fixture/gdeps/logs/gloader-client.log"
 
+          test "$status" -eq 124
           grep -q 'Attached target: Terraria, Version=1.4.5.8' "$fixture/gdeps/logs/gloader-client.log"
+          grep -q 'source mods armed for Main.OnEnginePreload' "$fixture/gdeps/logs/gloader-client.log"
+          grep -q 'Terraria mod-safe startup point reached; loading source mods' "$fixture/gdeps/logs/gloader-client.log"
           grep -q 'Compiling mod: ExpandedWorlds' "$fixture/gdeps/logs/gloader-client.log"
           grep -q 'Applying .* Harmony patch class(es) for ExpandedWorlds' "$fixture/gdeps/logs/gloader-client.log"
           grep -q 'Loaded mod: ExpandedWorlds' "$fixture/gdeps/logs/gloader-client.log"
+          test "$(grep -c 'Patched class:' "$fixture/gdeps/logs/gloader-client.log")" -eq 37
           grep -q 'gloader initialization complete; returning control to Terraria' "$fixture/gdeps/logs/gloader-client.log"
-          grep -q 'SDL_Init failed: No available video device' "$fixture/client.out"
+          ! grep -q 'Mod failed: ExpandedWorlds' "$fixture/gdeps/logs/gloader-client.log"
+          ! grep -q 'FATAL UNHANDLED EXCEPTION' "$fixture/client.out"
