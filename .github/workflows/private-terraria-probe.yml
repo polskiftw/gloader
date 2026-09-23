@@ -24,7 +24,7 @@ jobs:
       - name: Build current Linux gloader
         run: ./build.sh
 
-      - name: Download private Steam Terraria sample
+      - name: Download private full Steam Terraria sample
         uses: actions/github-script@v7
         with:
           script: |
@@ -32,122 +32,163 @@ jobs:
             const response = await github.request('GET /repos/{owner}/{repo}/releases/assets/{asset_id}', {
               owner: context.repo.owner,
               repo: context.repo.repo,
-              asset_id: 582741513,
+              asset_id: 582791397,
               headers: { accept: 'application/octet-stream' }
             });
             const bytes = Buffer.isBuffer(response.data)
               ? response.data
               : Buffer.from(response.data);
-            fs.writeFileSync('Terraria.tar.gz', bytes);
+            fs.writeFileSync('Terraria.Linux.tar.gz', bytes);
 
-      - name: Verify exact Steam host ABI
+      - name: Inspect exact Steam runtime
         shell: bash
         run: |
           set -euo pipefail
-          test "$(sha256sum Terraria.tar.gz | cut -d' ' -f1)" = "c973651f7eea527749be6ba92e4aced3ee61b514dad1a35c7f85163a04a28ec0"
+          test "$(sha256sum Terraria.Linux.tar.gz | cut -d' ' -f1)" = "e040584fc536c2c415dd8b8d6ab3cbcb60882f13da46fde0638e06b6de646860"
+
           mkdir input
-          tar -xzf Terraria.tar.gz -C input
+          tar -xzf Terraria.Linux.tar.gz -C input
 
-          test "$(sha256sum input/Terraria.bin.x86_64 | cut -d' ' -f1)" = "07ac140a3c0a2513d20bc3008c93f5cf464ea9f1ab68d0e2084c58a67a10f159"
-          test "$(sha256sum input/TerrariaServer.bin.x86_64 | cut -d' ' -f1)" = "07ac140a3c0a2513d20bc3008c93f5cf464ea9f1ab68d0e2084c58a67a10f159"
+          client_bin="$(find input -maxdepth 4 -type f -name Terraria.bin.x86_64 -print -quit)"
+          test -n "$client_bin"
+          steam_root="$(dirname "$client_bin")"
+          echo "$steam_root" > steam-root.txt
 
-          nm -D input/Terraria.bin.x86_64 | grep -q ' mono_profiler_create$'
-          nm -D input/Terraria.bin.x86_64 | grep -q ' mono_profiler_set_assembly_loaded_callback$'
-          nm -D input/Terraria.bin.x86_64 | grep -q ' mono_domain_assembly_open$'
-          nm -D input/Terraria.bin.x86_64 | grep -q ' mono_set_assemblies_path$'
-          nm -D input/Terraria.bin.x86_64 | grep -q ' mono_runtime_invoke$'
+          echo "=== STEAM ROOT ==="
+          echo "$steam_root"
+          echo
+          echo "=== TOP-LEVEL RUNTIME FILES ==="
+          find "$steam_root" -maxdepth 1 -type f -printf '%f\t%s bytes\n' | sort
+          echo
+          echo "=== LIB64 FILES ==="
+          if [ -d "$steam_root/lib64" ]; then
+            find "$steam_root/lib64" -maxdepth 1 -type f -printf '%f\t%s bytes\n' | sort
+          fi
+          echo
+          echo "=== CLIENT LAUNCH SCRIPT ==="
+          sed -n '1,120p' "$steam_root/Terraria"
+          echo
+          echo "=== SERVER LAUNCH SCRIPT ==="
+          sed -n '1,120p' "$steam_root/TerrariaServer"
 
-      - name: Download public Terraria Linux server runtime
+          for required in \
+            Terraria Terraria.bin.x86_64 Terraria.exe \
+            TerrariaServer TerrariaServer.bin.x86_64 TerrariaServer.exe \
+            monoconfig monomachineconfig mscorlib.dll System.Core.dll FNA.dll ReLogic.dll; do
+            test -f "$steam_root/$required"
+          done
+          test -d "$steam_root/lib64"
+
+          echo
+          echo "=== HOST HASHES ==="
+          sha256sum "$steam_root/Terraria.bin.x86_64" "$steam_root/TerrariaServer.bin.x86_64"
+          cmp -s "$steam_root/Terraria.bin.x86_64" "$steam_root/TerrariaServer.bin.x86_64"
+
+          echo
+          echo "=== HOST ELF ABI ==="
+          file "$steam_root/Terraria.bin.x86_64"
+          readelf -h "$steam_root/Terraria.bin.x86_64" | grep -E 'Class:|Type:|Machine:|Entry point'
+          readelf -d "$steam_root/Terraria.bin.x86_64" | grep -E 'NEEDED|RPATH|RUNPATH'
+
+          echo
+          echo "=== REQUIRED EMBEDDED MONO EXPORTS ==="
+          for symbol in \
+            mono_profiler_create \
+            mono_profiler_set_assembly_loaded_callback \
+            mono_get_root_domain \
+            mono_domain_assembly_open \
+            mono_assembly_get_name \
+            mono_assembly_name_get_name \
+            mono_assembly_get_image \
+            mono_class_from_name \
+            mono_class_get_method_from_name \
+            mono_runtime_invoke \
+            mono_object_unbox \
+            mono_object_to_string \
+            mono_string_to_utf8 \
+            mono_free \
+            mono_set_assemblies_path; do
+            nm -D "$steam_root/Terraria.bin.x86_64" | grep -q " $symbol$"
+            echo "$symbol"
+          done
+
+      - name: Inspect managed assembly identities
         shell: bash
         run: |
           set -euo pipefail
-          archive="$(curl -fsSL https://terraria.org/api/get/dedicated-servers-names | jq -r '.[0]')"
-          test -n "$archive"
-          test "$archive" != "null"
-          echo "Public dedicated-server archive: $archive"
-          curl -fL "https://terraria.org/api/download/pc-dedicated-server/$archive" -o server.zip
-          mkdir public-server
-          unzip -q server.zip -d public-server
-
-          server_bin="$(find public-server -type f -name TerrariaServer.bin.x86_64 -print -quit)"
-          test -n "$server_bin"
-          linux_dir="$(dirname "$server_bin")"
-          echo "$linux_dir" > linux-runtime-dir.txt
-
-          echo "Public Linux host SHA256:"
-          sha256sum "$server_bin"
-          test -f "$linux_dir/monoconfig"
-          test -f "$linux_dir/monomachineconfig"
-          test -f "$linux_dir/mscorlib.dll"
-          test -f "$linux_dir/System.Core.dll"
-
-      - name: Install fixture C# compiler
-        shell: bash
-        run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq mono-mcs
+          sudo apt-get install -y -qq mono-utils
 
-      - name: Full proof with official matching Terraria MonoKickstart runtime
+          steam_root="$(cat steam-root.txt)"
+          echo "=== Terraria.exe ==="
+          monodis --assembly "$steam_root/Terraria.exe" | head -80
+          echo "=== TerrariaServer.exe ==="
+          monodis --assembly "$steam_root/TerrariaServer.exe" | head -80
+          echo "=== Terraria refs ==="
+          monodis --assemblyref "$steam_root/Terraria.exe" | head -220
+
+      - name: Exact Steam dedicated-server gloader proof
         shell: bash
         run: |
           set -euo pipefail
-          fixture="$RUNNER_TEMP/public-terraria-profiler-proof"
-          linux_dir="$(cat linux-runtime-dir.txt)"
+          steam_root="$(cat steam-root.txt)"
+          fixture="$RUNNER_TEMP/exact-steam-server"
           rm -rf "$fixture"
           mkdir -p "$fixture"
-          cp -a "$linux_dir/." "$fixture/"
-          chmod 0755 "$fixture/TerrariaServer.bin.x86_64"
-          mkdir -p "$fixture/gdeps" "$fixture/gmods"
+          cp -a "$steam_root/." "$fixture/"
+          cp dist/gloader "$fixture/gloader"
+          rm -rf "$fixture/gdeps" "$fixture/gmods"
+          mkdir -p "$fixture/gdeps" "$fixture/gmods/Probe"
           cp -a dist/gdeps/. "$fixture/gdeps/"
 
-          cat > "$fixture/TerrariaServer.cs" <<'CS'
+          cat > "$fixture/gmods/Probe/Main.cs" <<'CS'
           using System;
-          public static class Program
+          using System.IO;
+
+          public static class Mod
           {
-              public static void Main(string[] args)
+              public static void Load()
               {
-                  Console.WriteLine("OFFICIAL_MONOKICKSTART_FIXTURE_MAIN");
+                  var directory = AppDomain.CurrentDomain.GetData("GLoader.ModDirectory") as string;
+                  if (string.IsNullOrEmpty(directory))
+                      throw new InvalidOperationException("GLoader.ModDirectory was not set.");
+
+                  File.WriteAllText(Path.Combine(directory, "loaded.txt"), "exact-steam-runtime-ok");
               }
           }
           CS
-          mcs -nologo -target:exe -out:"$fixture/TerrariaServer.exe" "$fixture/TerrariaServer.cs"
 
+          set +e
           (
             cd "$fixture"
-            GLOADER_ROOT="$fixture" \
-            GLOADER_MODE=server \
-            GLOADER_DISABLE_MODS=1 \
-            MONO_IOMAP=all \
-            MONO_BUNDLED_OPTIONS=--profile=gloader \
-            LD_LIBRARY_PATH="$fixture/gdeps:$fixture/lib64" \
-            ./TerrariaServer.bin.x86_64 | tee fixture.out
-          )
+            timeout 20s ./gloader --server -- -help
+          ) > "$fixture/server.out" 2>&1
+          status=$?
+          set -e
 
-          grep -q 'OFFICIAL_MONOKICKSTART_FIXTURE_MAIN' "$fixture/fixture.out"
+          echo "Server process status: $status"
+          cat "$fixture/server.out"
+
+          test -f "$fixture/gdeps/logs/gloader-server.log"
+          cat "$fixture/gdeps/logs/gloader-server.log"
           grep -q 'Attached target: TerrariaServer' "$fixture/gdeps/logs/gloader-server.log"
-          grep -q 'returning control to Terraria' "$fixture/gdeps/logs/gloader-server.log"
+          grep -q 'Loaded mod: Probe' "$fixture/gdeps/logs/gloader-server.log"
+          grep -q 'gloader initialization complete; returning control to Terraria' "$fixture/gdeps/logs/gloader-server.log"
+          grep -Fxq 'exact-steam-runtime-ok' "$fixture/gmods/Probe/loaded.txt"
 
-      - name: Exact Steam host reaches gloader boundary
+      - name: Exact Steam client attach proof
         shell: bash
         run: |
           set -euo pipefail
-          fixture="$RUNNER_TEMP/exact-steam-host-boundary"
-          linux_dir="$(cat linux-runtime-dir.txt)"
+          steam_root="$(cat steam-root.txt)"
+          fixture="$RUNNER_TEMP/exact-steam-client"
           rm -rf "$fixture"
           mkdir -p "$fixture"
-          cp -a "$linux_dir/." "$fixture/"
+          cp -a "$steam_root/." "$fixture/"
+          cp dist/gloader "$fixture/gloader"
+          rm -rf "$fixture/gdeps" "$fixture/gmods"
           mkdir -p "$fixture/gdeps" "$fixture/gmods"
-          cp input/Terraria.bin.x86_64 "$fixture/Terraria.bin.x86_64"
-          chmod 0755 "$fixture/Terraria.bin.x86_64"
           cp -a dist/gdeps/. "$fixture/gdeps/"
-
-          cat > "$fixture/Terraria.cs" <<'CS'
-          public static class Program
-          {
-              public static void Main(string[] args) { }
-          }
-          CS
-          mcs -nologo -target:exe -out:"$fixture/Terraria.exe" "$fixture/Terraria.cs"
 
           set +e
           (
@@ -157,14 +198,17 @@ jobs:
             GLOADER_DISABLE_MODS=1 \
             MONO_IOMAP=all \
             MONO_BUNDLED_OPTIONS=--profile=gloader \
-            LD_LIBRARY_PATH="$fixture/gdeps:$fixture/lib64" \
-            ./Terraria.bin.x86_64
-          ) > "$fixture/boundary.out" 2>&1
+            LD_LIBRARY_PATH="$fixture/gdeps${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            timeout 20s ./Terraria.bin.x86_64
+          ) > "$fixture/client.out" 2>&1
           status=$?
           set -e
 
-          test "$status" -ne 0
-          grep -q 'Your mono runtime and class libraries are out of sync' "$fixture/boundary.out"
-          grep -q 'gloader managed exception:' "$fixture/boundary.out"
-          grep -q 'GLoader.Entry' "$fixture/boundary.out"
-          echo "Exact Steam host loaded the gloader profiler and entered GLoader.Entry; full execution is intentionally blocked here by the nonmatching public 1.4.5.8 class libraries."
+          echo "Client process status: $status"
+          tail -200 "$fixture/client.out" || true
+
+          test -f "$fixture/gdeps/logs/gloader-client.log"
+          cat "$fixture/gdeps/logs/gloader-client.log"
+          grep -q 'Attached target: Terraria' "$fixture/gdeps/logs/gloader-client.log"
+          grep -q 'Source mods skipped for this run.' "$fixture/gdeps/logs/gloader-client.log"
+          grep -q 'gloader initialization complete; returning control to Terraria' "$fixture/gdeps/logs/gloader-client.log"
