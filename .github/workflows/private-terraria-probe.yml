@@ -132,6 +132,32 @@ jobs:
           echo "=== Terraria refs ==="
           monodis --assemblyref "$steam_root/Terraria.exe" | head -220
 
+          echo "=== GLOADER PAYLOAD REFS ==="
+          for managed in \
+            dist/gdeps/GLoader.dll \
+            dist/gdeps/0Harmony.dll \
+            dist/gdeps/Microsoft.CodeAnalysis.dll \
+            dist/gdeps/Microsoft.CodeAnalysis.CSharp.dll \
+            dist/gdeps/System.Collections.Immutable.dll \
+            dist/gdeps/System.Reflection.Metadata.dll \
+            dist/gdeps/System.Memory.dll; do
+            echo
+            echo "--- $managed ---"
+            monodis --assembly "$managed" | sed -n '1,40p'
+            monodis --assemblyref "$managed" | sed -n '1,220p'
+          done
+
+          echo
+          echo "=== NETSTANDARD REFERENCES ==="
+          found=0
+          for managed in dist/gdeps/*.dll; do
+            if monodis --assemblyref "$managed" 2>/dev/null | grep -qi 'Name=netstandard'; then
+              echo "$managed"
+              found=1
+            fi
+          done
+          test "$found" -eq 0
+
       - name: Exact Steam dedicated-server gloader proof
         shell: bash
         run: |
