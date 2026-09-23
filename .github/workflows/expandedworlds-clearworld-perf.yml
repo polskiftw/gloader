@@ -79,6 +79,7 @@ jobs:
           run_case() {
             name="$1"
             preset="$2"
+            gc_params="${3:-}"
             out="$RUNNER_TEMP/clear-$name.out"
             save="$RUNNER_TEMP/clear-save-$name"
             world="$save/Worlds/clear-$name.wld"
@@ -97,6 +98,12 @@ jobs:
                 unset GLOADER_EXPANDED_WORLD || true
               fi
 
+              if [ -n "$gc_params" ]; then
+                export MONO_GC_PARAMS="$gc_params"
+              else
+                unset MONO_GC_PARAMS || true
+              fi
+
               exec ./gloader --server --                 -savedirectory "$save"                 -world "$world"                 -autocreate 3                 -worldname "Clear$name"                 -seed "$seed"                 -difficulty 0                 -port 7941                 -maxplayers 1                 -noupnp
             ) >"$out" 2>&1
             status=$?
@@ -113,6 +120,8 @@ jobs:
           run_case large ""
           run_case thicc THICC
           run_case thicc11 THICC11
+          run_case thicc11-gc64 THICC11 "nursery-size=64m"
+          run_case thicc11-gc256 THICC11 "nursery-size=256m"
 
       - name: Upload clearWorld logs
         if: always()
@@ -123,4 +132,6 @@ jobs:
             ${{ runner.temp }}/clear-large.out
             ${{ runner.temp }}/clear-thicc.out
             ${{ runner.temp }}/clear-thicc11.out
+            ${{ runner.temp }}/clear-thicc11-gc64.out
+            ${{ runner.temp }}/clear-thicc11-gc256.out
           if-no-files-found: warn
