@@ -31,12 +31,12 @@ jobs:
       - name: Build Linux gloader
         run: ./build.sh
 
-      - name: Install virtual display
+      - name: Install virtual X11 session
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y -qq xvfb xauth
+          sudo apt-get install -y -qq xvfb xauth openbox xdotool
 
       - name: Download exact Steam Terraria 1.4.5.8 Linux sample
         uses: actions/github-script@v7
@@ -79,7 +79,7 @@ jobs:
 
           echo "$fixture" > fixture-path.txt
 
-      - name: Disable Steam social mode in probe copy only
+      - name: Prepare offline deterministic probe copy
         shell: bash
         run: |
           set -euo pipefail
@@ -95,7 +95,28 @@ jobs:
           set +e
           (
             cd "$fixture"
-            xvfb-run -a env SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1               timeout -s KILL 90s ./gloader ./Terraria
+            xvfb-run -a bash -lc '
+              set -e
+              openbox --sm-disable > /tmp/gloader-openbox.log 2>&1 &
+              wm_pid=$!
+              trap "kill $wm_pid 2>/dev/null || true" EXIT
+
+              env SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1 \
+                timeout -s KILL 90s ./gloader ./Terraria &
+              game_pid=$!
+
+              for _ in $(seq 1 120); do
+                window_id="$(xdotool search --name Terraria 2>/dev/null | head -n1 || true)"
+                if [ -n "$window_id" ]; then
+                  xdotool windowactivate --sync "$window_id" >/dev/null 2>&1 || true
+                  xdotool windowfocus --sync "$window_id" >/dev/null 2>&1 || true
+                  break
+                fi
+                sleep 0.25
+              done
+
+              wait "$game_pid"
+            '
           ) > "$fixture/client.out" 2>&1
           status=$?
           set -e
