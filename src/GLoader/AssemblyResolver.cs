@@ -8,11 +8,16 @@ namespace GLoader
 {
     internal sealed class AssemblyResolver : IDisposable
     {
+        private const string EmbeddedLibraryMarker = ".Libraries.NET.";
+
         private readonly string _root;
         private readonly string _dependencies;
         private readonly List<string> _extraDirectories = new List<string>();
         private readonly HashSet<string> _active = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, byte[]> _embeddedImages =
+            new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
         private readonly object _gate = new object();
+
         private Assembly _preferredAssembly;
         private bool _installed;
 
@@ -34,6 +39,7 @@ namespace GLoader
         public void PreferAssembly(Assembly assembly)
         {
             _preferredAssembly = assembly;
+            IndexEmbeddedManagedLibraries(assembly);
         }
 
         public void AddDirectory(string path)
@@ -44,6 +50,16 @@ namespace GLoader
             var fullPath = Path.GetFullPath(path);
             if (!_extraDirectories.Contains(fullPath, StringComparer.OrdinalIgnoreCase))
                 _extraDirectories.Add(fullPath);
+        }
+
+        public IEnumerable<KeyValuePair<string, byte[]>> GetEmbeddedAssemblyImages()
+        {
+            lock (_gate)
+            {
+                return _embeddedImages
+                    .Select(pair => new KeyValuePair<string, byte[]>(pair.Key, pair.Value))
+                    .ToArray();
+            }
         }
 
         public void Dispose()
@@ -102,6 +118,10 @@ namespace GLoader
 
             try
             {
+                var embedded = TryLoadEmbedded(requestedName);
+                if (embedded != null)
+                    return embedded;
+
                 var directories = new List<string>();
 
                 if (args.RequestingAssembly != null)
@@ -139,6 +159,94 @@ namespace GLoader
             {
                 lock (_gate)
                     _active.Remove(requestedName);
+            }
+        }
+
+        private void IndexEmbeddedManagedLibraries(Assembly assembly)
+        {
+            if (assembly == null)
+                return;
+
+            string[] resources;
+            try
+            {
+                resources = assembly.GetManifestResourceNames();
+            }
+            catch
+            {
+                return;
+            }
+
+            foreach (var resource in resources)
+            {
+                var marker = resource.IndexOf(
+                    EmbeddedLibraryMarker,
+                    StringComparison.OrdinalIgnoreCase);
+
+                if (marker < 0 ||
+                    !resource.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var start = marker + EmbeddedLibraryMarker.Length;
+                var length = resource.Length - start - ".dll".Length;
+                if (length <= 0)
+                    continue;
+
+                var simpleName = resource.Substring(start, length);
+
+                lock (_gate)
+                {
+                    if (_embeddedImages.ContainsKey(simpleName))
+                        continue;
+                }
+
+                try
+                {
+                    using (var stream = assembly.GetManifestResourceStream(resource))
+                    {
+                        if (stream == null)
+                            continue;
+
+                        using (var memory = new MemoryStream())
+                        {
+                            stream.CopyTo(memory);
+                            var image = memory.ToArray();
+
+                            lock (_gate)
+                                _embeddedImages[simpleName] = image;
+                        }
+                    }
+
+                    Log.Info("Indexed embedded game library: " + simpleName);
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn("Could not read embedded game library " + simpleName + ": " + ex.Message);
+                }
+            }
+        }
+
+        private Assembly TryLoadEmbedded(string requestedName)
+        {
+            byte[] image;
+            lock (_gate)
+            {
+                if (!_embeddedImages.TryGetValue(requestedName, out image))
+                    return null;
+            }
+
+            try
+            {
+                var assembly = Assembly.Load(image);
+                Log.Info("Loaded embedded game library: " + requestedName);
+                return assembly;
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("Could not load embedded game library " + requestedName + ": " + ex.Message);
+                return null;
             }
         }
 

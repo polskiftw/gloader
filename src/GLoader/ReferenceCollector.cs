@@ -13,7 +13,8 @@ namespace GLoader
             Assembly gameAssembly,
             string root,
             string dependencies,
-            string modDirectory)
+            string modDirectory,
+            AssemblyResolver resolver)
         {
             var paths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
@@ -40,6 +41,27 @@ namespace GLoader
                 catch (IOException ex)
                 {
                     Log.Warn("Could not use compiler reference " + path + ": " + ex.Message);
+                }
+            }
+
+            foreach (var embedded in resolver
+                .GetEmbeddedAssemblyImages()
+                .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                if (paths.ContainsKey(embedded.Key))
+                    continue;
+
+                try
+                {
+                    references.Add(MetadataReference.CreateFromImage(embedded.Value));
+                }
+                catch (BadImageFormatException)
+                {
+                }
+                catch (ArgumentException ex)
+                {
+                    Log.Warn("Could not use embedded compiler reference " +
+                        embedded.Key + ": " + ex.Message);
                 }
             }
 

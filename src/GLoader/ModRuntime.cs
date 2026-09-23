@@ -45,7 +45,8 @@ namespace GLoader
                     gameAssembly,
                     root,
                     dependencies,
-                    mod.Directory);
+                    mod.Directory,
+                    resolver);
 
                 Log.Info("Compiling mod: " + mod.DisplayName);
                 var assembly = ModCompiler.Compile(mod, references, isServerTarget);
