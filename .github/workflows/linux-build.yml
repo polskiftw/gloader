@@ -102,6 +102,40 @@ jobs:
           grep -Fxq 'ARG=alpha' "$fixture/client.out"
           grep -Fxq 'ARG=two words' "$fixture/client.out"
 
+          cat > "$fixture/steam-wrapper" <<'SH'
+          #!/usr/bin/env bash
+          printf '%s\n' "$@" > "$WRAPPER_CAPTURE"
+
+          while [ "$#" -gt 0 ]; do
+            if [ "$1" = "--" ]; then
+              shift
+              exec "$@"
+            fi
+            shift
+          done
+
+          exit 90
+          SH
+          chmod 0755 "$fixture/steam-wrapper"
+
+          CAPTURE="$fixture/steam-client.out" \
+          WRAPPER_CAPTURE="$fixture/steam-wrapper.out" \
+          "$fixture/gloader" \
+            "$fixture/steam-wrapper" \
+            SteamLaunch \
+            AppId=105600 \
+            -- \
+            "$fixture/Terraria" \
+            steamarg
+
+          test -f "$fixture/steam-wrapper.out"
+          grep -Fxq "$fixture/gloader" "$fixture/steam-wrapper.out"
+          grep -Fxq "$fixture/Terraria" "$fixture/steam-wrapper.out"
+          grep -Fxq 'HOST=Terraria.bin.x86_64' "$fixture/steam-client.out"
+          grep -Fxq 'MODE=client' "$fixture/steam-client.out"
+          grep -Fxq 'ARG=steamarg' "$fixture/steam-client.out"
+          test "$(grep -c '^ARG=' "$fixture/steam-client.out")" -eq 1
+
           CAPTURE="$fixture/server.out" \
           "$fixture/gloader" --server -- -port 7777
 
