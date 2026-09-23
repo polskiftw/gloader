@@ -134,8 +134,32 @@ jobs:
           monodis --assembly "$steam_root/TerrariaServer.exe" | head -80
           echo "=== Terraria refs ==="
           monodis --assemblyref "$steam_root/Terraria.exe" | head -220
-          echo "=== Terraria embedded managed libraries ==="
-          monodis --manifest "$steam_root/Terraria.exe" | grep -i 'Libraries.NET' || true
+          echo "=== Terraria embedded managed libraries (monodis) ==="
+          monodis --manifest "$steam_root/Terraria.exe" | grep -Ei 'ReLogic|Libraries|\\.dll' || true
+
+          cat > "$RUNNER_TEMP/ListResources.cs" <<'CS'
+          using System;
+          using System.Reflection;
+
+          public static class ListResources
+          {
+              public static void Main(string[] args)
+              {
+                  var assembly = Assembly.ReflectionOnlyLoadFrom(args[0]);
+                  foreach (var name in assembly.GetManifestResourceNames())
+                      Console.WriteLine(name);
+              }
+          }
+          CS
+          mcs -nologo -out:"$RUNNER_TEMP/ListResources.exe" "$RUNNER_TEMP/ListResources.cs"
+          echo "=== Terraria manifest resources (reflection) ==="
+          mono "$RUNNER_TEMP/ListResources.exe" "$steam_root/Terraria.exe" |
+            grep -Ei 'ReLogic|Libraries|\\.dll' || true
+
+          echo "=== Terraria ReLogic strings ==="
+          strings -a "$steam_root/Terraria.exe" |
+            grep -i 'ReLogic' |
+            head -100 || true
 
           echo "=== GLOADER PAYLOAD REFS ==="
           for managed in \
