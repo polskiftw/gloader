@@ -8,6 +8,7 @@ MODS="$DIST/gmods"
 PROJECT="$ROOT/src/GLoader/GLoader.csproj"
 LAUNCHER="$ROOT/src/native/gloader.c"
 PROFILER="$ROOT/src/native/profiler.c"
+FACADES="$ROOT/third_party/mono-facades"
 
 rm -rf "$DIST"
 mkdir -p "$DEPS" "$MODS"
@@ -18,6 +19,16 @@ dotnet build "$PROJECT" \
   --nologo
 
 test -f "$DEPS/GLoader.dll"
+test -f "$FACADES/SHA256SUMS"
+test -f "$FACADES/System.Runtime.dll"
+
+(
+  cd "$FACADES"
+  sha256sum -c SHA256SUMS
+)
+
+cp "$FACADES"/*.dll "$DEPS/"
+test -f "$DEPS/System.Runtime.dll"
 
 CC_VALUE="$(printenv CC || true)"
 if [ -z "$CC_VALUE" ]; then

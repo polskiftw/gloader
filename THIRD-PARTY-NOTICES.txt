@@ -13,6 +13,19 @@ Managed build/runtime dependencies include:
   Upstream: dotnet/roslyn on GitHub.
 
 - Microsoft.NETFramework.ReferenceAssemblies
-  Build-time reference assemblies used so the managed loader can target the Mono-compatible .NET Framework API surface from modern .NET SDKs.
+  Build-time reference assemblies used so the managed loader can target the
+  Mono-compatible .NET Framework API surface from modern .NET SDKs.
 
-Terraria, FNA, and the Mono runtime shipped with Terraria are NOT distributed by this repository. gloader loads the user's existing Terraria installation in place. Terraria and its bundled components remain subject to their respective owners' licenses.
+- Mono compatibility facade assemblies
+  A selected set of 30 architecture-neutral managed facade assemblies from
+  Ubuntu 24.04's Mono 6.8.0.105+dfsg-3.6ubuntu2 package is distributed in
+  third_party/mono-facades and copied into gdeps at build time. They bridge
+  Roslyn's contract assembly references to the framework implementation already
+  present in Terraria's embedded Mono environment. The exact source version,
+  validation rationale, and SHA-256 hashes are recorded in
+  third_party/mono-facades/README.md and SHA256SUMS.
+
+Terraria, FNA, and the Mono runtime itself are NOT distributed by this
+repository. gloader loads the user's existing Terraria installation in place.
+Terraria and its bundled components remain subject to their respective owners'
+licenses.

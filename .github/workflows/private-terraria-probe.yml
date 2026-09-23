@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/private-terraria-probe.yml"
       - "src/**"
+      - "third_party/mono-facades/**"
       - "build.sh"
   workflow_dispatch:
 
@@ -57,23 +58,6 @@ jobs:
           steam_root="$(dirname "$client_bin")"
           echo "$steam_root" > steam-root.txt
 
-          echo "=== STEAM ROOT ==="
-          echo "$steam_root"
-          echo
-          echo "=== TOP-LEVEL RUNTIME FILES ==="
-          find "$steam_root" -maxdepth 1 -type f -printf '%f\t%s bytes\n' | sort
-          echo
-          echo "=== LIB64 FILES ==="
-          if [ -d "$steam_root/lib64" ]; then
-            find "$steam_root/lib64" -maxdepth 1 -type f -printf '%f\t%s bytes\n' | sort
-          fi
-          echo
-          echo "=== CLIENT LAUNCH SCRIPT ==="
-          sed -n '1,120p' "$steam_root/Terraria"
-          echo
-          echo "=== SERVER LAUNCH SCRIPT ==="
-          sed -n '1,120p' "$steam_root/TerrariaServer"
-
           for required in \
             Terraria Terraria.bin.x86_64 Terraria.exe \
             TerrariaServer TerrariaServer.bin.x86_64 TerrariaServer.exe \
@@ -81,24 +65,17 @@ jobs:
             test -f "$steam_root/$required"
           done
           test -d "$steam_root/lib64"
-          if [ -e "$steam_root/ReLogic.dll" ]; then
-            echo "Unexpected standalone ReLogic.dll is present."
-          else
-            echo "No standalone ReLogic.dll: confirmed current Steam Linux layout."
-          fi
+          test ! -e "$steam_root/ReLogic.dll"
 
-          echo
           echo "=== HOST HASHES ==="
           sha256sum "$steam_root/Terraria.bin.x86_64" "$steam_root/TerrariaServer.bin.x86_64"
           cmp -s "$steam_root/Terraria.bin.x86_64" "$steam_root/TerrariaServer.bin.x86_64"
 
-          echo
           echo "=== HOST ELF ABI ==="
           file "$steam_root/Terraria.bin.x86_64"
           readelf -h "$steam_root/Terraria.bin.x86_64" | grep -E 'Class:|Type:|Machine:|Entry point'
           readelf -d "$steam_root/Terraria.bin.x86_64" | grep -E 'NEEDED|RPATH|RUNPATH'
 
-          echo
           echo "=== REQUIRED EMBEDDED MONO EXPORTS ==="
           for symbol in \
             mono_profiler_create \
@@ -117,7 +94,6 @@ jobs:
             mono_free \
             mono_set_assemblies_path; do
             nm -D "$steam_root/Terraria.bin.x86_64" | grep -q " $symbol$"
-            echo "$symbol"
           done
 
       - name: Inspect managed assembly identities
@@ -125,41 +101,14 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y -qq mono-devel mono-utils
+          sudo apt-get install -y -qq mono-utils
 
           steam_root="$(cat steam-root.txt)"
-          echo "=== Terraria.exe ==="
           monodis --assembly "$steam_root/Terraria.exe" | head -80
-          echo "=== TerrariaServer.exe ==="
           monodis --assembly "$steam_root/TerrariaServer.exe" | head -80
-          echo "=== Terraria refs ==="
           monodis --assemblyref "$steam_root/Terraria.exe" | head -220
-          echo "=== Terraria embedded managed libraries (monodis) ==="
-          monodis --manifest "$steam_root/Terraria.exe" | grep -Ei 'ReLogic|Libraries|\\.dll' || true
-
-          cat > "$RUNNER_TEMP/ListResources.cs" <<'CS'
-          using System;
-          using System.Reflection;
-
-          public static class ListResources
-          {
-              public static void Main(string[] args)
-              {
-                  var assembly = Assembly.ReflectionOnlyLoadFrom(args[0]);
-                  foreach (var name in assembly.GetManifestResourceNames())
-                      Console.WriteLine(name);
-              }
-          }
-          CS
-          mcs -nologo -out:"$RUNNER_TEMP/ListResources.exe" "$RUNNER_TEMP/ListResources.cs"
-          echo "=== Terraria manifest resources (reflection) ==="
-          mono "$RUNNER_TEMP/ListResources.exe" "$steam_root/Terraria.exe" |
-            grep -Ei 'ReLogic|Libraries|\\.dll' || true
-
-          echo "=== Terraria ReLogic strings ==="
-          strings -a "$steam_root/Terraria.exe" |
-            grep -i 'ReLogic' |
-            head -100 || true
+          echo "=== TERRARIA EMBEDDED MANAGED LIBRARIES ==="
+          monodis --manifest "$steam_root/Terraria.exe" | grep -E '\\.dll' || true
 
           echo "=== GLOADER PAYLOAD REFS ==="
           for managed in \
@@ -169,13 +118,11 @@ jobs:
             dist/gdeps/Microsoft.CodeAnalysis.CSharp.dll \
             dist/gdeps/System.Collections.Immutable.dll \
             dist/gdeps/System.Reflection.Metadata.dll; do
-            echo
             echo "--- $managed ---"
             monodis --assembly "$managed" | sed -n '1,40p'
             monodis --assemblyref "$managed" | sed -n '1,220p'
           done
 
-          echo
           echo "=== NETSTANDARD REFERENCES ==="
           found=0
           for managed in dist/gdeps/*.dll; do
@@ -186,150 +133,7 @@ jobs:
           done
           test "$found" -eq 0
 
-      - name: Probe minimal Roslyn facade set
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -euo pipefail
-          steam_root="$(cat steam-root.txt)"
-          fixture="$RUNNER_TEMP/minimal-facade-server"
-          rm -rf "$fixture"
-          mkdir -p "$fixture"
-          cp -a "$steam_root/." "$fixture/"
-          cp dist/gloader "$fixture/gloader"
-          rm -rf "$fixture/gdeps" "$fixture/gmods"
-          mkdir -p "$fixture/gdeps" "$fixture/gmods/Probe"
-          cp -a dist/gdeps/. "$fixture/gdeps/"
-
-          runtime_facades="/usr/lib/mono/4.5/Facades"
-          test -d "$runtime_facades"
-
-          refs="$RUNNER_TEMP/roslyn-facades.txt"
-          selected="$RUNNER_TEMP/selected-facades"
-          rm -rf "$selected"
-          mkdir -p "$selected"
-          : > "$refs"
-          for managed in             dist/gdeps/Microsoft.CodeAnalysis.dll             dist/gdeps/Microsoft.CodeAnalysis.CSharp.dll             dist/gdeps/System.Collections.Immutable.dll             dist/gdeps/System.Reflection.Metadata.dll; do
-            monodis --assemblyref "$managed" |
-              sed -n 's/^[[:space:]]*Name=\(System[^[:space:]]*\)$/\1/p' >> "$refs"
-          done
-          sort -u -o "$refs" "$refs"
-
-          echo "=== DIRECT ROSLYN SYSTEM CONTRACTS ==="
-          cat "$refs"
-
-          copied=0
-          missing=0
-          while IFS= read -r name; do
-            [ -n "$name" ] || continue
-            source="$runtime_facades/$name.dll"
-            if [ -f "$source" ]; then
-              cp "$source" "$fixture/gdeps/"
-              cp "$source" "$selected/"
-              echo "COPIED $name.dll"
-              copied=$((copied + 1))
-            else
-              echo "NOT A MONO FACADE $name.dll"
-              missing=$((missing + 1))
-            fi
-          done < "$refs"
-
-          echo "Copied facade count: $copied"
-          echo "Non-facade contract count: $missing"
-          du -ch "$fixture/gdeps"/System*.dll 2>/dev/null | tail -1 || true
-
-          cat > "$fixture/gmods/Probe/Main.cs" <<'CS'
-          using System;
-          using System.IO;
-
-          public static class Mod
-          {
-              public static void Load()
-              {
-                  var directory = AppDomain.CurrentDomain.GetData("GLoader.ModDirectory") as string;
-                  if (string.IsNullOrEmpty(directory))
-                      throw new InvalidOperationException("GLoader.ModDirectory was not set.");
-
-                  File.WriteAllText(Path.Combine(directory, "loaded.txt"), "minimal-facades-ok");
-              }
-          }
-          CS
-
-          set +e
-          (
-            cd "$fixture"
-            timeout 10s ./gloader --server -- -help
-          ) > "$fixture/server.out" 2>&1
-          status=$?
-          set -e
-
-          echo "Minimal-facade server status: $status"
-          cat "$fixture/server.out"
-          test -f "$fixture/gdeps/logs/gloader-server.log"
-          cat "$fixture/gdeps/logs/gloader-server.log"
-          grep -q 'Loaded mod: Probe' "$fixture/gdeps/logs/gloader-server.log"
-          grep -Fxq 'minimal-facades-ok' "$fixture/gmods/Probe/loaded.txt"
-
-      - name: Upload proven Mono facade set
-        uses: actions/upload-artifact@v4
-        with:
-          name: mono-facades-minimal
-          path: ${{ runner.temp }}/selected-facades/
-          if-no-files-found: error
-
-      - name: Pin proven Mono facade set
-        if: github.ref == 'refs/heads/main'
-        shell: bash
-        run: |
-          set -euo pipefail
-          source_dir="$RUNNER_TEMP/selected-facades"
-          target_dir="third_party/mono-facades"
-
-          test -d "$source_dir"
-          test -f "$source_dir/System.Runtime.dll"
-
-          if [ -f "$target_dir/System.Runtime.dll" ]; then
-            echo "Mono facade set is already pinned."
-            exit 0
-          fi
-
-          mkdir -p "$target_dir"
-          cp "$source_dir"/*.dll "$target_dir/"
-
-          cat > "$target_dir/README.md" <<'EOF'
-          # Mono compatibility facades
-
-          These 30 architecture-neutral managed facade assemblies are copied from
-          Ubuntu 24.04's Mono 6.8.0.105+dfsg-3.6ubuntu2 package
-          (/usr/lib/mono/4.5/Facades).
-
-          They are the minimal facade set obtained by intersecting the direct
-          System.* assembly references of GLoader's Roslyn 2.10 runtime payload
-          with Mono's runtime facade directory. The set was then validated by
-          compiling and loading a raw C# source mod inside the exact Steam Linux
-          TerrariaServer 1.4.5.8 MonoKickstart runtime.
-
-          GLoader does not use or ship a second Mono runtime. These tiny facade
-          assemblies only bridge Roslyn's contract assembly references to the
-          framework implementation already present in Terraria's embedded Mono
-          environment.
-
-          Mono runtime/class-library code is generally MIT-licensed; retain the
-          project's THIRD-PARTY-NOTICES.txt when redistributing GLoader.
-          EOF
-
-          (
-            cd "$target_dir"
-            sha256sum ./*.dll | sed 's#  \./#  #' | sort > SHA256SUMS
-          )
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "$target_dir"
-          git commit -m "deps: pin Mono Roslyn facade set"
-          git push origin HEAD:main
-
-      - name: Exact Steam dedicated-server gloader proof
+      - name: Exact Steam dedicated-server raw-mod proof
         shell: bash
         run: |
           set -euo pipefail
@@ -343,11 +147,11 @@ jobs:
           mkdir -p "$fixture/gdeps" "$fixture/gmods/Probe"
           cp -a dist/gdeps/. "$fixture/gdeps/"
 
-          runtime_facades="/usr/lib/mono/4.5/Facades"
-          test -d "$runtime_facades"
-          echo "Using Mono runtime facades from: $runtime_facades"
-          cp -a "$runtime_facades/." "$fixture/gdeps/"
-          monodis --assembly "$fixture/gdeps/System.Runtime.dll" | sed -n '1,40p'
+          test -f "$fixture/gdeps/System.Runtime.dll"
+          test "$(find third_party/mono-facades -maxdepth 1 -type f -name '*.dll' | wc -l)" -eq 30
+          for facade in third_party/mono-facades/*.dll; do
+            cmp -s "$facade" "$fixture/gdeps/$(basename "$facade")"
+          done
 
           cat > "$fixture/gmods/Probe/Main.cs" <<'CS'
           using System;
@@ -384,7 +188,7 @@ jobs:
           grep -q 'gloader initialization complete; returning control to Terraria' "$fixture/gdeps/logs/gloader-server.log"
           grep -Fxq 'exact-steam-runtime-ok' "$fixture/gmods/Probe/loaded.txt"
 
-      - name: Exact Steam client gloader and Host Play proof
+      - name: Exact Steam client and Host Play proof
         shell: bash
         run: |
           set -euo pipefail
@@ -415,3 +219,4 @@ jobs:
           grep -q 'Host & Play server redirection enabled.' "$fixture/gdeps/logs/gloader-client.log"
           grep -q 'Discovered 0 source mod(s).' "$fixture/gdeps/logs/gloader-client.log"
           grep -q 'gloader initialization complete; returning control to Terraria' "$fixture/gdeps/logs/gloader-client.log"
+          grep -q 'SDL_Init failed: No available video device' "$fixture/client.out"

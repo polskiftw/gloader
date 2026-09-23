@@ -34,6 +34,14 @@ jobs:
           test -x dist/gdeps/libmono-profiler-gloader.so
           test -d dist/gmods
           test ! -e dist/gloader.exe
+          test "$(find third_party/mono-facades -maxdepth 1 -type f -name '*.dll' | wc -l)" -eq 30
+          (
+            cd third_party/mono-facades
+            sha256sum -c SHA256SUMS
+          )
+          for facade in third_party/mono-facades/*.dll; do
+            cmp -s "$facade" "dist/gdeps/$(basename "$facade")"
+          done
 
           file dist/gloader
           file dist/gdeps/libmono-profiler-gloader.so
