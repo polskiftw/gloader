@@ -129,17 +129,29 @@ jobs:
           mkdir -p "$fixture/gdeps" "$fixture/gmods"
           cp -a dist/gdeps/. "$fixture/gdeps/"
 
+          cat > "$fixture/ReLogic.cs" <<'CS'
+          namespace ReLogic
+          {
+              public static class Marker
+              {
+                  public const string Value = "RELOGIC_FIXTURE_LOADED";
+              }
+          }
+          CS
+          mcs -nologo -target:library -out:"$fixture/ReLogic.dll" "$fixture/ReLogic.cs"
+
           cat > "$fixture/Terraria.cs" <<'CS'
           using System;
           public static class Program
           {
               public static void Main(string[] args)
               {
+                  Console.WriteLine(ReLogic.Marker.Value);
                   Console.WriteLine("TERRARIA_FIXTURE_MAIN");
               }
           }
           CS
-          mcs -nologo -target:exe -out:"$fixture/Terraria.exe" "$fixture/Terraria.cs"
+          mcs -nologo -target:exe -r:"$fixture/ReLogic.dll" -out:"$fixture/Terraria.exe" "$fixture/Terraria.cs"
 
           (
             cd "$fixture"
@@ -151,6 +163,7 @@ jobs:
             mono --profile=gloader Terraria.exe | tee fixture.out
           )
 
+          grep -q 'RELOGIC_FIXTURE_LOADED' "$fixture/fixture.out"
           grep -q 'TERRARIA_FIXTURE_MAIN' "$fixture/fixture.out"
           grep -q 'Attached target: Terraria' "$fixture/gdeps/logs/gloader-client.log"
           grep -q 'returning control to Terraria' "$fixture/gdeps/logs/gloader-client.log"
