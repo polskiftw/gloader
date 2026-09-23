@@ -112,14 +112,21 @@ namespace GLoader
     {
         public static string[] Decode()
         {
-            var encoded = Environment.GetEnvironmentVariable("GLOADER_ARGV_HEX");
-            if (string.IsNullOrEmpty(encoded))
+            var countText = Environment.GetEnvironmentVariable("GLOADER_ARGC");
+            int count;
+            if (!int.TryParse(countText, out count) || count < 0)
+                throw new FormatException("Malformed GLOADER_ARGC value.");
+
+            if (count == 0)
                 return Array.Empty<string>();
 
-            return encoded
-                .Split(new[] { ',' }, StringSplitOptions.None)
-                .Select(DecodeOne)
-                .ToArray();
+            var encoded = Environment.GetEnvironmentVariable("GLOADER_ARGV_HEX") ?? string.Empty;
+            var parts = encoded.Split(new[] { ',' }, StringSplitOptions.None);
+
+            if (parts.Length != count)
+                throw new FormatException("GLOADER_ARGV_HEX does not match GLOADER_ARGC.");
+
+            return parts.Select(DecodeOne).ToArray();
         }
 
         private static string DecodeOne(string value)

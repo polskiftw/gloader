@@ -335,8 +335,12 @@ static int set_loader_environment(const char *root, int argc, char **argv)
         return 0;
     }
 
+    char argument_count[32];
+    snprintf(argument_count, sizeof(argument_count), "%d", argc > 0 ? argc - 1 : 0);
+
     const int ok =
         setenv("GLOADER_ROOT", root, 1) == 0 &&
+        setenv("GLOADER_ARGC", argument_count, 1) == 0 &&
         setenv("GLOADER_ARGV_HEX", encoded, 1) == 0 &&
         setenv("MONO_PATH", mono_path, 1) == 0;
 
