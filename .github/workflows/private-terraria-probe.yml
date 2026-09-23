@@ -132,16 +132,6 @@ jobs:
           echo "=== Terraria refs ==="
           monodis --assemblyref "$steam_root/Terraria.exe" | head -220
 
-      - name: Inspect full-framework Roslyn toolset payload
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl -fL \
-            https://api.nuget.org/v3-flatcontainer/microsoft.net.compilers.toolset/4.8.0/microsoft.net.compilers.toolset.4.8.0.nupkg \
-            -o "$RUNNER_TEMP/roslyn.nupkg"
-          echo "=== ROSLYN NET472 PAYLOAD ==="
-          unzip -l "$RUNNER_TEMP/roslyn.nupkg" | grep 'tasks/net472/' | sed -n '1,220p'
-
       - name: Exact Steam dedicated-server gloader proof
         shell: bash
         run: |
@@ -191,7 +181,7 @@ jobs:
           grep -q 'gloader initialization complete; returning control to Terraria' "$fixture/gdeps/logs/gloader-server.log"
           grep -Fxq 'exact-steam-runtime-ok' "$fixture/gmods/Probe/loaded.txt"
 
-      - name: Exact Steam client attach proof
+      - name: Exact Steam client gloader and Host Play proof
         shell: bash
         run: |
           set -euo pipefail
@@ -208,13 +198,7 @@ jobs:
           set +e
           (
             cd "$fixture"
-            GLOADER_ROOT="$fixture" \
-            GLOADER_MODE=client \
-            GLOADER_DISABLE_MODS=1 \
-            MONO_IOMAP=all \
-            MONO_BUNDLED_OPTIONS=--profile=gloader \
-            LD_LIBRARY_PATH="$fixture/gdeps${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-            timeout 20s ./Terraria.bin.x86_64
+            SDL_AUDIODRIVER=dummy timeout 20s ./gloader ./Terraria
           ) > "$fixture/client.out" 2>&1
           status=$?
           set -e
@@ -224,6 +208,7 @@ jobs:
 
           test -f "$fixture/gdeps/logs/gloader-client.log"
           cat "$fixture/gdeps/logs/gloader-client.log"
-          grep -q 'Attached target: Terraria' "$fixture/gdeps/logs/gloader-client.log"
-          grep -q 'Source mods skipped for this run.' "$fixture/gdeps/logs/gloader-client.log"
+          grep -q 'Attached target: Terraria, Version=1.4.5.8' "$fixture/gdeps/logs/gloader-client.log"
+          grep -q 'Host & Play server redirection enabled.' "$fixture/gdeps/logs/gloader-client.log"
+          grep -q 'Discovered 0 source mod(s).' "$fixture/gdeps/logs/gloader-client.log"
           grep -q 'gloader initialization complete; returning control to Terraria' "$fixture/gdeps/logs/gloader-client.log"
