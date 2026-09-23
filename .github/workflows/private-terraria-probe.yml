@@ -205,6 +205,9 @@ jobs:
           test -d "$runtime_facades"
 
           refs="$RUNNER_TEMP/roslyn-facades.txt"
+          selected="$RUNNER_TEMP/selected-facades"
+          rm -rf "$selected"
+          mkdir -p "$selected"
           : > "$refs"
           for managed in             dist/gdeps/Microsoft.CodeAnalysis.dll             dist/gdeps/Microsoft.CodeAnalysis.CSharp.dll             dist/gdeps/System.Collections.Immutable.dll             dist/gdeps/System.Reflection.Metadata.dll; do
             monodis --assemblyref "$managed" |
@@ -222,6 +225,7 @@ jobs:
             source="$runtime_facades/$name.dll"
             if [ -f "$source" ]; then
               cp "$source" "$fixture/gdeps/"
+              cp "$source" "$selected/"
               echo "COPIED $name.dll"
               copied=$((copied + 1))
             else
@@ -265,6 +269,13 @@ jobs:
           cat "$fixture/gdeps/logs/gloader-server.log"
           grep -q 'Loaded mod: Probe' "$fixture/gdeps/logs/gloader-server.log"
           grep -Fxq 'minimal-facades-ok' "$fixture/gmods/Probe/loaded.txt"
+
+      - name: Upload proven Mono facade set
+        uses: actions/upload-artifact@v4
+        with:
+          name: mono-facades-minimal
+          path: ${{ runner.temp }}/selected-facades/
+          if-no-files-found: error
 
       - name: Exact Steam dedicated-server gloader proof
         shell: bash
