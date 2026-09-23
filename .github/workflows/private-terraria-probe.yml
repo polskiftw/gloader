@@ -125,7 +125,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y -qq mono-devel
+          sudo apt-get install -y -qq mono-devel mono-utils
 
           steam_root="$(cat steam-root.txt)"
           echo "=== Terraria.exe ==="
