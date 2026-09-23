@@ -57,7 +57,7 @@ namespace GLoader
                         if (!options.DedicatedServer)
                             HostPlayServerRedirect.TryInstall(Path.Combine(root, "gloader"), root);
 
-                        ModRuntime.LoadAll(
+                        DeferredModBootstrap.Install(
                             modsDirectory,
                             gameAssembly,
                             root,
