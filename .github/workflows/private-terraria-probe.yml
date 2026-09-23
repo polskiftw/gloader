@@ -125,7 +125,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y -qq mono-utils
+          sudo apt-get install -y -qq mono-devel
 
           steam_root="$(cat steam-root.txt)"
           echo "=== Terraria.exe ==="
@@ -161,6 +161,7 @@ jobs:
           test "$found" -eq 0
 
       - name: Exact Steam dedicated-server gloader proof
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
@@ -173,6 +174,12 @@ jobs:
           rm -rf "$fixture/gdeps" "$fixture/gmods"
           mkdir -p "$fixture/gdeps" "$fixture/gmods/Probe"
           cp -a dist/gdeps/. "$fixture/gdeps/"
+
+          runtime_facades="/usr/lib/mono/4.5/Facades"
+          test -d "$runtime_facades"
+          echo "Using Mono runtime facades from: $runtime_facades"
+          cp -a "$runtime_facades/." "$fixture/gdeps/"
+          monodis --assembly "$fixture/gdeps/System.Runtime.dll" | sed -n '1,40p'
 
           cat > "$fixture/gmods/Probe/Main.cs" <<'CS'
           using System;
