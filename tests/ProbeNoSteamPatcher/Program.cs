@@ -6,13 +6,20 @@ if (args.Length != 1)
 
 var path = Path.GetFullPath(args[0]);
 var temporaryPath = path + ".gloader-probe";
+var gameDirectory = Path.GetDirectoryName(path)
+    ?? throw new InvalidOperationException("Terraria.exe has no parent directory.");
 
+var resolver = new DefaultAssemblyResolver();
+resolver.AddSearchDirectory(gameDirectory);
+
+using (resolver)
 using (var assembly = AssemblyDefinition.ReadAssembly(
     path,
     new ReaderParameters
     {
         InMemory = true,
-        ReadSymbols = false
+        ReadSymbols = false,
+        AssemblyResolver = resolver
     }))
 {
     var module = assembly.MainModule;
