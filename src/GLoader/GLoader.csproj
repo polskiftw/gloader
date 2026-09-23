@@ -42,29 +42,37 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Buffers.dll"
-          Link="System.Buffers.dll"
-          CopyToOutputDirectory="PreserveNewest" />
-    <None Include="$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Collections.Immutable.dll"
-          Link="System.Collections.Immutable.dll"
-          CopyToOutputDirectory="PreserveNewest" />
-    <None Include="$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Memory.dll"
-          Link="System.Memory.dll"
-          CopyToOutputDirectory="PreserveNewest" />
-    <None Include="$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Numerics.Vectors.dll"
-          Link="System.Numerics.Vectors.dll"
-          CopyToOutputDirectory="PreserveNewest" />
-    <None Include="$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Reflection.Metadata.dll"
-          Link="System.Reflection.Metadata.dll"
-          CopyToOutputDirectory="PreserveNewest" />
-    <None Include="$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Runtime.CompilerServices.Unsafe.dll"
-          Link="System.Runtime.CompilerServices.Unsafe.dll"
-          CopyToOutputDirectory="PreserveNewest" />
-    <None Include="$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Text.Encoding.CodePages.dll"
-          Link="System.Text.Encoding.CodePages.dll"
-          CopyToOutputDirectory="PreserveNewest" />
-    <None Include="$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Threading.Tasks.Extensions.dll"
-          Link="System.Threading.Tasks.Extensions.dll"
-          CopyToOutputDirectory="PreserveNewest" />
+    <Reference Include="System.Buffers">
+      <HintPath>$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Buffers.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="System.Collections.Immutable">
+      <HintPath>$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Collections.Immutable.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="System.Memory">
+      <HintPath>$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Memory.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="System.Numerics.Vectors">
+      <HintPath>$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Numerics.Vectors.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="System.Reflection.Metadata">
+      <HintPath>$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Reflection.Metadata.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="System.Runtime.CompilerServices.Unsafe">
+      <HintPath>$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Runtime.CompilerServices.Unsafe.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="System.Text.Encoding.CodePages">
+      <HintPath>$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Text.Encoding.CodePages.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="System.Threading.Tasks.Extensions">
+      <HintPath>$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Threading.Tasks.Extensions.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
   </ItemGroup>
 </Project>
