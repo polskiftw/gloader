@@ -14,6 +14,8 @@ namespace GLoader
 
         private static Harmony _harmony;
         private static MethodInfo _runGameMethod;
+        private static EventInfo _enginePreloadEvent;
+        private static Action _enginePreloadHandler;
         private static string _modsDirectory;
         private static Assembly _gameAssembly;
         private static string _root;
@@ -21,6 +23,7 @@ namespace GLoader
         private static AssemblyResolver _resolver;
         private static bool _isServerTarget;
         private static bool _installed;
+        private static bool _clientArmed;
         private static bool _loaded;
 
         public static void Install(
@@ -60,6 +63,22 @@ namespace GLoader
                 if (_runGameMethod == null)
                     throw new MissingMethodException(programType.FullName, "RunGame()");
 
+                if (!isServerTarget)
+                {
+                    var mainType = gameAssembly.GetType("Terraria.Main", true);
+                    _enginePreloadEvent = mainType.GetEvent(
+                        "OnEnginePreload",
+                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+
+                    if (_enginePreloadEvent == null ||
+                        _enginePreloadEvent.EventHandlerType != typeof(Action))
+                    {
+                        throw new MissingMemberException(
+                            mainType.FullName,
+                            "OnEnginePreload event Action");
+                    }
+                }
+
                 _modsDirectory = modsDirectory;
                 _gameAssembly = gameAssembly;
                 _root = root;
@@ -76,8 +95,72 @@ namespace GLoader
 
                 _installed = true;
                 Log.Info(
-                    "Source mod loading deferred until Terraria LaunchGame startup setup is complete.");
+                    isServerTarget
+                        ? "Source mod loading deferred until Terraria LaunchGame setup is complete."
+                        : "Source mod loading deferred until Terraria's first engine preload update.");
             }
+        }
+
+        public static void OnLaunchGameReady()
+        {
+            if (_isServerTarget)
+            {
+                LoadMods();
+                return;
+            }
+
+            try
+            {
+                lock (Gate)
+                {
+                    if (_clientArmed || _loaded)
+                        return;
+
+                    if (_enginePreloadEvent == null)
+                        throw new InvalidOperationException(
+                            "Terraria.Main.OnEnginePreload was not initialized.");
+
+                    _enginePreloadHandler = OnClientEnginePreload;
+                    _enginePreloadEvent.AddEventHandler(null, _enginePreloadHandler);
+                    _clientArmed = true;
+                }
+
+                Log.Info(
+                    "Terraria LaunchGame setup complete; source mods armed for Main.OnEnginePreload.");
+            }
+            catch (Exception ex)
+            {
+                Log.Error(
+                    "Could not arm deferred client source-mod loading." +
+                    Environment.NewLine +
+                    ex);
+            }
+        }
+
+        private static void OnClientEnginePreload()
+        {
+            Action handler;
+            EventInfo enginePreloadEvent;
+
+            lock (Gate)
+            {
+                handler = _enginePreloadHandler;
+                enginePreloadEvent = _enginePreloadEvent;
+                _enginePreloadHandler = null;
+                _clientArmed = false;
+            }
+
+            try
+            {
+                if (handler != null && enginePreloadEvent != null)
+                    enginePreloadEvent.RemoveEventHandler(null, handler);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("Could not detach deferred engine-preload hook: " + ex.Message);
+            }
+
+            LoadMods();
         }
 
         public static void LoadMods()
@@ -92,7 +175,7 @@ namespace GLoader
 
             try
             {
-                Log.Info("Terraria startup setup complete; loading source mods.");
+                Log.Info("Terraria mod-safe startup point reached; loading source mods.");
 
                 ModRuntime.LoadAll(
                     _modsDirectory,
@@ -118,7 +201,7 @@ namespace GLoader
             var code = instructions.ToList();
             var callback = AccessTools.Method(
                 typeof(DeferredModBootstrap),
-                nameof(LoadMods),
+                nameof(OnLaunchGameReady),
                 Type.EmptyTypes);
 
             if (_runGameMethod == null)
@@ -126,7 +209,7 @@ namespace GLoader
             if (callback == null)
                 throw new MissingMethodException(
                     typeof(DeferredModBootstrap).FullName,
-                    nameof(LoadMods));
+                    nameof(OnLaunchGameReady));
 
             int inserted = 0;
 
@@ -140,13 +223,13 @@ namespace GLoader
                     continue;
                 }
 
-                var loadMods = new CodeInstruction(OpCodes.Call, callback);
-                loadMods.labels.AddRange(instruction.labels);
+                var ready = new CodeInstruction(OpCodes.Call, callback);
+                ready.labels.AddRange(instruction.labels);
                 instruction.labels.Clear();
-                loadMods.blocks.AddRange(instruction.blocks);
+                ready.blocks.AddRange(instruction.blocks);
                 instruction.blocks.Clear();
 
-                code.Insert(i, loadMods);
+                code.Insert(i, ready);
                 inserted++;
                 i++;
             }
