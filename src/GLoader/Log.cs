@@ -12,24 +12,25 @@ namespace GLoader
         public static void Initialize(string logsDirectory, string role)
         {
             Directory.CreateDirectory(logsDirectory);
-
             var safeRole = string.IsNullOrWhiteSpace(role) ? "process" : role.Trim().ToLowerInvariant();
             var path = Path.Combine(logsDirectory, "gloader-" + safeRole + ".log");
-            _writer = new StreamWriter(path, append: false, encoding: new UTF8Encoding(false))
+
+            _writer = new StreamWriter(path, false, new UTF8Encoding(false))
             {
                 AutoFlush = true
             };
         }
 
-        public static void Info(string message) => Write("INFO", message);
-        public static void Warn(string message) => Write("WARN", message);
-        public static void Error(string message) => Write("ERROR", message);
+        public static void Info(string message) { Write("INFO", message); }
+        public static void Warn(string message) { Write("WARN", message); }
+        public static void Error(string message) { Write("ERROR", message); }
 
         public static void Dispose()
         {
             lock (Gate)
             {
-                _writer?.Dispose();
+                if (_writer != null)
+                    _writer.Dispose();
                 _writer = null;
             }
         }
@@ -45,7 +46,8 @@ namespace GLoader
             lock (Gate)
             {
                 Console.WriteLine(line);
-                _writer?.WriteLine(line);
+                if (_writer != null)
+                    _writer.WriteLine(line);
             }
         }
     }

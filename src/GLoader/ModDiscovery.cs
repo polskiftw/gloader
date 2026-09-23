@@ -13,56 +13,28 @@ namespace GLoader
             Directory.CreateDirectory(modsDirectory);
 
             var mods = new List<ModSource>();
-            var directories = Directory
+
+            foreach (var directory in Directory
                 .EnumerateDirectories(modsDirectory, "*", SearchOption.TopDirectoryOnly)
-                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-
-            // General Radio supersedes VGMRadio. Package upgrades are commonly copied
-            // over an existing Terraria folder, which does not delete the user's old
-            // gmods/VGMRadio directory. If Radio is installed, ignore that leftover
-            // legacy source folder so an overlay upgrade cannot start two audio clients.
-            var hasGeneralRadio = directories.Any(directory =>
-                !directory.EndsWith(".disabled", StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(Path.GetFileName(directory), "Radio", StringComparison.OrdinalIgnoreCase) &&
-                Directory.EnumerateFiles(directory, "*.cs", SearchOption.AllDirectories).Any(path => !IsDisabled(path)));
-
-            foreach (var directory in directories)
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
             {
                 if (directory.EndsWith(".disabled", StringComparison.OrdinalIgnoreCase))
-                {
                     continue;
-                }
-
-                var displayName = Path.GetFileName(directory);
-                if (hasGeneralRadio && string.Equals(displayName, "VGMRadio", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
 
                 var sources = Directory
                     .EnumerateFiles(directory, "*.cs", SearchOption.AllDirectories)
-                    .Where(path => !IsDisabled(path))
+                    .Where(path => !path.EndsWith(".disabled.cs", StringComparison.OrdinalIgnoreCase))
                     .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
                     .ToArray();
 
                 if (sources.Length == 0)
-                {
                     continue;
-                }
 
-                mods.Add(new ModSource(
-                    MakeId(displayName),
-                    displayName,
-                    sources));
+                var displayName = Path.GetFileName(directory);
+                mods.Add(new ModSource(MakeId(displayName), displayName, sources, directory));
             }
 
             return mods;
-        }
-
-        private static bool IsDisabled(string path)
-        {
-            return path.EndsWith(".disabled.cs", StringComparison.OrdinalIgnoreCase);
         }
 
         private static string MakeId(string value)
@@ -71,14 +43,9 @@ namespace GLoader
 
             foreach (var character in value)
             {
-                if (char.IsLetterOrDigit(character))
-                {
-                    builder.Append(char.ToLowerInvariant(character));
-                }
-                else
-                {
-                    builder.Append('.');
-                }
+                builder.Append(char.IsLetterOrDigit(character)
+                    ? char.ToLowerInvariant(character)
+                    : '.');
             }
 
             var id = builder.ToString().Trim('.');

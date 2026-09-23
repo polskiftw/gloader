@@ -1,0 +1,51 @@
+name: gloader Linux build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build native ELF and managed loader
+        run: ./build.sh
+
+      - name: Verify package contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x dist/gloader
+          test -f dist/gdeps/GLoader.dll
+          test -d dist/gmods
+          test ! -e dist/gloader.exe
+
+          file dist/gloader
+          file dist/gdeps/GLoader.dll
+          readelf -h dist/gloader
+          readelf -d dist/gloader
+
+          file dist/gloader | grep -q 'ELF 64-bit'
+          readelf -h dist/gloader | grep -q 'Advanced Micro Devices X86-64'
+          readelf -d dist/gloader | grep -Fq '$ORIGIN/lib64:$ORIGIN/lib:$ORIGIN'
+
+      - name: Upload Linux package
+        uses: actions/upload-artifact@v4
+        with:
+          name: gloader-linux
+          path: dist/
+          if-no-files-found: error

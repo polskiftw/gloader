@@ -11,46 +11,21 @@ namespace GLoader
     {
         public static IReadOnlyList<MetadataReference> Collect(
             Assembly gameAssembly,
-            string gameDirectory,
-            string runtimeDirectory,
-            string supportDirectory)
+            string root,
+            string dependencies,
+            string modDirectory)
         {
             var paths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-            AddTrustedPlatformAssemblies(paths);
-
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
-                AddAssemblyLocation(paths, assembly, overwrite: false);
+                AddAssemblyLocation(paths, assembly, false);
 
-            AddManagedFiles(paths, supportDirectory, overwrite: false, recursive: false);
+            AddManagedFiles(paths, root, false);
+            AddManagedFiles(paths, dependencies, false);
+            AddManagedFiles(paths, modDirectory, false);
 
-            // The game root contains Content and the original Steam files. The private
-            // CoreCLR/FNA runtime can live elsewhere, so scan both roots independently.
-            AddManagedFiles(paths, gameDirectory, overwrite: false, recursive: false);
-            AddManagedFiles(paths, Path.Combine(gameDirectory, "Libraries"), overwrite: false, recursive: true);
-
-            if (!PathsEqual(gameDirectory, runtimeDirectory))
-            {
-                AddManagedFiles(paths, runtimeDirectory, overwrite: false, recursive: false);
-                AddManagedFiles(paths, Path.Combine(runtimeDirectory, "Libraries"), overwrite: false, recursive: true);
-                AddManagedFiles(paths, Path.Combine(runtimeDirectory, "runtimes"), overwrite: false, recursive: true);
-            }
-
-            // The Steam client, TerrariaNetCore client variants, and dedicated server
-            // all define the Terraria namespace. Feed Roslyn only the exact client or
-            // server assembly that is actually running or every Terraria type becomes
-            // ambiguous (for example Terraria.Main in Terraria.dll + TerrariaRelease.dll).
             RemoveOtherTerrariaAssemblies(paths, gameAssembly);
-
-            // TerrariaNetCore/FNA replaces the legacy XNA implementation while keeping
-            // the Microsoft.Xna.Framework namespaces. If the selected game assembly
-            // targets FNA, never also reference the original Steam XNA assemblies or
-            // mod source can see duplicate Color/Vector2/etc. definitions.
-            RemoveLegacyXnaAssembliesForFna(paths, gameAssembly);
-
-            // The exact Terraria assembly selected by the user always wins over a
-            // same-named assembly that might already have been visible elsewhere.
-            AddAssemblyLocation(paths, gameAssembly, overwrite: true);
+            AddAssemblyLocation(paths, gameAssembly, true);
 
             var references = new List<MetadataReference>();
             foreach (var path in paths.Values.OrderBy(value => value, StringComparer.OrdinalIgnoreCase))
@@ -61,7 +36,6 @@ namespace GLoader
                 }
                 catch (BadImageFormatException)
                 {
-                    // Ignore native binaries.
                 }
                 catch (IOException ex)
                 {
@@ -72,82 +46,32 @@ namespace GLoader
             return references;
         }
 
-        private static bool PathsEqual(string left, string right)
-        {
-            if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
-                return false;
-
-            return string.Equals(
-                Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static void AddTrustedPlatformAssemblies(IDictionary<string, string> paths)
-        {
-            var trusted = AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string;
-            if (string.IsNullOrWhiteSpace(trusted))
-                return;
-
-            foreach (var path in trusted.Split(Path.PathSeparator))
-                AddManagedPath(paths, path, overwrite: false);
-        }
-
         private static void RemoveOtherTerrariaAssemblies(
             IDictionary<string, string> paths,
             Assembly gameAssembly)
         {
             var targetName = gameAssembly.GetName().Name;
-            var knownTerrariaAssemblies = new[]
-            {
-                "Terraria",
-                "TerrariaRelease",
-                "TerrariaDebug",
-                "TerrariaServer"
-            };
+            var known = new[] { "Terraria", "TerrariaRelease", "TerrariaDebug", "TerrariaServer" };
 
-            foreach (var assemblyName in knownTerrariaAssemblies)
+            foreach (var name in known)
             {
-                if (!string.Equals(assemblyName, targetName, StringComparison.OrdinalIgnoreCase))
-                    paths.Remove(assemblyName);
+                if (!string.Equals(name, targetName, StringComparison.OrdinalIgnoreCase))
+                    paths.Remove(name);
             }
-        }
-
-        private static void RemoveLegacyXnaAssembliesForFna(
-            IDictionary<string, string> paths,
-            Assembly gameAssembly)
-        {
-            var usesFna = gameAssembly
-                .GetReferencedAssemblies()
-                .Any(reference => string.Equals(reference.Name, "FNA", StringComparison.OrdinalIgnoreCase));
-
-            if (!usesFna)
-                return;
-
-            var legacyXnaNames = paths.Keys
-                .Where(name =>
-                    name.Equals("Microsoft.Xna.Framework", StringComparison.OrdinalIgnoreCase) ||
-                    name.StartsWith("Microsoft.Xna.Framework.", StringComparison.OrdinalIgnoreCase))
-                .ToArray();
-
-            foreach (var name in legacyXnaNames)
-                paths.Remove(name);
         }
 
         private static void AddManagedFiles(
             IDictionary<string, string> paths,
             string directory,
-            bool overwrite,
-            bool recursive)
+            bool overwrite)
         {
-            if (!Directory.Exists(directory))
+            if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
                 return;
 
-            var searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
-            foreach (var path in Directory.EnumerateFiles(directory, "*.dll", searchOption))
+            foreach (var path in Directory.EnumerateFiles(directory, "*.dll", SearchOption.TopDirectoryOnly))
                 AddManagedPath(paths, path, overwrite);
 
-            foreach (var path in Directory.EnumerateFiles(directory, "*.exe", searchOption))
+            foreach (var path in Directory.EnumerateFiles(directory, "*.exe", SearchOption.TopDirectoryOnly))
                 AddManagedPath(paths, path, overwrite);
         }
 
@@ -158,14 +82,13 @@ namespace GLoader
         {
             try
             {
-                if (assembly.IsDynamic || string.IsNullOrWhiteSpace(assembly.Location))
+                if (assembly == null || assembly.IsDynamic || string.IsNullOrWhiteSpace(assembly.Location))
                     return;
 
                 AddManagedPath(paths, assembly.Location, overwrite);
             }
-            catch (NotSupportedException)
+            catch
             {
-                // Dynamic or byte-loaded assembly with no usable location.
             }
         }
 
@@ -187,15 +110,12 @@ namespace GLoader
             }
             catch (BadImageFormatException)
             {
-                // Native DLL/exe.
             }
             catch (FileLoadException)
             {
-                // Not a usable managed reference.
             }
             catch (FileNotFoundException)
             {
-                // File disappeared while scanning; ignore it.
             }
         }
     }

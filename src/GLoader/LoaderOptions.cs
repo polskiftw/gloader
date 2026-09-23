@@ -1,140 +1,119 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 
 namespace GLoader
 {
     internal sealed class LoaderOptions
     {
-        public string TargetPath { get; private set; }
-        public string ModsPath { get; private set; }
-        public bool DedicatedServer { get; private set; }
         public bool DisableMods { get; private set; }
+        public bool DedicatedServer { get; private set; }
         public bool ShowHelp { get; private set; }
-        public bool DirectRun { get; private set; }
-        public List<string> GameArguments { get; } = new List<string>();
+        public List<string> GameArguments { get; private set; } = new List<string>();
 
-        public static LoaderOptions Parse(string[] args)
+        public static LoaderOptions Parse(string root, string[] args)
         {
-            var result = new LoaderOptions();
-            var passThrough = false;
+            var options = new LoaderOptions();
+            var index = 0;
 
-            for (var i = 0; i < args.Length; i++)
+            while (index < args.Length)
             {
-                var arg = args[i];
+                var argument = args[index];
 
-                if (passThrough)
+                if (argument == "--")
                 {
-                    result.GameArguments.Add(arg);
+                    index++;
+                    break;
+                }
+
+                if (EqualsOption(argument, "--vanilla") || EqualsOption(argument, "--no-mods"))
+                {
+                    options.DisableMods = true;
+                    index++;
                     continue;
                 }
 
-                if (arg == "--")
+                if (EqualsOption(argument, "--server"))
                 {
-                    passThrough = true;
+                    options.DedicatedServer = true;
+                    index++;
                     continue;
                 }
 
-                if (arg.Equals("--help", StringComparison.OrdinalIgnoreCase) ||
-                    arg.Equals("-h", StringComparison.OrdinalIgnoreCase) ||
-                    arg.Equals("/?", StringComparison.OrdinalIgnoreCase))
+                if (EqualsOption(argument, "--help") || EqualsOption(argument, "-h"))
                 {
-                    result.ShowHelp = true;
+                    options.ShowHelp = true;
+                    index++;
                     continue;
                 }
 
-                if (arg.Equals("--run", StringComparison.OrdinalIgnoreCase))
-                {
-                    result.DirectRun = true;
-                    continue;
-                }
-
-                if (arg.Equals("--server", StringComparison.OrdinalIgnoreCase))
-                {
-                    result.DedicatedServer = true;
-                    continue;
-                }
-
-                if (arg.Equals("--no-mods", StringComparison.OrdinalIgnoreCase))
-                {
-                    result.DisableMods = true;
-                    continue;
-                }
-
-                if (arg.Equals("--target", StringComparison.OrdinalIgnoreCase))
-                {
-                    result.TargetPath = RequireValue(args, ref i, "--target");
-                    continue;
-                }
-
-                if (arg.Equals("--mods", StringComparison.OrdinalIgnoreCase))
-                {
-                    result.ModsPath = RequireValue(args, ref i, "--mods");
-                    continue;
-                }
-
-                if (result.TargetPath == null && IsManagedTargetPath(arg))
-                {
-                    var unquoted = Unquote(arg);
-                    if (File.Exists(unquoted))
-                    {
-                        result.TargetPath = unquoted;
-                        continue;
-                    }
-                }
-
-                result.GameArguments.Add(arg);
+                break;
             }
 
-            return result;
-        }
+            options.GameArguments.AddRange(args.Skip(index));
 
-        public void DisableModsForRun()
-        {
-            DisableMods = true;
+            if (options.GameArguments.Count > 0 &&
+                LooksLikeSteamTerrariaCommand(root, options.GameArguments[0]))
+            {
+                options.GameArguments.RemoveAt(0);
+            }
+
+            return options;
         }
 
         public static void PrintHelp()
         {
-            Console.WriteLine("gloader - 64-bit raw C# source mod loader for Terraria");
+            Console.WriteLine("gloader - native Linux/Mono Terraria source-mod loader");
             Console.WriteLine();
-            Console.WriteLine("Usage:");
-            Console.WriteLine("  gloader.exe                         Open the mod launcher GUI");
-            Console.WriteLine("  gloader.exe --run                   Launch directly without the GUI");
-            Console.WriteLine("  gloader.exe --target \"C:\\...\\TerrariaRelease.dll\"");
-            Console.WriteLine("  gloader.exe --server");
-            Console.WriteLine("  gloader.exe --mods \"C:\\...\\gmods\"");
-            Console.WriteLine("  gloader.exe --no-mods");
-            Console.WriteLine("  gloader.exe -- <arguments passed to Terraria>");
+            Console.WriteLine("Steam launch option:");
+            Console.WriteLine("  ./gloader %command%");
             Console.WriteLine();
-            Console.WriteLine("Default x64 runtime: gdeps\\x64-runtime\\TerrariaRelease.dll");
-            Console.WriteLine("Stock 32-bit/XNA Terraria.exe is not loaded into the x64 process.");
-            Console.WriteLine("gmods contains mod folders; gdeps contains support files, logs, and the x64 runtime.");
+            Console.WriteLine("Options:");
+            Console.WriteLine("  --vanilla, --no-mods   Launch without loading gmods");
+            Console.WriteLine("  --server               Launch the Linux dedicated-server managed target");
+            Console.WriteLine("  --help, -h             Show this help");
+            Console.WriteLine("  --                     Pass all remaining arguments to Terraria");
         }
 
-        private static string RequireValue(string[] args, ref int index, string option)
+        private static bool EqualsOption(string value, string expected)
         {
-            if (index + 1 >= args.Length)
-                throw new ArgumentException(option + " requires a value.");
-
-            index++;
-            return Unquote(args[index]);
+            return string.Equals(value, expected, StringComparison.OrdinalIgnoreCase);
         }
 
-        private static bool IsManagedTargetPath(string value)
+        private static bool LooksLikeSteamTerrariaCommand(string root, string value)
         {
-            var unquoted = Unquote(value);
-            return unquoted != null &&
-                (unquoted.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ||
-                 unquoted.EndsWith(".dll", StringComparison.OrdinalIgnoreCase));
-        }
+            if (string.IsNullOrWhiteSpace(value))
+                return false;
 
-        private static string Unquote(string value)
-        {
-            if (value == null)
-                return null;
+            var trimmed = value.Trim().Trim('"');
+            var fileName = Path.GetFileName(trimmed);
 
-            return value.Trim().Trim('"');
+            if (string.IsNullOrWhiteSpace(fileName))
+                return false;
+
+            if (fileName.Equals("Terraria", StringComparison.OrdinalIgnoreCase) ||
+                fileName.Equals("Terraria.exe", StringComparison.OrdinalIgnoreCase) ||
+                fileName.Equals("Terraria.bin.x86_64", StringComparison.OrdinalIgnoreCase) ||
+                fileName.Equals("TerrariaServer", StringComparison.OrdinalIgnoreCase) ||
+                fileName.Equals("TerrariaServer.exe", StringComparison.OrdinalIgnoreCase) ||
+                fileName.Equals("TerrariaServer.bin.x86_64", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            try
+            {
+                if (Path.IsPathRooted(trimmed))
+                    return File.Exists(trimmed) && fileName.StartsWith("Terraria", StringComparison.OrdinalIgnoreCase);
+
+                var local = Path.Combine(root, trimmed);
+                return File.Exists(local) && fileName.StartsWith("Terraria", StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
         }
     }
 }

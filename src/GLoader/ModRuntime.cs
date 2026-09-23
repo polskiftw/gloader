@@ -12,34 +12,26 @@ namespace GLoader
         public static void LoadAll(
             string modsDirectory,
             Assembly gameAssembly,
-            string gameDirectory,
-            string runtimeDirectory,
-            string supportDirectory,
+            string root,
+            string dependencies,
+            AssemblyResolver resolver,
             bool isServerTarget)
         {
             var mods = ModDiscovery.Discover(modsDirectory);
             Log.Info("Discovered " + mods.Count + " source mod(s).");
 
-            if (mods.Count == 0)
-            {
-                return;
-            }
-
-            var references = ReferenceCollector.Collect(
-                gameAssembly,
-                gameDirectory,
-                runtimeDirectory,
-                supportDirectory);
-
             foreach (var mod in mods)
             {
-                LoadOne(mod, references, isServerTarget);
+                LoadOne(mod, gameAssembly, root, dependencies, resolver, isServerTarget);
             }
         }
 
         private static void LoadOne(
             ModSource mod,
-            System.Collections.Generic.IReadOnlyList<Microsoft.CodeAnalysis.MetadataReference> references,
+            Assembly gameAssembly,
+            string root,
+            string dependencies,
+            AssemblyResolver resolver,
             bool isServerTarget)
         {
             var harmonyId = "gloader.mod." + mod.Id;
@@ -47,10 +39,18 @@ namespace GLoader
 
             try
             {
+                resolver.AddDirectory(mod.Directory);
+
+                var references = ReferenceCollector.Collect(
+                    gameAssembly,
+                    root,
+                    dependencies,
+                    mod.Directory);
+
                 Log.Info("Compiling mod: " + mod.DisplayName);
                 var assembly = ModCompiler.Compile(mod, references, isServerTarget);
 
-                InvokeOptionalLoad(assembly, GetModDirectory(mod));
+                InvokeOptionalLoad(assembly, mod.Directory);
 
                 harmony = new Harmony(harmonyId);
                 harmony.PatchAll(assembly);
@@ -61,7 +61,8 @@ namespace GLoader
             {
                 try
                 {
-                    harmony?.UnpatchAll(harmonyId);
+                    if (harmony != null)
+                        harmony.UnpatchAll(harmonyId);
                 }
                 catch (Exception cleanupEx)
                 {
@@ -70,14 +71,6 @@ namespace GLoader
 
                 Log.Error("Mod failed: " + mod.DisplayName + Environment.NewLine + Unwrap(ex));
             }
-        }
-
-        private static string GetModDirectory(ModSource mod)
-        {
-            if (mod == null || mod.SourceFiles == null || mod.SourceFiles.Count == 0)
-                return null;
-
-            return System.IO.Path.GetDirectoryName(mod.SourceFiles[0]);
         }
 
         private static void InvokeOptionalLoad(Assembly assembly, string modDirectory)
@@ -91,26 +84,21 @@ namespace GLoader
                     Method = type.GetMethod(
                         "Load",
                         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static,
-                        binder: null,
-                        types: Type.EmptyTypes,
-                        modifiers: null)
+                        null,
+                        Type.EmptyTypes,
+                        null)
                 })
                 .Where(candidate => candidate.Method != null)
                 .OrderBy(candidate => candidate.Type.FullName, StringComparer.Ordinal)
                 .ToArray();
 
             if (candidates.Length == 0)
-            {
                 return;
-            }
 
             if (candidates.Length > 1)
-            {
-                throw new AmbiguousMatchException(
-                    "A source mod may contain at most one class named Mod with a static parameterless Load() method.");
-            }
+                throw new AmbiguousMatchException("A source mod may contain at most one class named Mod with a static parameterless Load() method.");
 
-            var previousModDirectory = AppDomain.CurrentDomain.GetData(ModDirectoryDataKey);
+            var previous = AppDomain.CurrentDomain.GetData(ModDirectoryDataKey);
             try
             {
                 AppDomain.CurrentDomain.SetData(ModDirectoryDataKey, modDirectory);
@@ -118,16 +106,16 @@ namespace GLoader
             }
             finally
             {
-                AppDomain.CurrentDomain.SetData(ModDirectoryDataKey, previousModDirectory);
+                AppDomain.CurrentDomain.SetData(ModDirectoryDataKey, previous);
             }
         }
 
         private static Exception Unwrap(Exception exception)
         {
-            while (exception is TargetInvocationException invocation &&
-                   invocation.InnerException != null)
+            while (exception is TargetInvocationException &&
+                   ((TargetInvocationException)exception).InnerException != null)
             {
-                exception = invocation.InnerException;
+                exception = ((TargetInvocationException)exception).InnerException;
             }
 
             return exception;

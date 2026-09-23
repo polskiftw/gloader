@@ -16,14 +16,14 @@ namespace GLoader
             bool isServerTarget)
         {
             var symbols = isServerTarget
-                ? new[] { "GLOADER", "GLOADER_SERVER" }
-                : new[] { "GLOADER", "GLOADER_CLIENT" };
+                ? new[] { "GLOADER", "GLOADER_LINUX", "GLOADER_MONO", "GLOADER_SERVER" }
+                : new[] { "GLOADER", "GLOADER_LINUX", "GLOADER_MONO", "GLOADER_CLIENT" };
 
             var parseOptions = new CSharpParseOptions(
-                languageVersion: LanguageVersion.Latest,
-                documentationMode: DocumentationMode.None,
-                kind: SourceCodeKind.Regular,
-                preprocessorSymbols: symbols);
+                LanguageVersion.Latest,
+                DocumentationMode.None,
+                SourceCodeKind.Regular,
+                symbols);
 
             var syntaxTrees = mod.SourceFiles
                 .Select(path => CSharpSyntaxTree.ParseText(
@@ -54,7 +54,9 @@ namespace GLoader
                         .Where(diagnostic =>
                             diagnostic.Severity == DiagnosticSeverity.Error ||
                             diagnostic.IsWarningAsError)
-                        .OrderBy(diagnostic => diagnostic.Location.SourceTree?.FilePath)
+                        .OrderBy(diagnostic => diagnostic.Location.SourceTree == null
+                            ? string.Empty
+                            : diagnostic.Location.SourceTree.FilePath)
                         .ThenBy(diagnostic => diagnostic.Location.GetLineSpan().StartLinePosition.Line)
                         .Select(FormatDiagnostic)
                         .ToArray();
@@ -74,9 +76,7 @@ namespace GLoader
         {
             var span = diagnostic.Location.GetLineSpan();
             if (!span.IsValid || string.IsNullOrWhiteSpace(span.Path))
-            {
                 return diagnostic.ToString();
-            }
 
             return string.Format(
                 "{0}({1},{2}): {3} {4}: {5}",
@@ -90,14 +90,12 @@ namespace GLoader
 
         private static string SanitizeAssemblyName(string value)
         {
-            var characters = value
+            return new string(value
                 .Select(character =>
                     char.IsLetterOrDigit(character) || character == '.' || character == '_'
                         ? character
                         : '_')
-                .ToArray();
-
-            return new string(characters);
+                .ToArray());
         }
     }
 
