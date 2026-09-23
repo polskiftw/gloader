@@ -186,6 +186,86 @@ jobs:
           done
           test "$found" -eq 0
 
+      - name: Probe minimal Roslyn facade set
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          steam_root="$(cat steam-root.txt)"
+          fixture="$RUNNER_TEMP/minimal-facade-server"
+          rm -rf "$fixture"
+          mkdir -p "$fixture"
+          cp -a "$steam_root/." "$fixture/"
+          cp dist/gloader "$fixture/gloader"
+          rm -rf "$fixture/gdeps" "$fixture/gmods"
+          mkdir -p "$fixture/gdeps" "$fixture/gmods/Probe"
+          cp -a dist/gdeps/. "$fixture/gdeps/"
+
+          runtime_facades="/usr/lib/mono/4.5/Facades"
+          test -d "$runtime_facades"
+
+          refs="$RUNNER_TEMP/roslyn-facades.txt"
+          : > "$refs"
+          for managed in             dist/gdeps/Microsoft.CodeAnalysis.dll             dist/gdeps/Microsoft.CodeAnalysis.CSharp.dll             dist/gdeps/System.Collections.Immutable.dll             dist/gdeps/System.Reflection.Metadata.dll; do
+            monodis --assemblyref "$managed" |
+              sed -n 's/^[[:space:]]*Name=\(System[^[:space:]]*\)$/\1/p' >> "$refs"
+          done
+          sort -u -o "$refs" "$refs"
+
+          echo "=== DIRECT ROSLYN SYSTEM CONTRACTS ==="
+          cat "$refs"
+
+          copied=0
+          missing=0
+          while IFS= read -r name; do
+            [ -n "$name" ] || continue
+            source="$runtime_facades/$name.dll"
+            if [ -f "$source" ]; then
+              cp "$source" "$fixture/gdeps/"
+              echo "COPIED $name.dll"
+              copied=$((copied + 1))
+            else
+              echo "NOT A MONO FACADE $name.dll"
+              missing=$((missing + 1))
+            fi
+          done < "$refs"
+
+          echo "Copied facade count: $copied"
+          echo "Non-facade contract count: $missing"
+          du -ch "$fixture/gdeps"/System*.dll 2>/dev/null | tail -1 || true
+
+          cat > "$fixture/gmods/Probe/Main.cs" <<'CS'
+          using System;
+          using System.IO;
+
+          public static class Mod
+          {
+              public static void Load()
+              {
+                  var directory = AppDomain.CurrentDomain.GetData("GLoader.ModDirectory") as string;
+                  if (string.IsNullOrEmpty(directory))
+                      throw new InvalidOperationException("GLoader.ModDirectory was not set.");
+
+                  File.WriteAllText(Path.Combine(directory, "loaded.txt"), "minimal-facades-ok");
+              }
+          }
+          CS
+
+          set +e
+          (
+            cd "$fixture"
+            timeout 10s ./gloader --server -- -help
+          ) > "$fixture/server.out" 2>&1
+          status=$?
+          set -e
+
+          echo "Minimal-facade server status: $status"
+          cat "$fixture/server.out"
+          test -f "$fixture/gdeps/logs/gloader-server.log"
+          cat "$fixture/gdeps/logs/gloader-server.log"
+          grep -q 'Loaded mod: Probe' "$fixture/gdeps/logs/gloader-server.log"
+          grep -Fxq 'minimal-facades-ok' "$fixture/gmods/Probe/loaded.txt"
+
       - name: Exact Steam dedicated-server gloader proof
         shell: bash
         run: |
