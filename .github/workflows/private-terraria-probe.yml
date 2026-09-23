@@ -74,10 +74,15 @@ jobs:
           for required in \
             Terraria Terraria.bin.x86_64 Terraria.exe \
             TerrariaServer TerrariaServer.bin.x86_64 TerrariaServer.exe \
-            monoconfig monomachineconfig mscorlib.dll System.Core.dll FNA.dll ReLogic.dll; do
+            monoconfig monomachineconfig mscorlib.dll System.Core.dll FNA.dll; do
             test -f "$steam_root/$required"
           done
           test -d "$steam_root/lib64"
+          if [ -e "$steam_root/ReLogic.dll" ]; then
+            echo "Unexpected standalone ReLogic.dll is present."
+          else
+            echo "No standalone ReLogic.dll: confirmed current Steam Linux layout."
+          fi
 
           echo
           echo "=== HOST HASHES ==="
