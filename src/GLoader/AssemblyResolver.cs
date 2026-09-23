@@ -12,6 +12,8 @@ namespace GLoader
         private readonly string _dependencies;
         private readonly List<string> _extraDirectories = new List<string>();
         private readonly HashSet<string> _active = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, byte[]> _embeddedImages =
+            new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
         private readonly object _gate = new object();
         private Assembly _preferredAssembly;
         private bool _installed;
@@ -34,6 +36,87 @@ namespace GLoader
         public void PreferAssembly(Assembly assembly)
         {
             _preferredAssembly = assembly;
+        }
+
+        public Assembly LoadEmbedded(
+            Assembly container,
+            string simpleName,
+            string resourceName)
+        {
+            if (container == null)
+                throw new ArgumentNullException("container");
+            if (string.IsNullOrWhiteSpace(simpleName))
+                throw new ArgumentException("Embedded assembly name is required.", "simpleName");
+            if (string.IsNullOrWhiteSpace(resourceName))
+                throw new ArgumentException("Embedded resource name is required.", "resourceName");
+
+            var loaded = AppDomain.CurrentDomain
+                .GetAssemblies()
+                .FirstOrDefault(assembly =>
+                {
+                    try
+                    {
+                        return string.Equals(
+                            assembly.GetName().Name,
+                            simpleName,
+                            StringComparison.OrdinalIgnoreCase);
+                    }
+                    catch
+                    {
+                        return false;
+                    }
+                });
+
+            if (loaded != null)
+                return loaded;
+
+            byte[] image;
+            lock (_gate)
+                _embeddedImages.TryGetValue(simpleName, out image);
+
+            if (image == null)
+            {
+                using (var stream = container.GetManifestResourceStream(resourceName))
+                {
+                    if (stream == null)
+                    {
+                        throw new FileNotFoundException(
+                            "Terraria embedded managed resource was not found: " + resourceName);
+                    }
+
+                    using (var memory = new MemoryStream())
+                    {
+                        stream.CopyTo(memory);
+                        image = memory.ToArray();
+                    }
+                }
+
+                lock (_gate)
+                    _embeddedImages[simpleName] = image;
+            }
+
+            try
+            {
+                var assembly = Assembly.Load(image);
+                Log.Info("Loaded Terraria embedded library: " + simpleName);
+                return assembly;
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    "Could not load Terraria embedded library '" + simpleName + "'.",
+                    ex);
+            }
+        }
+
+        public IEnumerable<KeyValuePair<string, byte[]>> GetEmbeddedAssemblyImages()
+        {
+            lock (_gate)
+            {
+                return _embeddedImages
+                    .Select(pair => new KeyValuePair<string, byte[]>(pair.Key, pair.Value))
+                    .ToArray();
+            }
         }
 
         public void AddDirectory(string path)

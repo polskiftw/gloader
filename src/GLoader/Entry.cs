@@ -51,6 +51,14 @@ namespace GLoader
 
                     Log.Info("Attached target: " + gameAssembly.FullName);
 
+                    if (!options.DedicatedServer)
+                    {
+                        _resolver.LoadEmbedded(
+                            gameAssembly,
+                            "ReLogic",
+                            "Terraria.Libraries.NET.ReLogic.dll");
+                    }
+
                     if (!options.DisableMods)
                     {
                         if (!options.DedicatedServer)
