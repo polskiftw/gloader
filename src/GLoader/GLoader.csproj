@@ -21,7 +21,50 @@
 
   <ItemGroup>
     <PackageReference Include="Lib.Harmony" Version="2.4.2" />
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
-    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="All" />
+    <PackageReference Include="Microsoft.Net.Compilers.Toolset"
+                      Version="4.8.0"
+                      PrivateAssets="All"
+                      GeneratePathProperty="true" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies"
+                      Version="1.0.3"
+                      PrivateAssets="All" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Microsoft.CodeAnalysis">
+      <HintPath>$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/Microsoft.CodeAnalysis.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Microsoft.CodeAnalysis.CSharp">
+      <HintPath>$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/Microsoft.CodeAnalysis.CSharp.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Buffers.dll"
+          Link="System.Buffers.dll"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Collections.Immutable.dll"
+          Link="System.Collections.Immutable.dll"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Memory.dll"
+          Link="System.Memory.dll"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Numerics.Vectors.dll"
+          Link="System.Numerics.Vectors.dll"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Reflection.Metadata.dll"
+          Link="System.Reflection.Metadata.dll"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Runtime.CompilerServices.Unsafe.dll"
+          Link="System.Runtime.CompilerServices.Unsafe.dll"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Text.Encoding.CodePages.dll"
+          Link="System.Text.Encoding.CodePages.dll"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/net472/System.Threading.Tasks.Extensions.dll"
+          Link="System.Threading.Tasks.Extensions.dll"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
