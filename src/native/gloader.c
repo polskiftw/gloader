@@ -172,12 +172,25 @@ static int set_loader_environment(const char *root, int dedicated_server, int di
     if (mono_options == NULL)
         return 0;
 
-    int ok =
-        setenv("GLOADER_ROOT", root, 1) == 0 &&
-        setenv("GLOADER_MODE", dedicated_server ? "server" : "client", 1) == 0 &&
-        setenv("GLOADER_DISABLE_MODS", disable_mods ? "1" : "0", 1) == 0 &&
-        setenv("MONO_IOMAP", "all", 1) == 0 &&
-        prepend_library_path(root);
+    int ok = setenv("MONO_IOMAP", "all", 1) == 0;
+
+    if (disable_mods) {
+        if (ok)
+            ok = unsetenv("GLOADER_ROOT") == 0;
+        if (ok)
+            ok = unsetenv("GLOADER_MODE") == 0;
+        if (ok)
+            ok = unsetenv("GLOADER_DISABLE_MODS") == 0;
+    } else {
+        if (ok)
+            ok = setenv("GLOADER_ROOT", root, 1) == 0;
+        if (ok)
+            ok = setenv("GLOADER_MODE", dedicated_server ? "server" : "client", 1) == 0;
+        if (ok)
+            ok = setenv("GLOADER_DISABLE_MODS", "0", 1) == 0;
+        if (ok)
+            ok = prepend_library_path(root);
+    }
 
     if (ok) {
         if (*mono_options != '\0')
@@ -238,12 +251,14 @@ int main(int argc, char **argv)
     int disable_mods = 0;
     int dedicated_server = 0;
     int show_help = 0;
+    int passthrough = 0;
     int index = 1;
 
     while (index < argc) {
         const char *argument = argv[index];
 
         if (strcmp(argument, "--") == 0) {
+            passthrough = 1;
             index++;
             break;
         }
@@ -271,7 +286,7 @@ int main(int argc, char **argv)
     }
 
     const char *requested_command = NULL;
-    if (index < argc && is_terraria_command(argv[index])) {
+    if (!passthrough && index < argc && is_terraria_command(argv[index])) {
         requested_command = argv[index++];
         if (is_server_command(requested_command))
             dedicated_server = 1;
