@@ -48,23 +48,27 @@ using (var assembly = AssemblyDefinition.ReadAssembly(
         ?? throw new InvalidOperationException(
             "Terraria.Main.IsEnginePreloaded was not found.");
 
-    var loadContent = mainType.Methods.SingleOrDefault(method =>
-        method.Name == "LoadContent" &&
+    var clientInitialize = mainType.Methods.SingleOrDefault(method =>
+        method.Name == "ClientInitialize" &&
         !method.IsStatic &&
         method.Parameters.Count == 0 &&
         method.ReturnType.MetadataType == MetadataType.Void)
         ?? throw new InvalidOperationException(
-            "Terraria.Main.LoadContent() was not found.");
+            "Terraria.Main.ClientInitialize() was not found.");
 
-    var loadContentReturns = loadContent.Body.Instructions
-        .Where(instruction => instruction.OpCode == OpCodes.Ret)
+    var checkBunnyCalls = clientInitialize.Body.Instructions
+        .Where(instruction =>
+            (instruction.OpCode == OpCodes.Call || instruction.OpCode == OpCodes.Callvirt) &&
+            instruction.Operand is MethodReference method &&
+            method.DeclaringType.FullName == "Terraria.Main" &&
+            method.Name == "CheckBunny")
         .ToArray();
 
-    if (loadContentReturns.Length != 1)
+    if (checkBunnyCalls.Length != 1)
     {
         throw new InvalidOperationException(
-            "Expected exactly one return in Terraria.Main.LoadContent(), found " +
-            loadContentReturns.Length + ".");
+            "Expected exactly one CheckBunny call in Terraria.Main.ClientInitialize, found " +
+            checkBunnyCalls.Length + ".");
     }
 
     var runGame = programType.Methods.SingleOrDefault(method =>
@@ -100,39 +104,40 @@ using (var assembly = AssemblyDefinition.ReadAssembly(
     runGameIl.InsertAfter(socialCall, setClient);
     runGameIl.InsertAfter(setClient, storeClient);
 
-    // The headless Xvfb probe reaches Main.LoadContent() but FNA never advances
-    // to the first Main.Update() where Terraria normally raises OnEnginePreload.
-    // Raise that exact event at the end of LoadContent in the disposable probe
-    // copy so gloader is exercised at essentially the same post-graphics point.
+    // The headless probe reliably reaches ClientInitialize through
+    // graphics.ApplyChanges(), but does not advance to Main.LoadContent/Update.
+    // Raise Terraria's real engine-preload event immediately after that proven
+    // graphics initialization point, just before CheckBunny(), in this disposable
+    // probe copy only. Production Terraria/gloader binaries are not modified.
     var actionInvoke = module.ImportReference(
         typeof(Action).GetMethod(nameof(Action.Invoke))
         ?? throw new InvalidOperationException("System.Action.Invoke was not found."));
 
-    var loadContentIl = loadContent.Body.GetILProcessor();
-    var loadContentReturn = loadContentReturns[0];
+    var clientInitializeIl = clientInitialize.Body.GetILProcessor();
+    var checkBunnyCall = checkBunnyCalls[0];
     var skipPreload = Instruction.Create(OpCodes.Nop);
 
-    loadContentIl.InsertBefore(loadContentReturn, Instruction.Create(OpCodes.Ldc_I4_1));
-    loadContentIl.InsertBefore(
-        loadContentReturn,
+    clientInitializeIl.InsertBefore(checkBunnyCall, Instruction.Create(OpCodes.Ldc_I4_1));
+    clientInitializeIl.InsertBefore(
+        checkBunnyCall,
         Instruction.Create(OpCodes.Stsfld, isEnginePreloadedField));
-    loadContentIl.InsertBefore(
-        loadContentReturn,
+    clientInitializeIl.InsertBefore(
+        checkBunnyCall,
         Instruction.Create(OpCodes.Ldsfld, enginePreloadField));
-    loadContentIl.InsertBefore(
-        loadContentReturn,
+    clientInitializeIl.InsertBefore(
+        checkBunnyCall,
         Instruction.Create(OpCodes.Brfalse_S, skipPreload));
-    loadContentIl.InsertBefore(
-        loadContentReturn,
+    clientInitializeIl.InsertBefore(
+        checkBunnyCall,
         Instruction.Create(OpCodes.Ldsfld, enginePreloadField));
-    loadContentIl.InsertBefore(
-        loadContentReturn,
+    clientInitializeIl.InsertBefore(
+        checkBunnyCall,
         Instruction.Create(OpCodes.Callvirt, actionInvoke));
-    loadContentIl.InsertBefore(loadContentReturn, skipPreload);
+    clientInitializeIl.InsertBefore(checkBunnyCall, skipPreload);
 
     assembly.Write(temporaryPath);
 }
 
 File.Move(temporaryPath, path, overwrite: true);
 Console.WriteLine(
-    "Patched probe Terraria.exe for offline SocialAPI and deterministic engine preload.");
+    "Patched probe Terraria.exe for offline SocialAPI and post-graphics engine preload.");
