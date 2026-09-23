@@ -24,7 +24,8 @@
     <PackageReference Include="Microsoft.Net.Compilers"
                       Version="2.10.0"
                       PrivateAssets="All"
-                      GeneratePathProperty="true" />
+                      GeneratePathProperty="true"
+                      ExcludeAssets="build;buildTransitive;analyzers" />
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies"
                       Version="1.0.3"
                       PrivateAssets="All" />
