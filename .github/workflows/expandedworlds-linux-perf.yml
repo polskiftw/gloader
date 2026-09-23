@@ -1,0 +1,162 @@
+name: ExpandedWorlds Linux perf probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/expandedworlds-linux-perf.yml"
+      - "tests/WorldgenPerfProbe/**"
+      - "gmods/ExpandedWorlds/**"
+      - "src/**"
+      - "build.sh"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  perf:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out gloader
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build Linux gloader
+        run: ./build.sh
+
+      - name: Download exact Steam Terraria 1.4.5.8 Linux sample
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const response = await github.request('GET /repos/{owner}/{repo}/releases/assets/{asset_id}', {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              asset_id: 582791397,
+              headers: { accept: 'application/octet-stream' }
+            });
+            const bytes = Buffer.isBuffer(response.data)
+              ? response.data
+              : Buffer.from(response.data);
+            fs.writeFileSync('Terraria.Linux.tar.gz', bytes);
+
+      - name: Prepare exact server fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(sha256sum Terraria.Linux.tar.gz | cut -d' ' -f1)" = "e040584fc536c2c415dd8b8d6ab3cbcb60882f13da46fde0638e06b6de646860"
+
+          mkdir input
+          tar -xzf Terraria.Linux.tar.gz -C input
+
+          server_bin="$(find input -maxdepth 4 -type f -name TerrariaServer.bin.x86_64 -print -quit)"
+          test -n "$server_bin"
+          steam_root="$(dirname "$server_bin")"
+          fixture="$RUNNER_TEMP/expandedworlds-perf"
+
+          rm -rf "$fixture"
+          cp -a "$steam_root" "$fixture"
+          cp dist/gloader "$fixture/gloader"
+          rm -rf "$fixture/gdeps" "$fixture/gmods"
+          mkdir -p "$fixture/gdeps" "$fixture/gmods/ExpandedWorlds" "$fixture/gmods/WorldgenPerfProbe"
+          cp -a dist/gdeps/. "$fixture/gdeps/"
+          cp -a gmods/ExpandedWorlds/. "$fixture/gmods/ExpandedWorlds/"
+          cp tests/WorldgenPerfProbe/PerfProbe.cs "$fixture/gmods/WorldgenPerfProbe/PerfProbe.cs"
+
+          echo "$fixture" > fixture-path.txt
+
+      - name: Benchmark exact Mono worldgen
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture="$(cat fixture-path.txt)"
+          seed=1337420
+
+          run_case() {
+            name="$1"
+            preset="$2"
+            mono_options="$3"
+            port="$4"
+
+            save="$RUNNER_TEMP/save-$name"
+            world="$save/Worlds/perf-$name.wld"
+            out="$RUNNER_TEMP/$name.out"
+            rm -rf "$save"
+            mkdir -p "$save/Worlds"
+
+            echo "===== CASE $name ====="
+            start_ns="$(date +%s%N)"
+
+            (
+              cd "$fixture"
+              if [ -n "$preset" ]; then
+                export GLOADER_EXPANDED_WORLD="$preset"
+              else
+                unset GLOADER_EXPANDED_WORLD || true
+              fi
+
+              if [ -n "$mono_options" ]; then
+                export MONO_BUNDLED_OPTIONS="$mono_options"
+              else
+                unset MONO_BUNDLED_OPTIONS || true
+              fi
+
+              exec ./gloader --server --                 -savedirectory "$save"                 -world "$world"                 -autocreate 3                 -worldname "Perf$name"                 -seed "$seed"                 -difficulty 0                 -port "$port"                 -maxplayers 1                 -noupnp
+            ) >"$out" 2>&1 &
+            pid=$!
+
+            ready=0
+            for _ in $(seq 1 1800); do
+              if ! kill -0 "$pid" 2>/dev/null; then
+                break
+              fi
+
+              if (echo >/dev/tcp/127.0.0.1/"$port") >/dev/null 2>&1; then
+                ready=1
+                break
+              fi
+
+              sleep 1
+            done
+
+            end_ns="$(date +%s%N)"
+            elapsed="$(awk -v a="$start_ns" -v b="$end_ns" 'BEGIN { printf "%.3f", (b-a)/1000000000 }')"
+
+            echo "RESULT case=$name seconds=$elapsed ready=$ready"
+            grep -E '^\[Worldgen Perf\]|Creating world|Dedicated-server generation completed|Runtime metrics' "$out" || true
+
+            if kill -0 "$pid" 2>/dev/null; then
+              kill "$pid" 2>/dev/null || true
+              sleep 1
+              kill -9 "$pid" 2>/dev/null || true
+            fi
+            wait "$pid" 2>/dev/null || true
+
+            if [ "$ready" -ne 1 ]; then
+              echo "===== FULL OUTPUT $name ====="
+              tail -300 "$out" || true
+              return 1
+            fi
+          }
+
+          run_case large-default "" "" 7931
+          run_case thicc-default THICC "" 7932
+          run_case thicc-optimize-all THICC "--optimize=all" 7933
+
+      - name: Upload perf logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: expandedworlds-linux-perf
+          path: |
+            ${{ runner.temp }}/large-default.out
+            ${{ runner.temp }}/thicc-default.out
+            ${{ runner.temp }}/thicc-optimize-all.out
+          if-no-files-found: warn
