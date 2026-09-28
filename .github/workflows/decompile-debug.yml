@@ -33,6 +33,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           dotnet tool install --global ilspycmd
           ilspycmd --version
+          if ($LASTEXITCODE -ne 0) { throw 'ilspycmd installation/version check failed.' }
 
       - name: Download TerrariaDebug.tar.gz from draft release
         shell: pwsh
@@ -64,6 +65,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path extracted | Out-Null
           tar -xzf TerrariaDebug.tar.gz -C extracted
+          if ($LASTEXITCODE -ne 0) { throw 'Could not extract TerrariaDebug.tar.gz.' }
 
       - name: Discover Terraria managed assemblies
         id: discover
@@ -74,28 +76,51 @@ jobs:
           foreach ($file in Get-ChildItem extracted -Recurse -File) {
             try {
               $assembly = [System.Reflection.AssemblyName]::GetAssemblyName($file.FullName)
-              $managed += [PSCustomObject]@{ Name = $assembly.Name; Path = $file.FullName }
+              $managed += [PSCustomObject]@{ Name = $assembly.Name; Version = $assembly.Version; Path = $file.FullName }
             }
             catch { }
           }
+
           $client = $managed | Where-Object { $_.Name -eq 'Terraria' } | Select-Object -First 1
           $server = $managed | Where-Object { $_.Name -eq 'TerrariaServer' } | Select-Object -First 1
           if (-not $client) { throw "Could not find a managed assembly named 'Terraria' in TerrariaDebug.tar.gz." }
+
+          Write-Host "Terraria client: $($client.Path) ($($client.Version))"
           "client=$($client.Path)" >> $env:GITHUB_OUTPUT
-          if ($server) { "server=$($server.Path)" >> $env:GITHUB_OUTPUT }
+          if ($server) {
+            Write-Host "Terraria server: $($server.Path) ($($server.Version))"
+            "server=$($server.Path)" >> $env:GITHUB_OUTPUT
+          }
 
       - name: Bootstrap embedded dependencies
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          New-Item -ItemType Directory -Force -Path BootstrapClientSource | Out-Null
-          ilspycmd '${{ steps.discover.outputs.client }}' -o BootstrapClientSource -p --disable-updatecheck
-          if ('${{ steps.discover.outputs.server }}' -ne '') {
-            New-Item -ItemType Directory -Force -Path BootstrapServerSource | Out-Null
-            ilspycmd '${{ steps.discover.outputs.server }}' -o BootstrapServerSource -p --disable-updatecheck
+
+          function Invoke-ProjectDecompile {
+            param(
+              [Parameter(Mandatory=$true)][string]$Assembly,
+              [Parameter(Mandatory=$true)][string]$Output
+            )
+            $args = @($Assembly, '-o', $Output, '-p', '--disable-updatecheck')
+            $pdb = [System.IO.Path]::ChangeExtension($Assembly, '.pdb')
+            if (Test-Path $pdb) {
+              Write-Host "Using PDB variable names from $pdb"
+              $args += @('--use-varnames-from-pdb', $pdb)
+            }
+            & ilspycmd @args
+            if ($LASTEXITCODE -ne 0) { throw "ILSpy bootstrap decompile failed for $Assembly (exit $LASTEXITCODE)." }
           }
 
-      - name: Build managed reference set
+          New-Item -ItemType Directory -Force -Path BootstrapClientSource | Out-Null
+          Invoke-ProjectDecompile -Assembly '${{ steps.discover.outputs.client }}' -Output 'BootstrapClientSource'
+
+          if ('${{ steps.discover.outputs.server }}' -ne '') {
+            New-Item -ItemType Directory -Force -Path BootstrapServerSource | Out-Null
+            Invoke-ProjectDecompile -Assembly '${{ steps.discover.outputs.server }}' -Output 'BootstrapServerSource'
+          }
+
+      - name: Build complete managed reference set
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -104,9 +129,11 @@ jobs:
           function Add-ManagedAssembliesFromDirectory {
             param([string]$Directory)
             if (-not (Test-Path $Directory)) { return }
+
             foreach ($file in Get-ChildItem $Directory -Recurse -File) {
               try { $assembly = [System.Reflection.AssemblyName]::GetAssemblyName($file.FullName) }
               catch { continue }
+
               $destination = Join-Path (Resolve-Path ManagedRefs) ($assembly.Name + '.dll')
               if (Test-Path $destination) {
                 $existing = [System.Reflection.AssemblyName]::GetAssemblyName($destination)
@@ -119,39 +146,175 @@ jobs:
           Add-ManagedAssembliesFromDirectory 'extracted'
           Add-ManagedAssembliesFromDirectory 'BootstrapClientSource'
           Add-ManagedAssembliesFromDirectory 'BootstrapServerSource'
+
           if (-not (Test-Path 'ManagedRefs/ReLogic.dll')) {
             throw 'ReLogic.dll was not recovered; refusing to return an incomplete Terraria decompile.'
           }
 
-      - name: Decompile Terraria client
+          Write-Host "Managed reference assemblies: $((Get-ChildItem ManagedRefs -File -Filter '*.dll').Count)"
+
+      - name: Decompile Terraria client with resolved dependencies
+        id: client_decompile
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $assembly = '${{ steps.discover.outputs.client }}'
           New-Item -ItemType Directory -Force -Path Result/Client | Out-Null
-          ilspycmd '${{ steps.discover.outputs.client }}' -o Result/Client -p -r ManagedRefs --disable-updatecheck --no-dead-code
-          if (-not (Get-ChildItem Result/Client -Recurse -File | Select-Object -First 1)) { throw 'ILSpy produced no Terraria client source.' }
 
-      - name: Decompile Terraria server
+          $args = @($assembly, '-o', 'Result/Client', '-p', '-r', (Resolve-Path ManagedRefs), '--disable-updatecheck', '--no-dead-code')
+          $pdb = [System.IO.Path]::ChangeExtension($assembly, '.pdb')
+          $pdbUsed = $false
+          if (Test-Path $pdb) {
+            Write-Host "Using original PDB variable names from $pdb"
+            $args += @('--use-varnames-from-pdb', $pdb)
+            $pdbUsed = $true
+          }
+          & ilspycmd @args
+          if ($LASTEXITCODE -ne 0) { throw "Terraria client decompile failed (exit $LASTEXITCODE)." }
+
+          if (-not (Get-ChildItem Result/Client -Recurse -File -Filter '*.cs' | Select-Object -First 1)) {
+            throw 'ILSpy produced no Terraria client C# source.'
+          }
+          "pdb_used=$($pdbUsed.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+
+      - name: Decompile Terraria server with resolved dependencies
+        id: server_decompile
         if: ${{ steps.discover.outputs.server != '' }}
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $assembly = '${{ steps.discover.outputs.server }}'
           New-Item -ItemType Directory -Force -Path Result/Server | Out-Null
-          ilspycmd '${{ steps.discover.outputs.server }}' -o Result/Server -p -r ManagedRefs --disable-updatecheck --no-dead-code
-          if (-not (Get-ChildItem Result/Server -Recurse -File | Select-Object -First 1)) { throw 'ILSpy produced no Terraria server source.' }
 
-      - name: Audit decompiler diagnostics
+          $args = @($assembly, '-o', 'Result/Server', '-p', '-r', (Resolve-Path ManagedRefs), '--disable-updatecheck', '--no-dead-code')
+          $pdb = [System.IO.Path]::ChangeExtension($assembly, '.pdb')
+          $pdbUsed = $false
+          if (Test-Path $pdb) {
+            Write-Host "Using original PDB variable names from $pdb"
+            $args += @('--use-varnames-from-pdb', $pdb)
+            $pdbUsed = $true
+          }
+          & ilspycmd @args
+          if ($LASTEXITCODE -ne 0) { throw "Terraria server decompile failed (exit $LASTEXITCODE)." }
+
+          if (-not (Get-ChildItem Result/Server -Recurse -File -Filter '*.cs' | Select-Object -First 1)) {
+            throw 'ILSpy produced no Terraria server C# source.'
+          }
+          "pdb_used=$($pdbUsed.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+
+      - name: Make decompiled projects self-contained
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $patterns = @('Unknown result type','got Unknown','DecompilerException','Could not decompile','Error near IL')
-          $files = Get-ChildItem Result -Recurse -File -Filter '*.cs'
+
+          function Make-SelfContainedProject {
+            param([Parameter(Mandatory=$true)][string]$ProjectDirectory)
+
+            $project = Get-ChildItem $ProjectDirectory -File -Filter '*.csproj' | Select-Object -First 1
+            if (-not $project) { throw "No .csproj found in $ProjectDirectory." }
+
+            $referenceOutput = Join-Path $ProjectDirectory 'References'
+            New-Item -ItemType Directory -Force -Path $referenceOutput | Out-Null
+            Copy-Item 'ManagedRefs/*.dll' $referenceOutput -Force
+
+            [xml]$xml = Get-Content -Raw $project.FullName
+            foreach ($reference in @($xml.Project.ItemGroup.Reference)) {
+              if (-not $reference.HintPath) { continue }
+
+              $simpleName = ([string]$reference.Include).Split(',')[0]
+              $candidate = Join-Path $referenceOutput ($simpleName + '.dll')
+              if (-not (Test-Path $candidate)) {
+                $oldBase = [System.IO.Path]::GetFileName(([string]$reference.HintPath).Replace('\', '/'))
+                $candidate = Join-Path $referenceOutput $oldBase
+              }
+              if (-not (Test-Path $candidate)) {
+                throw "Could not make reference '$($reference.Include)' self-contained for $($project.Name)."
+              }
+
+              $reference.HintPath = 'References\' + [System.IO.Path]::GetFileName($candidate)
+            }
+            $xml.Save($project.FullName)
+
+            [xml]$check = Get-Content -Raw $project.FullName
+            foreach ($reference in @($check.Project.ItemGroup.Reference)) {
+              if (-not $reference.HintPath) { continue }
+              $resolved = Join-Path $ProjectDirectory ([string]$reference.HintPath)
+              if (-not (Test-Path $resolved)) {
+                throw "Generated project still contains a missing reference: $($reference.HintPath)"
+              }
+            }
+          }
+
+          Make-SelfContainedProject -ProjectDirectory 'Result/Client'
+          if (Test-Path 'Result/Server') {
+            Make-SelfContainedProject -ProjectDirectory 'Result/Server'
+          }
+
+      - name: Audit decompiler output and record provenance
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $fatalPatterns = @(
+            'Unknown result type',
+            'got Unknown',
+            'DecompilerException',
+            'Could not decompile',
+            'Error near IL',
+            'An error occurred while decompiling'
+          )
+
+          $sourceFiles = Get-ChildItem Result -Recurse -File -Filter '*.cs'
           $bad = @()
-          if ($files) { $bad = Select-String -Path $files.FullName -Pattern $patterns -SimpleMatch }
+          if ($sourceFiles) {
+            $bad = Select-String -Path $sourceFiles.FullName -Pattern $fatalPatterns -SimpleMatch
+          }
           if ($bad.Count -gt 0) {
             $bad | Select-Object -First 100 | ForEach-Object { Write-Host "$($_.Path):$($_.LineNumber): $($_.Line.Trim())" }
-            throw "Decompiler audit failed with $($bad.Count) suspicious diagnostics."
+            throw "Decompiler audit failed with $($bad.Count) fatal diagnostic marker(s)."
           }
+
+          $advisoryPatterns = @('Expected VT, but got Obj', 'Expected Obj, but got VT')
+          $advisories = @()
+          if ($sourceFiles) {
+            $advisories = Select-String -Path $sourceFiles.FullName -Pattern $advisoryPatterns -SimpleMatch
+          }
+
+          $ilspyVersion = (& ilspycmd --version | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'Could not record ILSpy version.' }
+
+          $clientAssembly = '${{ steps.discover.outputs.client }}'
+          $clientHash = (Get-FileHash $clientAssembly -Algorithm SHA256).Hash.ToLowerInvariant()
+          $clientName = [System.Reflection.AssemblyName]::GetAssemblyName($clientAssembly)
+
+          $lines = @(
+            'Terraria decompile provenance',
+            "ILSpy: $($ilspyVersion -replace '[\r\n]+', ' / ')",
+            "Client assembly: $($clientName.Name) $($clientName.Version)",
+            "Client SHA256: $clientHash",
+            "Client PDB variable names used: ${{ steps.client_decompile.outputs.pdb_used }}",
+            "Client C# files: $((Get-ChildItem Result/Client -Recurse -File -Filter '*.cs').Count)"
+          )
+
+          if ('${{ steps.discover.outputs.server }}' -ne '') {
+            $serverAssembly = '${{ steps.discover.outputs.server }}'
+            $serverHash = (Get-FileHash $serverAssembly -Algorithm SHA256).Hash.ToLowerInvariant()
+            $serverName = [System.Reflection.AssemblyName]::GetAssemblyName($serverAssembly)
+            $lines += "Server assembly: $($serverName.Name) $($serverName.Version)"
+            $lines += "Server SHA256: $serverHash"
+            $lines += "Server PDB variable names used: ${{ steps.server_decompile.outputs.pdb_used }}"
+            $lines += "Server C# files: $((Get-ChildItem Result/Server -Recurse -File -Filter '*.cs').Count)"
+          }
+
+          $lines += "Managed references bundled: $((Get-ChildItem ManagedRefs -File -Filter '*.dll').Count)"
+          $lines += "Fatal decompiler diagnostics: 0"
+          $lines += "Advisory IL stack-type comments: $($advisories.Count)"
+          if ($advisories.Count -gt 0) {
+            $lines += 'Advisory comments are preserved because ILSpy still emitted valid C# and returned success; inspect these methods when exact IL-level reconstruction matters.'
+            Write-Warning "ILSpy emitted $($advisories.Count) advisory stack-type comment(s). They are recorded in DECOMP_INFO.txt."
+          }
+
+          $lines | Set-Content -Encoding UTF8 'Result/DECOMP_INFO.txt'
 
       - name: Package decompile
         shell: pwsh
@@ -161,6 +324,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $name = "TerrariaDecomp-$env:JOB_ID.tar.gz"
           tar -czf $name -C Result .
+          if ($LASTEXITCODE -ne 0) { throw 'Could not package Terraria decompile.' }
           if ((Get-Item $name).Length -le 0) { throw 'Decompile archive is empty.' }
 
       - name: Upload decompile to draft release
