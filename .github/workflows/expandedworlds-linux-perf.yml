@@ -23,27 +23,49 @@ jobs:
       - name: Build Linux gloader
         run: ./build.sh
 
-      - name: Download exact Steam Terraria 1.4.5.8 Linux sample
+      - name: Download current private Steam Terraria Linux sample
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
+            const crypto = require('crypto');
+            const releases = await github.paginate(github.rest.repos.listReleases, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100
+            });
+            const release = releases.find(r => r.draft && r.name === 'Linux Terraria Full Binaries');
+            if (!release) {
+              throw new Error('Could not find draft release "Linux Terraria Full Binaries".');
+            }
+            const asset = release.assets.find(a => a.name === 'Terraria.Linux.tar.gz');
+            if (!asset) {
+              throw new Error('Draft release "Linux Terraria Full Binaries" does not contain Terraria.Linux.tar.gz.');
+            }
+            if (!asset.digest || !asset.digest.startsWith('sha256:')) {
+              throw new Error('Terraria.Linux.tar.gz does not expose a SHA-256 digest through the GitHub release API.');
+            }
+
             const response = await github.request('GET /repos/{owner}/{repo}/releases/assets/{asset_id}', {
               owner: context.repo.owner,
               repo: context.repo.repo,
-              asset_id: 582791397,
+              asset_id: asset.id,
               headers: { accept: 'application/octet-stream' }
             });
             const bytes = Buffer.isBuffer(response.data)
               ? response.data
               : Buffer.from(response.data);
+            const actual = crypto.createHash('sha256').update(bytes).digest('hex');
+            const expected = asset.digest.slice('sha256:'.length).toLowerCase();
+            if (actual !== expected) {
+              throw new Error(`Terraria.Linux.tar.gz SHA256 mismatch. Expected ${expected}, got ${actual}`);
+            }
+            core.info(`Using draft asset ${asset.id}; SHA256 ${actual}`);
             fs.writeFileSync('Terraria.Linux.tar.gz', bytes);
-
       - name: Prepare exact server fixture
         shell: bash
         run: |
           set -euo pipefail
-          test "$(sha256sum Terraria.Linux.tar.gz | cut -d' ' -f1)" = "e040584fc536c2c415dd8b8d6ab3cbcb60882f13da46fde0638e06b6de646860"
 
           mkdir input
           tar -xzf Terraria.Linux.tar.gz -C input
