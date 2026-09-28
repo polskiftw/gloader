@@ -38,12 +38,12 @@ jobs:
             if (!release) {
               throw new Error('Could not find draft release "Linux Terraria Full Binaries".');
             }
-            const asset = release.assets.find(a => a.name === 'Terraria.Linux.tar.gz');
+            const asset = release.assets.find(a => a.name === 'TerrariaDebug.tar.gz');
             if (!asset) {
-              throw new Error('Draft release "Linux Terraria Full Binaries" does not contain Terraria.Linux.tar.gz.');
+              throw new Error('Draft release "Linux Terraria Full Binaries" does not contain TerrariaDebug.tar.gz.');
             }
             if (!asset.digest || !asset.digest.startsWith('sha256:')) {
-              throw new Error('Terraria.Linux.tar.gz does not expose a SHA-256 digest through the GitHub release API.');
+              throw new Error('TerrariaDebug.tar.gz does not expose a SHA-256 digest through the GitHub release API.');
             }
 
             const response = await github.request('GET /repos/{owner}/{repo}/releases/assets/{asset_id}', {
@@ -58,16 +58,16 @@ jobs:
             const actual = crypto.createHash('sha256').update(bytes).digest('hex');
             const expected = asset.digest.slice('sha256:'.length).toLowerCase();
             if (actual !== expected) {
-              throw new Error(`Terraria.Linux.tar.gz SHA256 mismatch. Expected ${expected}, got ${actual}`);
+              throw new Error(`TerrariaDebug.tar.gz SHA256 mismatch. Expected ${expected}, got ${actual}`);
             }
             core.info(`Using draft asset ${asset.id}; SHA256 ${actual}`);
-            fs.writeFileSync('Terraria.Linux.tar.gz', bytes);
+            fs.writeFileSync('TerrariaDebug.tar.gz', bytes);
       - name: Prepare exact server fixture
         shell: bash
         run: |
           set -euo pipefail
           mkdir input
-          tar -xzf Terraria.Linux.tar.gz -C input
+          tar -xzf TerrariaDebug.tar.gz -C input
 
           server_bin="$(find input -maxdepth 4 -type f -name TerrariaServer.bin.x86_64 -print -quit)"
           test -n "$server_bin"
