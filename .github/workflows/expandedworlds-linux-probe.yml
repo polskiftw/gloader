@@ -53,9 +53,11 @@ jobs:
             if (!release) {
               throw new Error('Could not find draft release "Linux Terraria Full Binaries".');
             }
-            const asset = release.assets.find(a => a.name === 'TerrariaDebug.tar.gz');
+            const asset =
+              release.assets.find(a => a.name === 'TerrariaDebug.tar.gz') ||
+              release.assets.find(a => a.name === 'Terraria.Linux.tar.gz');
             if (!asset) {
-              throw new Error('Draft release "Linux Terraria Full Binaries" does not contain TerrariaDebug.tar.gz.');
+              throw new Error('Draft release "Linux Terraria Full Binaries" contains neither TerrariaDebug.tar.gz nor legacy Terraria.Linux.tar.gz.');
             }
             if (!asset.digest || !asset.digest.startsWith('sha256:')) {
               throw new Error('TerrariaDebug.tar.gz does not expose a SHA-256 digest through the GitHub release API.');
