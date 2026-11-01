@@ -128,3 +128,7 @@ That proof covers:
 The headless Actions client proceeds through GLoader initialization and then stops when FNA/SDL reports that no video device exists. Reaching the actual graphical Terraria title screen remains an on-machine acceptance test.
 
 See `DGD.md` for the canonical architecture and implementation record.
+
+## Licensing
+
+Original gloader source code and documentation are licensed under the **Apache License 2.0**; see [LICENSE.md](LICENSE.md). Bundled Mono facades and other third-party dependencies remain under their own terms, as described in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt). Terraria and its components are not relicensed by gloader.
