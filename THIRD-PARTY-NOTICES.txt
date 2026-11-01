@@ -1,6 +1,7 @@
 gloader Linux Native - Third-Party Notices
 
-gloader itself is distributed under the repository's LICENSE.md.
+Original gloader code is distributed under Apache License 2.0 (see LICENSE.md).
+Third-party components retain their own licenses and notices.
 
 Managed build/runtime dependencies include:
 
