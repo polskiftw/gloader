@@ -114,6 +114,8 @@ The historical gmods in this repository are porting inputs and are deliberately 
 
 ## Validation status
 
+### Steam Linux runtime (1.4.5.8)
+
 The Linux package has been tested in CI against the exact Steam Linux Terraria 1.4.5.8 client/server runtime used for development.
 
 That proof covers:
@@ -126,6 +128,12 @@ That proof covers:
 - Host & Play redirect installation.
 
 The headless Actions client proceeds through GLoader initialization and then stops when FNA/SDL reports that no video device exists. Reaching the actual graphical Terraria title screen remains an on-machine acceptance test.
+
+### Standalone Linux dedicated server (1.4.6.1)
+
+GLoader 0.3.0-alpha (commit `7fc44122dae7c9d52edf88658ca7f08dfc1779aa`) passed a smoke test against Re-Logic's [official Terraria 1.4.6.1 dedicated-server archive](https://terraria.org/api/download/pc-dedicated-server/terraria-server-1461.zip) on Linux x86-64. The stock server, GLoader's modded server, and its vanilla mode each started, accepted a local TCP connection, saved a disposable world, and shut down cleanly. The modded run compiled and loaded a minimal raw C# mod; the vanilla run did not load it. Original server files were unchanged.
+
+This was a dedicated-server smoke test, not gameplay validation. Steam Linux client and graphical Host & Play on 1.4.6.1 have not been verified.
 
 See `DGD.md` for the canonical architecture and implementation record.
 
