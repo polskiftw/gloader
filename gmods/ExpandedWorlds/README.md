@@ -172,6 +172,8 @@ The canonical acceptance run on **2026-09-04** completed successfully: **11 / 11
 
 See [`THICC-STRESS-RESULTS.md`](THICC-STRESS-RESULTS.md) for the complete per-tier acceptance table and run identity.
 
+A separate smoke test on **2026-11-28** used the official standalone Linux x86_64 Terraria **1.4.6.1** dedicated server and GLoader 0.3.0-alpha. Expanded Worlds compiled and loaded all 28 server patch classes. The server completed tile initialization at **8,400 × 2,400** with no preset and **10,600 × 3,000** with `GLOADER_EXPANDED_WORLD=THICC`. The test stopped immediately after `clearWorld`; it did not verify full generation, save/reload, the graphical client, or Steam Host & Play. It does not replace the 1.4.5.8 source audit or the stress matrix above.
+
 ## What Expanded Worlds does not do
 
 It does **not** replace/reorder worldgen passes, reseed Terraria's RNG, force biome sides, post-process completed worlds, invent a custom terrain generator, invent a new `.wld` format, or make fake Terraria size enums.
